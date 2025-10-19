@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { asyncBufferFromUrl, parquetReadObjects } from 'hyparquet';
+import { parquetReadObjects } from 'hyparquet';
 import { parseWaveData } from '../utils/dataParser.js';
 
 const DATA_FILE_NAME = import.meta.env.MODE === 'production'
   ? 'wave_buoys_data_prod.parquet'
-  : 'wave_buoys_data_prod.parquet';
+  : 'wave_buoys_data.parquet';
 const DATA_URL = `${import.meta.env.BASE_URL}data/${DATA_FILE_NAME}`;
 const REQUIRED_COLUMNS = [
   'campaign_id',
@@ -31,10 +31,31 @@ export default function DataLoader({ children }) {
 
   useEffect(() => {
     let isCancelled = false;
+    const controller = new AbortController();
+
+  // Fetch the entire file to avoid range issues when the host compresses responses.
+  async function fetchParquetFile(url, signal) {
+      const response = await fetch(url, { cache: 'no-store', signal });
+
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}`);
+      }
+
+      const buffer = await response.arrayBuffer();
+      const byteLength = buffer.byteLength;
+
+      return {
+        byteLength,
+        slice(start, end) {
+          const nextEnd = end ?? byteLength;
+          return buffer.slice(start, nextEnd);
+        }
+      };
+    }
 
     async function load() {
       try {
-        const file = await asyncBufferFromUrl({ url: DATA_URL });
+        const file = await fetchParquetFile(DATA_URL, controller.signal);
         const rawRows = await parquetReadObjects({
           file,
           columns: REQUIRED_COLUMNS
@@ -47,7 +68,7 @@ export default function DataLoader({ children }) {
         const { rows, campaignIds } = parseWaveData(rawRows);
         setState({ loading: false, error: null, rows, campaignIds });
       } catch (error) {
-        if (isCancelled) {
+        if (isCancelled || controller.signal.aborted) {
           return;
         }
 
@@ -60,6 +81,7 @@ export default function DataLoader({ children }) {
 
     return () => {
       isCancelled = true;
+      controller.abort();
     };
   }, []);
 
