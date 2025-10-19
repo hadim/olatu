@@ -31,9 +31,12 @@ The Vite `base` option is set to `/wave-buoys-viewer/` to support GitHub Pages d
 - `src/components/DataLoader.jsx` streams the Parquet file with hyparquet, handling loading and error states.
 - `src/components/WavePlot.jsx` renders four synchronized Plotly subplots with a common time axis, range slider, and range selector.
 - `src/utils/dataParser.js` converts raw Parquet rows into typed JavaScript objects with `Date` instances and numeric values.
+- `src/utils/downsample.js` limits the number of rendered points per trace to keep the UI responsive with long timelines.
 
 ## Notes
 
 - The Parquet reader only requests the columns needed for visualization to reduce bandwidth.
 - Filtering by campaign reuses the already loaded dataset; no additional network requests are issued.
 - Plotly's interactive controls (zoom, pan, hover, download PNG) are available by default.
+- The viewer defaults to the latest six hours and includes quick range buttons (6h, 12h, 1d, 3d, 10d, 1m, 6m, 1y, All). Data is downsampled to at most ~4k points per trace for smooth interaction on large files.
+- The current deployment focuses on the Saint-Jean-de-Luz buoy campaign and links to the [CANDHIS data catalog](https://candhis.cerema.fr/_public_/campagne.php). The interface shows when the dataset was last refreshed based on the most recent timestamp.

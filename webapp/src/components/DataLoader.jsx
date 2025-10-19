@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react';
 import { asyncBufferFromUrl, parquetReadObjects } from 'hyparquet';
 import { parseWaveData } from '../utils/dataParser.js';
 
-const DATA_URL = `${import.meta.env.BASE_URL}data/wave_buoys_data.parquet`;
+const DATA_FILE_NAME = import.meta.env.MODE === 'production'
+  ? 'wave_buoys_data_prod.parquet'
+  : 'wave_buoys_data.parquet';
+const DATA_URL = `${import.meta.env.BASE_URL}data/${DATA_FILE_NAME}`;
 const REQUIRED_COLUMNS = [
   'campaign_id',
   'datetime',

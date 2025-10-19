@@ -41,7 +41,6 @@ platforms = ["linux-64", "osx-arm64"]
 version = "0.0.0.dev" # remove once pixi supports dynamic version
 
 [tool.pixi.tasks]
-test = "pytest -vvv --durations=0 tests/"
 format = "ruff format --exclude='*.ipynb'"
 lint = "ruff check --fix --exclude='*.ipynb'"
 lint-format = { depends-on = ["format", "lint"] }

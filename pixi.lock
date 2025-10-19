@@ -6653,7 +6653,7 @@ packages:
   - python >=3.13.0,<4
   - python *
   input:
-    hash: 482038f5c2854587f54d678a2c06eb4f1a17154eb5b0e54c3ad74512ef9b543d
+    hash: 609d6c952a2e4d7364b1a1163e0bf39255bdea2ae829eeef41c78432a228587b
     globs:
     - pyproject.toml
 - conda: https://conda.anaconda.org/conda-forge/linux-64/wayland-1.24.0-h3e06ad9_0.conda
