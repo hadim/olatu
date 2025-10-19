@@ -182,3 +182,5 @@ output
 .ruff_cache/
 *.db/
 .DS_Store
+dist/
+node_modules/

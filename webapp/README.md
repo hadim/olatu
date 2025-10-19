@@ -1,0 +1,39 @@
+# Wave Buoy Data Viewer (React)
+
+This React 18 + Vite application renders synchronized time series visualizations for wave buoy measurements directly in the browser. It reads the `data/wave_buoys_data.parquet` file with the lightweight [hyparquet](https://www.npmjs.com/package/hyparquet) parser and plots interactive charts using `react-plotly.js`.
+
+## Getting started
+
+```bash
+cd webapp
+npm install
+npm run dev
+```
+
+The dev server runs on `http://localhost:5173` by default. Hot module replacement is enabled.
+
+## Building for production
+
+```bash
+npm run build
+npm run preview
+```
+
+The Vite build outputs static assets to `dist/`. The configuration copies `../data/wave_buoys_data.parquet` to `dist/data/` so the application can fetch it at runtime. Ensure the source file is present before building.
+
+## Deployment
+
+The Vite `base` option is set to `/wave-buoys-viewer/` to support GitHub Pages deployments from this repository. Publish the `dist/` directory (for example via GitHub Actions) to serve the site at `https://<username>.github.io/wave-buoys-viewer/`.
+
+## Project structure
+
+- `src/App.jsx` orchestrates layout, campaign filtering, and renders the plot component.
+- `src/components/DataLoader.jsx` streams the Parquet file with hyparquet, handling loading and error states.
+- `src/components/WavePlot.jsx` renders four synchronized Plotly subplots with a common time axis, range slider, and range selector.
+- `src/utils/dataParser.js` converts raw Parquet rows into typed JavaScript objects with `Date` instances and numeric values.
+
+## Notes
+
+- The Parquet reader only requests the columns needed for visualization to reduce bandwidth.
+- Filtering by campaign reuses the already loaded dataset; no additional network requests are issued.
+- Plotly's interactive controls (zoom, pan, hover, download PNG) are available by default.

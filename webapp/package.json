@@ -1,0 +1,23 @@
+{
+  "name": "wave-buoy-data-viewer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "hyparquet": "^1.20.0",
+  "plotly.js-dist-min": "3.1.2",
+  "react": "19.2.0",
+  "react-dom": "19.2.0",
+    "react-plotly.js": "^2.6.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "5.0.4",
+    "vite": "7.1.10",
+    "vite-plugin-static-copy": "3.1.4"
+  }
+}
