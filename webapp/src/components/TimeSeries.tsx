@@ -50,7 +50,7 @@ const PANELS: PanelDef[] = [
       { key: 'max_wave_height_m', colorVar: '--c-max', width: 1 },
     ],
   },
-  { titleKey: 'cc.period', series: [{ key: 'peak_period_s', colorVar: '--c-period', width: 2 }] },
+  { titleKey: 'cc.period', series: [{ key: 'significant_period_s', colorVar: '--c-period', width: 2 }] },
   {
     titleKey: 'cc.direction',
     series: [{ key: 'peak_direction_deg', colorVar: '--c-dir' }],
@@ -107,7 +107,7 @@ function movingAvg(arr: (number | null)[], radius: number): (number | null)[] {
 const CARD_METRICS: { key: string; labelKey: MessageKey; unit?: string; digits?: number; dir?: boolean; pm?: boolean }[] = [
   { key: 'significant_wave_height_m', labelKey: 'cc.waveHeight', unit: 'm', digits: 1 },
   { key: 'max_wave_height_m', labelKey: 'cc.maxWave', unit: 'm', digits: 1 },
-  { key: 'peak_period_s', labelKey: 'cc.period', unit: 's', digits: 1 },
+  { key: 'significant_period_s', labelKey: 'cc.period', unit: 's', digits: 1 },
   { key: 'peak_direction_deg', labelKey: 'cc.direction', dir: true },
   { key: 'peak_directional_spread_deg', labelKey: 'cc.spread', unit: '°', digits: 0, pm: true },
   { key: 'sea_temperature_c', labelKey: 'cc.seaTemp', unit: '°C', digits: 1 },
@@ -116,7 +116,7 @@ const CARD_METRICS: { key: string; labelKey: MessageKey; unit?: string; digits?:
 const DETAIL_COLUMNS = [
   'significant_wave_height_m',
   'max_wave_height_m',
-  'peak_period_s',
+  'significant_period_s',
   'peak_direction_deg',
   'peak_directional_spread_deg',
   'sea_temperature_c',

@@ -17,7 +17,7 @@ interface Loaded {
 const HISTORY_COLUMNS = [
   'significant_wave_height_m',
   'max_wave_height_m',
-  'peak_period_s',
+  'significant_period_s',
   'peak_direction_deg',
   'peak_directional_spread_deg',
   'sea_temperature_c',
