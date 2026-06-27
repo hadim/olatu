@@ -322,7 +322,9 @@ body {
 .banner-metrics {
   display: flex;
   flex-direction: column;
-  gap: 1.2rem;
+  gap: 1.35rem;
+  padding-left: 2rem;
+  border-left: 1px solid var(--hairline);
 }
 
 .metric-hero {
@@ -358,9 +360,14 @@ body {
 
 /* gauges */
 .banner-gauges {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1rem 1.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.3rem;
+}
+
+.banner-gauges .gauge + .gauge {
+  padding-left: 1.3rem;
+  border-left: 1px solid var(--hairline);
 }
 
 .gauge--warm .gauge-value {
@@ -693,9 +700,18 @@ body {
   .banner-metrics {
     width: 100%;
     align-items: center;
+    padding-left: 0;
+    border-left: none;
   }
   .metric-hero {
     align-items: center;
+  }
+  .banner-gauges {
+    justify-content: center;
+  }
+  .banner-gauges .gauge + .gauge {
+    padding-left: 0;
+    border-left: none;
   }
   .banner-gauges {
     width: 100%;

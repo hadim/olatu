@@ -3,18 +3,15 @@ import { lastValue, latestTimestamp, type Manifest, type Series } from '../lib/d
 import { compass, fmtNumber, fmtClock, freshness, relativeAgo, type Freshness } from '../lib/format';
 import InfoPopover from './InfoPopover';
 
-// Sector ("cone") path centred on "up" in the dial's local frame, half-angle = spread.
-// The whole group is rotated to the swell's from-direction, so the cone shows how
-// focused vs spread-out (messy) the swell is.
-function conePath(cx: number, cy: number, r: number, halfDeg: number): string {
-  const half = Math.min(Math.max(halfDeg, 2), 88);
+// Annular ("ring") sector centred on "up" in the dial's local frame, half-angle =
+// spread, drawn between radii ri..ro so it stays in the outer ring and never covers
+// the centre readout. The group is rotated to the swell's from-direction.
+function conePath(cx: number, cy: number, ri: number, ro: number, halfDeg: number): string {
+  const half = Math.min(Math.max(halfDeg, 2), 80);
   const a1 = ((-90 - half) * Math.PI) / 180;
   const a2 = ((-90 + half) * Math.PI) / 180;
-  const x1 = (cx + r * Math.cos(a1)).toFixed(2);
-  const y1 = (cy + r * Math.sin(a1)).toFixed(2);
-  const x2 = (cx + r * Math.cos(a2)).toFixed(2);
-  const y2 = (cy + r * Math.sin(a2)).toFixed(2);
-  return `M${cx} ${cy} L${x1} ${y1} A${r} ${r} 0 0 1 ${x2} ${y2} Z`;
+  const p = (r: number, a: number) => `${(cx + r * Math.cos(a)).toFixed(2)} ${(cy + r * Math.sin(a)).toFixed(2)}`;
+  return `M${p(ro, a1)} A${ro} ${ro} 0 0 1 ${p(ro, a2)} L${p(ri, a2)} A${ri} ${ri} 0 0 0 ${p(ri, a1)} Z`;
 }
 
 function CompassDial({ deg, spread, locale }: { deg: number | null; spread: number | null; locale: string }) {
@@ -33,8 +30,8 @@ function CompassDial({ deg, spread, locale }: { deg: number | null; spread: numb
         })}
         {deg != null && (
           <g transform={`rotate(${deg + 180} 60 60)`}>
-            {spread != null && <path d={conePath(60, 60, 44, spread)} className="dial-cone" />}
-            <path d="M60 20 L53 60 L60 53 L67 60 Z" className="dial-arrow" />
+            {spread != null && <path d={conePath(60, 60, 30, 50, spread)} className="dial-cone" />}
+            <path d="M60 13 L54.5 31 L65.5 31 Z" className="dial-arrow" />
           </g>
         )}
       </svg>
