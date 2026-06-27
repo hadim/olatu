@@ -130,6 +130,7 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
   }));
   const [mode, setMode] = useState<string>('p:1Y');
   const [navYear, setNavYear] = useState<number | null>(null);
+  const [showJump, setShowJump] = useState(false);
 
   const years = useMemo(() => {
     const a: number[] = [];
@@ -377,6 +378,14 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
               </button>
             );
           })}
+          <button
+            type="button"
+            className={`chip jump-toggle ${showJump ? 'chip--active' : ''}`}
+            aria-expanded={showJump}
+            onClick={() => setShowJump((v) => !v)}
+          >
+            {t('chart.jumpTo')} {showJump ? '▾' : '▸'}
+          </button>
         </div>
         <div className="chip-group smoother" role="group" aria-label={t('chart.smoothing')}>
           <span className="smoother-label">{t('chart.smoothing')}</span>
@@ -388,6 +397,7 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
         </div>
       </div>
 
+      {showJump && (
       <div className="time-nav">
         <div className="chip-row" role="group" aria-label="Year">
           {years.map((y) => (
@@ -410,8 +420,9 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
           <input type="date" value={toInput(range.max)} min={toInput(range.min)} max={toInput(TN)} onChange={(e) => e.target.value && apply(range.min, fromInput(e.target.value, true), 'custom')} />
         </label>
       </div>
+      )}
 
-      {navYear != null && (
+      {showJump && navYear != null && (
         <div className="chip-row months" role="group" aria-label={`${navYear}`}>
           {monthLabels.map((label, m) => (
             <button
