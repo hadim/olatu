@@ -1,5 +1,5 @@
 {
-  "name": "wave-buoy-data-viewer",
+  "name": "olatu",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -9,15 +9,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "hyparquet": "^1.20.0",
-    "plotly.js-dist-min": "3.1.2",
-    "react": "19.2.0",
-    "react-dom": "19.2.0",
-    "react-plotly.js": "^2.6.0"
+    "hyparquet": "^1.26.1",
+    "plotly.js-dist-min": "^3.6.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-plotly.js": "^4.0.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "5.0.4",
-    "vite": "7.1.10",
-    "vite-plugin-static-copy": "3.1.4"
+    "@vitejs/plugin-react": "^6.0.3",
+    "vite": "^8.1.0"
   }
 }

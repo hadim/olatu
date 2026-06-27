@@ -23,5 +23,5 @@ SOFTWARE.
 ---
 
 Note: this license covers the CODE in this repository. The wave measurement
-data (under data/) is © Cerema / CANDHIS and is subject to the CANDHIS
-conditions of use: https://candhis.cerema.fr/doc/01_Utilisation.fr.pdf
+data (under webapp/public/data/) is © Cerema / CANDHIS and is subject to the
+CANDHIS conditions of use: https://candhis.cerema.fr/doc/01_Utilisation.fr.pdf

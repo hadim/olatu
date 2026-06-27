@@ -43,10 +43,10 @@ this repo and rendered in your browser. Deployed on GitHub Pages.
 ## Repository layout
 
 ```
-ingest/     Python (polars) pipeline: CANDHIS CSV → tiered Parquet/JSON
-data/       generated data tiers (committed): manifest/latest/recent.json, year/*.parquet, hourly/daily.parquet
-webapp/     the frontend
-specs/      design & decision records (this project is spec-driven)
+ingest/              Python (polars) pipeline: CANDHIS CSV → tiered Parquet/JSON
+webapp/              the frontend
+  public/data/       generated data tiers (committed): manifest/latest/recent.json, year/*.parquet, hourly/daily.parquet
+specs/               design & decision records (this project is spec-driven)
 ```
 
 ## Getting started
@@ -57,22 +57,22 @@ Requires [pixi](https://pixi.sh).
 
 ```bash
 pixi install
-pixi run ingest --src /path/to/candhis/csv --out data
+pixi run ingest --src /path/to/candhis/csv
 ```
 
 This reads `Candhis_06403_*_arch.csv` (archive) and `Candhis_06403_*_reel.csv`
-(realtime) and produces the cleaned, tiered files in `data/`.
+(realtime) and produces the cleaned, tiered files in `webapp/public/data/`.
 
 ### Frontend
 
-Requires Node.js.
+`pixi` bundles Node, so no separate install is needed:
 
 ```bash
-cd webapp
-npm install
-npm run dev      # local dev server
-npm run build    # static build for GitHub Pages
+pixi run webapp          # start the local dev server
+pixi run webapp-build    # static build for GitHub Pages
 ```
+
+(Or use npm directly inside `webapp/`: `npm install && npm run dev`.)
 
 ## Contributing & bug reports
 

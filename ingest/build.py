@@ -278,8 +278,8 @@ def main() -> None:
     p.add_argument(
         "--out",
         type=Path,
-        default=Path("data"),
-        help="Output directory for the tiered files (default: ./data)",
+        default=Path("webapp/public/data"),
+        help="Output directory for the tiered files (default: webapp/public/data, served by Vite)",
     )
     args = p.parse_args()
     build(args.src, args.out)

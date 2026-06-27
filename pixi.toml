@@ -9,9 +9,20 @@ channels = ["conda-forge"]
 platforms = ["osx-arm64", "linux-64"]
 
 [tasks]
+# --- Data pipeline ---
 # Build the tiered data files. Override paths, e.g.:
 #   pixi run ingest --src /path/to/csv --out data
 ingest = "python -m ingest.build"
+
+# --- Webapp (frontend) ---
+webapp-install = { cmd = "npm install", cwd = "webapp" }
+# Start the webapp locally (installs deps if needed):
+#   pixi run webapp
+webapp = { cmd = "npm run dev", cwd = "webapp", depends-on = ["webapp-install"] }
+webapp-build = { cmd = "npm run build", cwd = "webapp", depends-on = ["webapp-install"] }
+webapp-preview = { cmd = "npm run preview", cwd = "webapp", depends-on = ["webapp-build"] }
+
+# --- Lint / format (Python) ---
 format = "ruff format ."
 lint = "ruff check --fix ."
 check = { depends-on = ["format", "lint"] }
@@ -23,5 +34,7 @@ pyarrow = ">=24.0.0"
 # For the (future) realtime scraper that pulls the CANDHIS web table:
 httpx = ">=0.28"
 lxml = ">=6.1.1"
+# Frontend toolchain (so `pixi run webapp` works without a system Node):
+nodejs = ">=22"
 # Dev
 ruff = ">=0.15.20"

@@ -26,10 +26,10 @@ This project is **spec-driven**. Before implementing, read:
 ```
 ingest/        Python (polars) CSV -> tiered Parquet/JSON. NOT an installable package.
   schema.py    canonical column mapping, units, sentinel, headline/direction vars
-  build.py     the build script (run via pixi)
-pixi.toml      Python env + tasks (no pyproject; no Python library)
-data/          generated tiers (committed): manifest/latest/recent.json, year/*.parquet, hourly/daily.parquet
-webapp/        the frontend (currently React+Vite+Plotly; being rebuilt — see roadmap)
+  build.py     the build script (run via pixi); default --out webapp/public/data
+pixi.toml      Python env + frontend tasks (no pyproject; no Python library)
+webapp/        the frontend
+  public/data/ generated tiers (committed): manifest/latest/recent.json, year/*.parquet, hourly/daily.parquet
 specs/         decisions
 ```
 
@@ -39,7 +39,8 @@ specs/         decisions
 pixi run ingest                      # build data/ from CANDHIS CSVs (default src /Users/hadim/Data/fff)
 pixi run ingest --src DIR --out DIR  # override paths
 pixi run check                       # ruff format + lint
-cd webapp && npm run dev             # frontend dev server
+pixi run webapp                      # start the frontend dev server (bundled Node)
+pixi run webapp-build                # static build for GitHub Pages
 ```
 
 ## Conventions & gotchas
