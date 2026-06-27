@@ -77,7 +77,8 @@ const PRESETS: { key: string; days: number | null }[] = [
 type Smooth = 'raw' | 'light' | 'strong';
 const SMOOTH_RADIUS: Record<Smooth, number> = { raw: 0, light: 2, strong: 7 };
 
-/** Gap-aware centred moving average. Keeps nulls where the centre is missing. */
+/** Centred moving average that never crosses a null (a gap break): the window stops
+ *  at the first null on each side, so smoothing can't bridge an outage. */
 function movingAvg(arr: (number | null)[], radius: number): (number | null)[] {
   if (radius <= 0) return arr;
   const out: (number | null)[] = new Array(arr.length);
@@ -86,16 +87,19 @@ function movingAvg(arr: (number | null)[], radius: number): (number | null)[] {
       out[i] = null;
       continue;
     }
-    let sum = 0;
-    let n = 0;
-    for (let j = Math.max(0, i - radius); j <= Math.min(arr.length - 1, i + radius); j++) {
-      const v = arr[j];
-      if (v != null) {
-        sum += v;
-        n += 1;
-      }
+    let sum = arr[i] as number;
+    let n = 1;
+    for (let j = i - 1; j >= Math.max(0, i - radius); j--) {
+      if (arr[j] == null) break;
+      sum += arr[j] as number;
+      n += 1;
     }
-    out[i] = n ? sum / n : null;
+    for (let j = i + 1; j <= Math.min(arr.length - 1, i + radius); j++) {
+      if (arr[j] == null) break;
+      sum += arr[j] as number;
+      n += 1;
+    }
+    out[i] = sum / n;
   }
   return out;
 }
@@ -168,6 +172,31 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
     const xmax = range.max;
     const radius = SMOOTH_RADIUS[smooth];
 
+    // Insert null break-points across real outages so the line never bridges a gap
+    // (daily.parquet omits empty days). gxs/gcols are the gap-aware arrays the charts
+    // AND the hover card read from — uPlot's cursor idx indexes into these.
+    const cadence = (() => {
+      let c = Infinity;
+      for (let i = 1; i < xs.length; i++) {
+        const d = xs[i] - xs[i - 1];
+        if (d > 0 && d < c) c = d;
+      }
+      return Number.isFinite(c) ? c : DAY;
+    })();
+    const gapThreshold = 4 * cadence;
+    const KEYS = Object.keys(data).filter((k) => k !== 't');
+    const gxs: number[] = [];
+    const gcols: Record<string, (number | null)[]> = {};
+    for (const k of KEYS) gcols[k] = [];
+    for (let i = 0; i < xs.length; i++) {
+      if (i > 0 && xs[i] - xs[i - 1] > gapThreshold) {
+        gxs.push(xs[i - 1] + cadence);
+        for (const k of KEYS) gcols[k].push(null);
+      }
+      gxs.push(xs[i]);
+      for (const k of KEYS) gcols[k].push((data[k] as (number | null)[])[i]);
+    }
+
     const axisColor = cssVar('--text-3');
     const gridColor = cssVar('--hairline');
     const plots: uPlot[] = [];
@@ -184,11 +213,11 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
         resetCard();
         return;
       }
-      if (timeEl) timeEl.textContent = fmtDateTime(xs[idx] * 1000, locale, tz);
+      if (timeEl) timeEl.textContent = fmtDateTime(gxs[idx] * 1000, locale, tz);
       if (!statsEl) return;
       const chips: string[] = [];
       for (const m of CARD_METRICS) {
-        const col = data[m.key] as (number | null)[] | undefined;
+        const col = gcols[m.key];
         const v = col?.[idx];
         if (v == null) continue;
         let val: string;
@@ -222,20 +251,20 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
       const hasData = panel.series.some((s) => inWindow(s.key));
 
       const plotted = (key: string) =>
-        panel.points ? (data[key] as (number | null)[]) : movingAvg(data[key] as (number | null)[], radius);
+        panel.points ? gcols[key] : movingAvg(gcols[key], radius);
 
       let chartData: uPlot.AlignedData;
       let series: uPlot.Series[];
       let bands: uPlot.Band[] | undefined;
 
       if (panel.spreadKey) {
-        const dir = data[panel.series[0].key] as (number | null)[];
-        const sp = data[panel.spreadKey] as (number | null)[];
+        const dir = gcols[panel.series[0].key];
+        const sp = gcols[panel.spreadKey];
         const hi = dir.map((d, i) => (d == null || sp[i] == null ? null : Math.min(360, d + (sp[i] as number))));
         const lo = dir.map((d, i) => (d == null || sp[i] == null ? null : Math.max(0, d - (sp[i] as number))));
         const color = cssVar(panel.series[0].colorVar);
         const invisible = (): uPlot.Series => ({ stroke: 'transparent', width: 1, points: { show: false }, value: () => '' });
-        chartData = [xs, hi, lo, dir];
+        chartData = [gxs, hi, lo, dir];
         series = [
           {},
           invisible(),
@@ -244,7 +273,7 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
         ];
         bands = [{ series: [1, 2], fill: color + '24' }];
       } else {
-        chartData = [xs, ...panel.series.map((s) => plotted(s.key))];
+        chartData = [gxs, ...panel.series.map((s) => plotted(s.key))];
         series = [
           {},
           ...panel.series.map((s) => {
