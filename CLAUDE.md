@@ -45,6 +45,8 @@ pixi run webapp-build                # static build for GitHub Pages
 
 ## Conventions & gotchas
 
+- **Conventional Commits, always**: `type(scope): description` (feat/fix/docs/
+  refactor/chore/ci/build/perf/test; scope e.g. `webapp`, `ingest`, `ci`).
 - **English everywhere** (code, comments, specs, UI source strings); UI translated EN/FR/ES.
 - **polars, not pandas.** TypeScript for the webapp. Pixel-perfect data-viz is the bar.
 - **Timestamps are UTC**, rendered Europe/Paris. Don't use bare `new Date(value)`.
