@@ -437,12 +437,40 @@ body {
 .minimap {
   position: relative;
   display: block;
+  width: 100%;
+  padding: 0;
   border: 1px solid var(--hairline);
   border-radius: 1rem;
   overflow: hidden;
   aspect-ratio: 16 / 10;
   background: var(--surface-2);
   text-decoration: none;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: border-color 0.15s ease;
+}
+
+.minimap:hover {
+  border-color: var(--accent);
+}
+
+.minimap-expand {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 0.4rem;
+  color: var(--text-2);
+  background: color-mix(in oklab, var(--surface) 74%, transparent);
+}
+
+.minimap:hover .minimap-expand {
+  color: var(--accent);
 }
 
 .minimap-img {
@@ -1181,4 +1209,82 @@ body {
   font-family: var(--font-mono);
   font-size: 0.64rem;
   color: var(--text-3);
+}
+
+/* ---- expanded map modal ---- */
+.map-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: color-mix(in oklab, #000 60%, transparent);
+  animation: fade-in 0.18s ease;
+}
+
+.map-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(920px, 94vw);
+  height: min(640px, 86vh);
+  background: var(--bg);
+  border: 1px solid var(--hairline);
+  border-radius: 1rem;
+  overflow: hidden;
+  box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.7);
+}
+
+.map-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.map-modal-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.map-modal-canvas {
+  position: relative;
+  flex: 1;
+}
+
+.map-modal-canvas .maplibregl-map {
+  position: absolute;
+  inset: 0;
+}
+
+.map-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 0.9rem;
+}
+
+.map-modal-foot {
+  padding: 0.6rem 1rem;
+  border-top: 1px solid var(--hairline);
+  font-size: 0.82rem;
+}
+
+.map-modal-foot a {
+  color: var(--text-2);
+  text-decoration: none;
+}
+
+.map-modal-foot a:hover {
+  color: var(--accent);
 }
