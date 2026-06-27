@@ -1,0 +1,27 @@
+# Olatu — Python side: a minimal, scriptable data pipeline (no installable package).
+# CANDHIS CSV -> cleaned, tiered Parquet/JSON for the static webapp.
+# See specs/2026-06-27-0001-foundation.md §5 and §9.
+
+[workspace]
+name = "olatu"
+description = "Ingest CANDHIS wave-buoy data (CSV -> tiered Parquet/JSON) for the Olatu webapp."
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "linux-64"]
+
+[tasks]
+# Build the tiered data files. Override paths, e.g.:
+#   pixi run ingest --src /path/to/csv --out data
+ingest = "python -m ingest.build"
+format = "ruff format ."
+lint = "ruff check --fix ."
+check = { depends-on = ["format", "lint"] }
+
+[dependencies]
+python = ">=3.13,<4"
+polars = ">=1.18"
+pyarrow = ">=24.0.0"
+# For the (future) realtime scraper that pulls the CANDHIS web table:
+httpx = ">=0.28"
+lxml = ">=6.1.1"
+# Dev
+ruff = ">=0.15.20"

@@ -1,35 +1,88 @@
-# Wave Buoy Data Viewer 🌊
+# 🌊 Olatu
 
-Real-time wave buoy data visualization webapp with automated data collection pipeline. Reads Parquet files directly in the browser for interactive time series analysis.
+> *Olatu* — Basque for "wave".
 
-## Features
+A fast, beautiful, **fully static** web app to read what the sea is doing at the
+**Saint-Jean-de-Luz wave buoy** (Atlantic / Basque coast) — right now, and across
+its whole history since 2013.
 
-- 📊 **Interactive time series plots** with synchronized zooming across multiple metrics
-- 📦 **Browser-native Parquet reading** - No backend required, streams data on-demand with Hyparquet
-- ⏱️ **Full timeline range slider** - Select specific time periods (6h, 1d, 7d, 1m, all)
-- 🤖 **Automated data pipeline** - Scheduled scraping and conversion via GitHub Actions
-- 🎯 **Multiple synchronized subplots** - Different metrics with appropriate units
-- 📱 **Responsive design** - Works on desktop and mobile
+No backend, no account, no API key. Data is read straight from Parquet committed in
+this repo and rendered in your browser. Deployed on GitHub Pages.
 
-## Tech Stack
+- **Live:** https://hadim.github.io/wave-buoys-viewer/
+- **Data source:** [CANDHIS](https://candhis.cerema.fr) — the French national
+  in-situ wave-measurement network, operated by [Cerema](https://www.cerema.fr).
+  Buoy **06403, Saint-Jean-de-Luz** (43.408° N, 1.682° W), ~3 km off the Belharra
+  reef, one measurement every 30 minutes.
+
+> 🚧 **Status: active rebuild.** The project is being rebuilt from scratch for a
+> much nicer UX and pixel-perfect data-viz. The data pipeline is done; the new
+> frontend is in progress. See [`specs/`](specs/) for the plan.
+
+## What it does
+
+- **Current conditions at a glance** — wave height, swell direction, period and sea
+  temperature, with a clear "how fresh is this reading?" indicator.
+- **Time travel** — today, yesterday, this week, this month, any past year, or a
+  precise custom date range.
+- **Every value explained** — a plain-language definition for each variable, so you
+  always know what you're looking at.
+- **A map** of where the buoy sits.
+- **Multilingual** — English, French, Spanish.
+- **Desktop and mobile**, both first-class.
+
+## How it's built
+
+| Layer | Tech |
+|-------|------|
+| Frontend | React + Vite + TypeScript, Tailwind CSS, **uPlot** (canvas charts), MapLibre (map), Paraglide (i18n) |
+| Data in the browser | [hyparquet](https://github.com/hyparam/hyparquet) — reads Parquet directly, no WASM |
+| Data pipeline | **Python + [polars](https://pola.rs)** (CSV → cleaned, tiered Parquet/JSON), managed by [pixi](https://pixi.sh) |
+| Hosting | GitHub Pages (static) |
+
+## Repository layout
+
+```
+ingest/     Python (polars) pipeline: CANDHIS CSV → tiered Parquet/JSON
+data/       generated data tiers (committed): manifest/latest/recent.json, year/*.parquet, hourly/daily.parquet
+webapp/     the frontend
+specs/      design & decision records (this project is spec-driven)
+```
+
+## Getting started
+
+### Data pipeline
+
+Requires [pixi](https://pixi.sh).
+
+```bash
+pixi install
+pixi run ingest --src /path/to/candhis/csv --out data
+```
+
+This reads `Candhis_06403_*_arch.csv` (archive) and `Candhis_06403_*_reel.csv`
+(realtime) and produces the cleaned, tiered files in `data/`.
 
 ### Frontend
 
-- **React 18** + **Vite** - Modern, fast build tool for static site generation
-- **Hyparquet** - Lightweight (9.7kb) browser-based Parquet reader with chunk loading
-- **Plotly.js** + **react-plotly.js** - Interactive charting with built-in range selectors
-- **Deployment**: GitHub Pages (static hosting)
+Requires Node.js.
 
-### Backend (Data Pipeline)
+```bash
+cd webapp
+npm install
+npm run dev      # local dev server
+npm run build    # static build for GitHub Pages
+```
 
-- **Python 3.13+** with **Pixi** - Fast conda-based package manager
-- **Pandas** - Data manipulation and CSV processing
-- **PyArrow** - High-performance Parquet file generation
-- **Automation**: GitHub Actions (scheduled cron jobs)
+## Contributing & bug reports
 
-## Quick Start
+Contributions, ideas and bug reports are very welcome — please
+[open an issue](https://github.com/hadim/wave-buoys-viewer/issues) or a pull
+request.
 
-### Prerequisites
+## License & attribution
 
-- Node.js 20+ and npm
-- [Pixi](https://pixi.sh) package manager
+- **Code** is released under the [MIT License](LICENSE).
+- **Wave data** is © **Cerema / CANDHIS** and is provided under the CANDHIS
+  [conditions of use](https://candhis.cerema.fr/doc/01_Utilisation.fr.pdf). This is
+  an independent community viewer and is **not** an official Cerema/CANDHIS product.
