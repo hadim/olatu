@@ -109,8 +109,13 @@ flags whether the column carries real data for *this* buoy.
   parameter.
 - **`datetime_utc`** — *Simple:* when the measurement was taken (UTC). *Full:*
   timestamp of the 30-min sea-state record in Universal Time. Archive uses one
-  `DateHeure` field; the realtime table splits Date + `Heure (TU)`, recombined into
-  one UTC instant and rendered in Europe/Paris.
+  `DateHeure` field; the realtime export uses one combined `Date` field (e.g.
+  `2026-06-27 16:00:00`). **Both are UTC** — empirically confirmed on 2026-06-27: a
+  realtime file downloaded at 18:34 CEST (16:34 UTC) had its newest row at `16:00:00`,
+  i.e. ~34 min old in UTC, not the ~2.5 h that a local-time reading would imply. The
+  ingest maps `Date → datetime_utc` as-is and the frontend renders Europe/Paris.
+  *(The earlier "splits Date + `Heure (TU)`" note was wrong — the file has no separate
+  time column.)*
 
 ### 4.2 Wave heights (time-domain)
 - **`significant_wave_height_m`** (H1/3) — *Simple:* the typical big-wave height

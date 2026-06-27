@@ -58,6 +58,11 @@
   box-sizing: border-box;
 }
 
+/* Global type scale: bump everything ~6% (most sizes are in rem). */
+html {
+  font-size: 106.25%;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -258,18 +263,20 @@ body {
 .dial-center {
   position: absolute;
   inset: 0;
-  display: flex;
+  display: grid;
+  grid-auto-flow: column;
+  place-content: center;
   align-items: baseline;
-  justify-content: center;
   gap: 0.15rem;
 }
 
 .dial-value {
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: clamp(2.5rem, 7vw, 3.4rem);
+  font-size: clamp(2rem, 5.5vw, 2.8rem);
   font-feature-settings: 'tnum' 1;
   letter-spacing: -0.02em;
+  line-height: 1;
 }
 
 .dial-unit {
@@ -285,13 +292,15 @@ body {
 }
 
 .caption-label {
-  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.86rem;
   color: var(--text-2);
 }
 
 .caption-dir {
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: 0.84rem;
   color: var(--accent);
 }
 
@@ -308,7 +317,9 @@ body {
 }
 
 .gauge-label {
-  font-size: 0.72rem;
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-3);
@@ -317,7 +328,7 @@ body {
 .gauge-value {
   font-family: var(--font-display);
   font-weight: 500;
-  font-size: 1.5rem;
+  font-size: 1.7rem;
   font-feature-settings: 'tnum' 1;
 }
 
@@ -386,7 +397,7 @@ body {
 }
 
 .station-facts dt {
-  font-size: 0.7rem;
+  font-size: 0.76rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-3);
@@ -395,7 +406,7 @@ body {
 .station-facts dd {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   color: var(--text);
 }
 
@@ -457,8 +468,25 @@ body {
 .charts-toolbar {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem 1rem;
+  margin-bottom: 0.8rem;
+}
+
+.chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 0.4rem;
-  margin-bottom: 0.9rem;
+}
+
+.smoother-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  margin-right: 0.15rem;
 }
 
 .chip {
@@ -492,7 +520,7 @@ body {
 }
 
 .chart-panel-title {
-  font-size: 0.68rem;
+  font-size: 0.74rem;
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--text-3);
@@ -501,10 +529,41 @@ body {
 
 .chart-panel {
   width: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+/* empty-state overlay (sea temperature when the window has no data) — `bottom`
+   is set inline so the x-axis on the last panel stays visible. */
+.chart-empty {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 1rem;
+  text-align: center;
+  font-size: 0.86rem;
+  color: var(--text-3);
+  background: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 9px,
+    color-mix(in oklab, var(--hairline) 32%, transparent) 9px,
+    color-mix(in oklab, var(--hairline) 32%, transparent) 10px
+  );
 }
 
 .u-cursor-pt {
   border: none !important;
+}
+
+/* visible drag-to-zoom selection (spec 0003 B4) */
+.charts .u-select {
+  background: color-mix(in oklab, var(--accent) 16%, transparent);
+  border: 1px solid color-mix(in oklab, var(--accent) 55%, transparent);
 }
 
 /* ---- responsive ---- */
@@ -525,5 +584,181 @@ body {
   .banner-temp {
     align-items: center;
     text-align: center;
+  }
+}
+
+/* ---- banner head + staleness badge ---- */
+.banner-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.1rem;
+}
+
+.banner-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.32rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.status-badge:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.status-badge--fresh {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--hairline));
+}
+.status-badge--aging {
+  border-color: color-mix(in oklab, var(--warning) 50%, var(--hairline));
+}
+.status-badge--stale {
+  border-color: color-mix(in oklab, var(--text-3) 45%, var(--hairline));
+}
+
+.status-ago {
+  white-space: nowrap;
+}
+
+/* ---- info popover (definitions + staleness explanation) ---- */
+.info-pop {
+  position: relative;
+  display: inline-flex;
+}
+
+.info-pop-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-left: 0.32rem;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--text-3);
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-style: italic;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.info-pop-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.info-pop-panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 17rem;
+  max-width: 78vw;
+  padding: 0.75rem 0.85rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--divider);
+  background: var(--surface);
+  box-shadow: 0 14px 34px -14px rgba(0, 0, 0, 0.6);
+  text-transform: none;
+  letter-spacing: normal;
+  cursor: auto;
+}
+
+.info-pop-panel--start {
+  left: 0;
+}
+.info-pop-panel--end {
+  right: 0;
+}
+
+.info-pop-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--text);
+}
+
+.info-pop-body {
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+/* ---- chart hover value card ---- */
+.hover-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 1.1rem;
+  min-height: 2.4rem;
+  margin-bottom: 0.7rem;
+  padding: 0.45rem 0.85rem;
+  border: 1px solid var(--hairline);
+  border-radius: 0.7rem;
+  background: var(--surface);
+}
+
+.hover-time {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text);
+  min-width: 12rem;
+}
+
+.hover-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1rem;
+}
+
+.hover-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+}
+
+.hover-chip-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+}
+
+.hover-chip-value {
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+  color: var(--text-2);
+}
+
+@media (max-width: 720px) {
+  .hover-time {
+    min-width: 0;
+  }
+  .info-pop-panel {
+    width: 15rem;
   }
 }

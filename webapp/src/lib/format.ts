@@ -31,6 +31,29 @@ export function fmtClock(ms: number, locale: Locale, timeZone: string): string {
   }).format(new Date(ms));
 }
 
+/** Full date + time for the chart hover card, e.g. "12 Jan 2024, 14:30". */
+export function fmtDateTime(ms: number, locale: Locale, timeZone: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone,
+  }).format(new Date(ms));
+}
+
+/** Locale-aware axis tick label whose detail scales with the tick spacing (seconds). */
+export function fmtAxisTick(ms: number, locale: Locale, timeZone: string, incrSec: number): string {
+  const DAY = 86_400;
+  let opts: Intl.DateTimeFormatOptions;
+  if (incrSec >= DAY * 300) opts = { year: 'numeric', timeZone };
+  else if (incrSec >= DAY * 27) opts = { month: 'short', year: '2-digit', timeZone };
+  else if (incrSec >= DAY) opts = { day: 'numeric', month: 'short', timeZone };
+  else opts = { hour: '2-digit', minute: '2-digit', timeZone };
+  return new Intl.DateTimeFormat(locale, opts).format(new Date(ms));
+}
+
 export type Freshness = 'fresh' | 'aging' | 'stale';
 
 export function freshness(ageMs: number): Freshness {

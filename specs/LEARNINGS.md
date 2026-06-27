@@ -9,6 +9,28 @@ Format per entry: **date — title** · what we found · why it matters · resol
 
 ---
 
+## 2026-06-27 — Realtime CSV `Date` column is UTC (verified empirically)
+
+**Finding.** The CANDHIS realtime export (`Candhis_06403_YYYY-MM-DD_reel.csv`) has a
+single combined `Date` column (`2026-06-27 16:00:00`), **not** a separate `Heure (TU)`
+field as the data dictionary claimed. Its values are **UTC**: a file downloaded at
+18:34 CEST (16:34 UTC) had its newest row at `16:00:00` — ~34 min old in UTC, whereas
+a local-Paris reading would have made the newest row ~2.5 h stale, which a live
+"rolling 48 h" feed never is. Cross-checked in the app: a December daily bucket
+(`00:00 UTC`) renders as `01:00` in the hover card (Europe/Paris = CET = UTC+1).
+
+**Why it matters.** If the realtime `Date` were misread as local time, every live
+reading + the staleness/age + the merged tail would be shifted +1/+2 h. The owner
+flagged the doubt; confirming it closes a whole class of silent tz bugs.
+
+**Resolution.** No code change — `REEL_MAP` already maps `Date → datetime_utc` as-is
+and the frontend renders Europe/Paris via `Intl`. Corrected the wrong "splits Date +
+`Heure (TU)`" note in [0002 §4.1](2026-06-27-0002-data-dictionary.md).
+
+**Refs.** `ingest/schema.py` (`REEL_MAP`); `webapp/src/lib/format.ts`.
+
+---
+
 ## 2026-06-27 — GitHub Pages gzips `.parquet`, which breaks HTTP range requests
 
 **Finding.** GitHub Pages (Fastly) compresses `application/octet-stream` responses

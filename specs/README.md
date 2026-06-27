@@ -35,6 +35,7 @@ Ask this for **every** request or task (and when in doubt, **ask the owner**):
 |------|--------|---------|
 | [0001 — Foundation](2026-06-27-0001-foundation.md) | Draft | Vision, data reality, tech stack, data-ops, features, UX, roadmap |
 | [0002 — Data dictionary](2026-06-27-0002-data-dictionary.md) | Draft | Buoy identity + canonical schema + plain-language definition of every variable |
+| [0003 — UX refinement](2026-06-27-0003-ux-refinement.md) | Draft | First owner-feedback polish pass: chart fixes, banner/staleness, terminology (vague/houle), definitions, time nav |
 | [LEARNINGS](LEARNINGS.md) | Living | Running log of significant findings (gzip/parquet, etc.) — update on every big finding |
 
 ## Conventions

@@ -1,6 +1,7 @@
-import { useI18n } from '../lib/i18n';
+import { useI18n, type MessageKey } from '../lib/i18n';
 import { lastValue, latestTimestamp, type Manifest, type Series } from '../lib/data';
-import { compass, fmtNumber, fmtClock, freshness, relativeAgo } from '../lib/format';
+import { compass, fmtNumber, fmtClock, freshness, relativeAgo, type Freshness } from '../lib/format';
+import InfoPopover from './InfoPopover';
 
 function CompassDial({ deg, hs, locale }: { deg: number | null; hs: number | null; locale: string }) {
   return (
@@ -10,7 +11,7 @@ function CompassDial({ deg, hs, locale }: { deg: number | null; hs: number | nul
         {['N', 'E', 'S', 'W'].map((c, i) => {
           const a = (i * 90 - 90) * (Math.PI / 180);
           return (
-            <text key={c} x={60 + Math.cos(a) * 46} y={60 + Math.sin(a) * 46 + 4} className="dial-tick" textAnchor="middle">
+            <text key={c} x={60 + Math.cos(a) * 51} y={60 + Math.sin(a) * 51 + 3.5} className="dial-tick" textAnchor="middle">
               {locale === 'en' ? c : c === 'W' ? 'O' : c}
             </text>
           );
@@ -29,15 +30,39 @@ function CompassDial({ deg, hs, locale }: { deg: number | null; hs: number | nul
   );
 }
 
-function Gauge({ label, value, unit }: { label: string; value: string; unit?: string }) {
+function Gauge({ label, value, unit, defKey }: { label: string; value: string; unit?: string; defKey: MessageKey }) {
+  const { t } = useI18n();
   return (
     <div className="gauge">
-      <span className="gauge-label">{label}</span>
+      <span className="gauge-label">
+        {label}
+        <InfoPopover title={label} body={t(defKey)} />
+      </span>
       <span className="gauge-value">
         {value}
         {unit && <span className="gauge-unit"> {unit}</span>}
       </span>
     </div>
+  );
+}
+
+function StalenessBadge({ fresh, stampMs, tz }: { fresh: Freshness; stampMs: number | null; tz: string }) {
+  const { t, locale } = useI18n();
+  const now = Date.now();
+  const ago = stampMs != null ? relativeAgo(stampMs, locale, now) : null;
+  const help = t(`cc.${fresh}.help` as MessageKey);
+  const body = stampMs != null ? `${help} · ${t('cc.updated')} ${fmtClock(stampMs, locale, tz)}` : help;
+  return (
+    <InfoPopover
+      title={t(`cc.${fresh}` as MessageKey)}
+      body={body}
+      align="end"
+      triggerClassName={`status-badge status-badge--${fresh}`}
+      triggerLabel={t('cc.freshness')}
+    >
+      <span className={`status-dot status-dot--${fresh}`} aria-hidden="true" />
+      {ago && <span className="status-ago">{ago}</span>}
+    </InfoPopover>
   );
 }
 
@@ -58,21 +83,19 @@ export default function CurrentConditions({ latest, manifest }: { latest: Series
 
   return (
     <section className={`banner banner--${fresh}`} aria-label={t('cc.title')}>
-      <div className="banner-status">
-        <span className={`status-dot status-dot--${fresh}`} aria-hidden="true" />
-        <span className="status-label">{t(`cc.${fresh}` as 'cc.fresh')}</span>
-        {stampMs != null && (
-          <span className="status-time">
-            {t('cc.updated')} {fmtClock(stampMs, locale, tz)} · {relativeAgo(stampMs, locale, now)}
-          </span>
-        )}
+      <div className="banner-head">
+        <span className="banner-eyebrow">{t('cc.title')}</span>
+        <StalenessBadge fresh={fresh} stampMs={stampMs} tz={tz} />
       </div>
 
       <div className="banner-grid">
         <div className="banner-dial">
           <CompassDial deg={dir?.value ?? null} hs={hs?.value ?? null} locale={locale} />
           <div className="dial-caption">
-            <span className="caption-label">{t('cc.waveHeight')}</span>
+            <span className="caption-label">
+              {t('cc.waveHeight')}
+              <InfoPopover title={t('cc.waveHeight')} body={t('def.waveHeight')} />
+            </span>
             {dir && (
               <span className="caption-dir">
                 {t('cc.from')} {compass(dir.value, locale)} · {Math.round(dir.value)}°
@@ -82,13 +105,16 @@ export default function CurrentConditions({ latest, manifest }: { latest: Series
         </div>
 
         <div className="banner-gauges">
-          <Gauge label={t('cc.period')} value={period ? fmtNumber(period.value, locale, 1) : '—'} unit="s" />
-          <Gauge label={t('cc.maxWave')} value={hmax ? fmtNumber(hmax.value, locale, 1) : '—'} unit="m" />
-          <Gauge label={t('cc.spread')} value={spread ? `±${Math.round(spread.value)}` : '—'} unit="°" />
+          <Gauge label={t('cc.period')} value={period ? fmtNumber(period.value, locale, 1) : '—'} unit="s" defKey="def.period" />
+          <Gauge label={t('cc.maxWave')} value={hmax ? fmtNumber(hmax.value, locale, 1) : '—'} unit="m" defKey="def.maxWave" />
+          <Gauge label={t('cc.spread')} value={spread ? `±${Math.round(spread.value)}` : '—'} unit="°" defKey="def.spread" />
         </div>
 
         <div className="banner-temp">
-          <span className="gauge-label">{t('cc.seaTemp')}</span>
+          <span className="gauge-label">
+            {t('cc.seaTemp')}
+            <InfoPopover title={t('cc.seaTemp')} body={t('def.seaTemp')} align="end" />
+          </span>
           <span className="temp-value">
             {temp ? fmtNumber(temp.value, locale, 1) : '—'}
             <span className="temp-unit">°C</span>

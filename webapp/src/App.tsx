@@ -18,6 +18,7 @@ const HISTORY_COLUMNS = [
   'max_wave_height_m',
   'peak_period_s',
   'peak_direction_deg',
+  'peak_directional_spread_deg',
   'sea_temperature_c',
 ];
 
@@ -96,7 +97,7 @@ export default function App() {
             <CurrentConditions latest={data.latest} manifest={data.manifest} />
 
             {history ? (
-              <TimeSeries data={history} />
+              <TimeSeries data={history} tz={data.manifest.timezone} />
             ) : historyError ? (
               <div className="state state--error">{t('state.chartsError')}</div>
             ) : (
