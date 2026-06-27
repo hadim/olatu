@@ -942,6 +942,20 @@ body {
   }
 }
 
+@media (max-width: 560px) {
+  .app-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.85rem;
+  }
+  .brand h1 {
+    font-size: 1.35rem;
+  }
+  .header-controls {
+    justify-content: flex-start;
+  }
+}
+
 /* ---- glossary (definitions slide-over) ---- */
 .glossary-trigger {
   display: inline-flex;

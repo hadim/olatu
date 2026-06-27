@@ -17,6 +17,7 @@ export default function HeatRibbon({ t, hs, min, max, onChange }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [drag, setDrag] = useState<{ a: number; b: number; moved: boolean } | null>(null);
+  const [width, setWidth] = useState(0);
 
   const T0 = t[0];
   const TN = t[t.length - 1];
@@ -30,6 +31,7 @@ export default function HeatRibbon({ t, hs, min, max, onChange }: Props) {
 
     const draw = () => {
       const w = wrap.clientWidth;
+      setWidth(w);
       const h = 48;
       const dpr = window.devicePixelRatio || 1;
       canvas.width = Math.round(w * dpr);
@@ -95,14 +97,16 @@ export default function HeatRibbon({ t, hs, min, max, onChange }: Props) {
   const leftPct = ((selMin - T0) / span) * 100;
   const rightPct = ((selMax - T0) / span) * 100;
 
-  // year ticks
+  // year ticks, thinned so labels never overlap on narrow screens
   const y0 = new Date(T0 * 1000).getUTCFullYear();
   const y1 = new Date(TN * 1000).getUTCFullYear();
-  const ticks: { year: number; pct: number }[] = [];
-  for (let y = y0 + 1; y <= y1; y++) {
-    const s = Date.UTC(y, 0, 1) / 1000;
-    ticks.push({ year: y, pct: ((s - T0) / span) * 100 });
-  }
+  const allYears: number[] = [];
+  for (let y = y0 + 1; y <= y1; y++) allYears.push(y);
+  const maxLabels = Math.max(2, Math.floor((width || 1000) / 46));
+  const step = Math.max(1, Math.ceil(allYears.length / maxLabels));
+  const ticks = allYears
+    .filter((_, i) => i % step === 0)
+    .map((year) => ({ year, pct: ((Date.UTC(year, 0, 1) / 1000 - T0) / span) * 100 }));
 
   return (
     <div className="ribbon-wrap">
