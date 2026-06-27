@@ -108,7 +108,11 @@ export default function App() {
             <CurrentConditions latest={data.latest} manifest={data.manifest} />
 
             {history ? (
-              <TimeSeries data={history} tz={data.manifest.timezone} />
+              <TimeSeries
+                data={history}
+                tz={data.manifest.timezone}
+                yearFiles={Object.fromEntries(data.manifest.years.map((y) => [y.year, y.file]))}
+              />
             ) : historyError ? (
               <div className="state state--error">{t('state.chartsError')}</div>
             ) : (

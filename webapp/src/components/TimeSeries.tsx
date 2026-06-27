@@ -14,7 +14,7 @@ import 'uplot/dist/uPlot.min.css';
 import { useTheme } from '../lib/theme';
 import { useI18n, type MessageKey } from '../lib/i18n';
 import { compass, fmtNumber, fmtDateTime, fmtAxisTick } from '../lib/format';
-import type { Columnar } from '../lib/parquet';
+import { loadParquetTier, type Columnar } from '../lib/parquet';
 import HeatRibbon from './HeatRibbon';
 
 const SYNC_KEY = 'olatu-ts';
@@ -113,7 +113,32 @@ const CARD_METRICS: { key: string; labelKey: MessageKey; unit?: string; digits?:
   { key: 'sea_temperature_c', labelKey: 'cc.seaTemp', unit: '°C', digits: 1 },
 ];
 
-export default function TimeSeries({ data, tz }: { data: Columnar; tz: string }) {
+const DETAIL_COLUMNS = [
+  'significant_wave_height_m',
+  'max_wave_height_m',
+  'peak_period_s',
+  'peak_direction_deg',
+  'peak_directional_spread_deg',
+  'sea_temperature_c',
+];
+// Below this window span, switch from daily means to the per-year 30-min files.
+// (Detail is most useful on short windows; 6M/1Y/5Y/All stay on the light daily tier.)
+const DETAIL_THRESHOLD = 120 * DAY;
+
+function mergeColumnar(parts: Columnar[]): Columnar {
+  const out: Columnar = { t: [] };
+  for (const c of DETAIL_COLUMNS) out[c] = [];
+  for (const p of parts) {
+    for (let i = 0; i < p.t.length; i++) out.t.push(p.t[i]);
+    for (const c of DETAIL_COLUMNS) {
+      const a = (p[c] as (number | null)[]) ?? [];
+      for (let i = 0; i < p.t.length; i++) out[c].push(a[i] ?? null);
+    }
+  }
+  return out;
+}
+
+export default function TimeSeries({ data, tz, yearFiles }: { data: Columnar; tz: string; yearFiles: Record<number, string> }) {
   const { theme } = useTheme();
   const { locale, t } = useI18n();
   const hostRef = useRef<HTMLDivElement>(null);
@@ -131,6 +156,8 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
   const [mode, setMode] = useState<string>('p:1Y');
   const [navYear, setNavYear] = useState<number | null>(null);
   const [showJump, setShowJump] = useState(false);
+  const [detail, setDetail] = useState<Columnar | null>(null);
+  const detailCache = useRef<Map<number, Columnar>>(new Map());
 
   const years = useMemo(() => {
     const a: number[] = [];
@@ -164,9 +191,50 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
     [locale],
   );
 
+  // Tiered detail: for narrow windows, load the per-year 30-min files and plot those
+  // instead of the daily means (real cadence + real timestamps). Wide windows stay on
+  // the daily tier. Loaded years are cached in memory.
+  useEffect(() => {
+    if (range.max - range.min > DETAIL_THRESHOLD) {
+      setDetail(null);
+      return;
+    }
+    const needed: number[] = [];
+    for (let y = new Date(range.min * 1000).getUTCFullYear(); y <= new Date(range.max * 1000).getUTCFullYear(); y++) {
+      if (yearFiles[y]) needed.push(y);
+    }
+    if (needed.length === 0) {
+      setDetail(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const parts: Columnar[] = [];
+        for (const y of needed) {
+          let c = detailCache.current.get(y);
+          if (!c) {
+            c = await loadParquetTier(yearFiles[y], DETAIL_COLUMNS);
+            detailCache.current.set(y, c);
+          }
+          parts.push(c);
+        }
+        if (!cancelled) setDetail(mergeColumnar(parts));
+      } catch (e) {
+        console.error('Failed to load detail tier:', e);
+        if (!cancelled) setDetail(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [range.min, range.max, yearFiles]);
+
   useEffect(() => {
     const host = hostRef.current;
-    if (!host || xs.length === 0) return;
+    const src = detail ?? data;
+    const sxs = src.t;
+    if (!host || sxs.length === 0) return;
     host.innerHTML = '';
 
     const xmin = range.min;
@@ -178,24 +246,24 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
     // AND the hover card read from — uPlot's cursor idx indexes into these.
     const cadence = (() => {
       let c = Infinity;
-      for (let i = 1; i < xs.length; i++) {
-        const d = xs[i] - xs[i - 1];
+      for (let i = 1; i < sxs.length; i++) {
+        const d = sxs[i] - sxs[i - 1];
         if (d > 0 && d < c) c = d;
       }
       return Number.isFinite(c) ? c : DAY;
     })();
     const gapThreshold = 4 * cadence;
-    const KEYS = Object.keys(data).filter((k) => k !== 't');
+    const KEYS = Object.keys(src).filter((k) => k !== 't');
     const gxs: number[] = [];
     const gcols: Record<string, (number | null)[]> = {};
     for (const k of KEYS) gcols[k] = [];
-    for (let i = 0; i < xs.length; i++) {
-      if (i > 0 && xs[i] - xs[i - 1] > gapThreshold) {
-        gxs.push(xs[i - 1] + cadence);
+    for (let i = 0; i < sxs.length; i++) {
+      if (i > 0 && sxs[i] - sxs[i - 1] > gapThreshold) {
+        gxs.push(sxs[i - 1] + cadence);
         for (const k of KEYS) gcols[k].push(null);
       }
-      gxs.push(xs[i]);
-      for (const k of KEYS) gcols[k].push((data[k] as (number | null)[])[i]);
+      gxs.push(sxs[i]);
+      for (const k of KEYS) gcols[k].push((src[k] as (number | null)[])[i]);
     }
 
     const axisColor = cssVar('--text-3');
@@ -241,10 +309,10 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
       host.appendChild(wrap);
 
       const inWindow = (key: string) => {
-        const col = data[key] as (number | null)[];
+        const col = src[key] as (number | null)[];
         let n = 0;
-        for (let i = 0; i < xs.length; i++) {
-          if (xs[i] >= xmin && xs[i] <= xmax && col[i] != null) n += 1;
+        for (let i = 0; i < sxs.length; i++) {
+          if (sxs[i] >= xmin && sxs[i] <= xmax && col[i] != null) n += 1;
           if (n >= 2) return true;
         }
         return false;
@@ -356,7 +424,7 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
       for (const p of plots) p.destroy();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, theme, locale, range.min, range.max, smooth, tz, t]);
+  }, [data, detail, theme, locale, range.min, range.max, smooth, tz, t]);
 
   return (
     <section className="charts-section">
