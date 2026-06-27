@@ -418,15 +418,93 @@ body {
   height: 96px;
 }
 
+/* ---- station location (mini-map + facts) ---- */
+.station-location {
+  display: grid;
+  grid-template-columns: minmax(240px, 360px) 1fr;
+  gap: 1.25rem;
+  margin-top: 1.5rem;
+  align-items: stretch;
+}
+
+.minimap {
+  position: relative;
+  display: block;
+  border: 1px solid var(--hairline);
+  border-radius: 1rem;
+  overflow: hidden;
+  aspect-ratio: 16 / 10;
+  background: var(--surface-2);
+  text-decoration: none;
+}
+
+.minimap-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.minimap-marker {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 28%, transparent), 0 0 12px var(--accent);
+}
+
+.minimap-marker::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1px solid var(--accent);
+  animation: marker-pulse 2.6s ease-out infinite;
+}
+
+@keyframes marker-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .minimap-marker::after {
+    animation: none;
+  }
+}
+
+.minimap-attrib {
+  position: absolute;
+  right: 6px;
+  bottom: 5px;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--text-2);
+  background: color-mix(in oklab, var(--surface) 72%, transparent);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
 /* ---- station facts ---- */
 .station-facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 1rem;
-  margin: 1.5rem 0 0;
+  margin: 0;
   padding: 1.1rem 1.3rem;
   border: 1px solid var(--hairline);
   border-radius: 1rem;
+  align-content: center;
 }
 
 .station-facts div {
@@ -625,6 +703,9 @@ body {
   }
   .gauge {
     align-items: center;
+  }
+  .station-location {
+    grid-template-columns: 1fr;
   }
 }
 

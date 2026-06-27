@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import Header from './components/Header';
 import CurrentConditions from './components/CurrentConditions';
 import TimeSeries from './components/TimeSeries';
+import MiniMap from './components/MiniMap';
 import Footer from './components/Footer';
 import { useI18n } from './lib/i18n';
 import { loadManifest, loadLatest, loadRecent, type Manifest, type Series } from './lib/data';
@@ -21,6 +22,16 @@ const HISTORY_COLUMNS = [
   'peak_directional_spread_deg',
   'sea_temperature_c',
 ];
+
+function StationLocation({ manifest }: { manifest: Manifest }) {
+  const b = manifest.buoy;
+  return (
+    <section className="station-location">
+      <MiniMap lat={b.lat} lon={b.lon} label={b.name} />
+      <StationFacts manifest={manifest} />
+    </section>
+  );
+}
 
 function StationFacts({ manifest }: { manifest: Manifest }) {
   const { t } = useI18n();
@@ -104,7 +115,7 @@ export default function App() {
               <div className="state">{t('state.loading')}</div>
             )}
 
-            <StationFacts manifest={data.manifest} />
+            <StationLocation manifest={data.manifest} />
           </>
         )}
       </main>
