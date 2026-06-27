@@ -920,6 +920,19 @@ body {
   color: var(--text-2);
 }
 
+.hover-tz {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-3);
+  white-space: nowrap;
+  cursor: help;
+}
+
+.hover-tz::before {
+  content: '◷ ';
+}
+
 @media (max-width: 720px) {
   .hover-time {
     min-width: 0;

@@ -387,6 +387,9 @@ export default function TimeSeries({ data, tz, yearFiles }: { data: Columnar; tz
           x: { time: true, min: xmin, max: xmax },
           y: panel.range ? { range: () => panel.range! } : {},
         },
+        // Place ticks on the buoy's timezone boundaries for every visitor (not the
+        // browser's), so axis labels stay round regardless of where you open the app.
+        tzDate: (ts: number) => uPlot.tzDate(new Date(ts * 1000), tz),
         axes: [xAxis, yAxis],
         series,
         bands,
@@ -524,6 +527,7 @@ export default function TimeSeries({ data, tz, yearFiles }: { data: Columnar; tz
       <div className="hover-card" ref={cardRef} aria-live="off">
         <span className="hover-time" />
         <div className="hover-stats" />
+        <span className="hover-tz" title={t('time.buoyLocal')}>{tz}</span>
       </div>
       <div ref={hostRef} className="charts" />
     </section>

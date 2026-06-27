@@ -9,6 +9,28 @@ Format per entry: **date — title** · what we found · why it matters · resol
 
 ---
 
+## 2026-06-27 — uPlot places ticks in the *browser's* timezone unless you set `tzDate`
+
+**Finding.** Our axis tick labels are formatted via `Intl.DateTimeFormat({timeZone:
+'Europe/Paris'})`, but uPlot chooses *where* to put ticks (the split instants) using
+the **browser's** local timezone by default. For a viewer already in Paris (or in our
+test env) the two agree and labels look round (`00:00`, `06:00`). For a viewer in
+another zone, ticks land on *their* local midnights but get *labelled* in Paris time →
+non-round labels (`01:30`, `07:30`).
+
+**Why it matters.** Times across the app are deliberately shown in the buoy's local
+zone (Europe/Paris), not the visitor's. The axis is the one place where uPlot's own
+split logic could leak the visitor's zone and desync from our labels.
+
+**Resolution.** Set `opts.tzDate = (ts) => uPlot.tzDate(new Date(ts * 1000), tz)` so
+uPlot computes splits in Europe/Paris for everyone. Also added a small `◷ Europe/Paris`
+label on the hover card so the display zone is explicit. (Decision confirmed with the
+owner: keep buoy-local time, not the visitor's.)
+
+**Refs.** `webapp/src/components/TimeSeries.tsx` (uPlot opts `tzDate`).
+
+---
+
 ## 2026-06-27 — Realtime CSV `Date` column is UTC (verified empirically)
 
 **Finding.** The CANDHIS realtime export (`Candhis_06403_YYYY-MM-DD_reel.csv`) has a
