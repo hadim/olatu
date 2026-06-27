@@ -9,15 +9,20 @@ its whole history since 2013.
 No backend, no account, no API key. Data is read straight from Parquet committed in
 this repo and rendered in your browser. Deployed on GitHub Pages.
 
-- **Live:** https://hadim.github.io/wave-buoys-viewer/
+![Olatu — live & historical sea state for the Saint-Jean-de-Luz wave buoy](docs/screenshot.png)
+
+- **Live:** https://hadim.github.io/olatu/
 - **Data source:** [CANDHIS](https://candhis.cerema.fr) — the French national
   in-situ wave-measurement network, operated by [Cerema](https://www.cerema.fr).
   Buoy **06403, Saint-Jean-de-Luz** (43.408° N, 1.682° W), ~3 km off the Belharra
   reef, one measurement every 30 minutes.
 
-> 🚧 **Status: active rebuild.** The project is being rebuilt from scratch for a
-> much nicer UX and pixel-perfect data-viz. The data pipeline is done; the new
-> frontend is in progress. See [`specs/`](specs/) for the plan.
+> 🚧 **Status: active development.** Rebuilt from scratch for a much nicer UX and
+> pixel-perfect data-viz. The data pipeline is done and the new frontend is live:
+> current-conditions banner, synced uPlot charts with a heat-ribbon timeline,
+> a mini-map, a definitions glossary, dark/light themes and EN/FR/ES. Still on the
+> roadmap: 30-min detail, the lazy MapLibre expanded map, and the Paraglide i18n
+> migration. See [`specs/`](specs/) for the plan and decisions.
 
 ## What it does
 
@@ -77,7 +82,7 @@ pixi run webapp-build    # static build for GitHub Pages
 ## Contributing & bug reports
 
 Contributions, ideas and bug reports are very welcome — please
-[open an issue](https://github.com/hadim/wave-buoys-viewer/issues) or a pull
+[open an issue](https://github.com/hadim/olatu/issues) or a pull
 request.
 
 ## License & attribution
