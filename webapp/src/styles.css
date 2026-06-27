@@ -119,3 +119,40 @@ select {
 .error {
   color: #dc2626;
 }
+
+.site-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 2.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid #e2e8f0;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.site-footer a {
+  color: #475569;
+  text-decoration: none;
+}
+
+.site-footer a:hover {
+  color: #0f172a;
+  text-decoration: underline;
+}
+
+.site-footer .gh-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+}
+
+.site-footer .footer-sep {
+  color: #cbd5e1;
+}
+
+.site-footer .footer-attribution a {
+  color: #64748b;
+}
