@@ -1,6 +1,7 @@
 import { useI18n, LOCALES, LOCALE_LABELS, type Locale } from '../lib/i18n';
 import { useTheme } from '../lib/theme';
 import type { Buoy } from '../lib/data';
+import Glossary from './Glossary';
 
 function SunIcon() {
   return (
@@ -36,6 +37,7 @@ export default function Header({ buoy }: { buoy: Buoy | null }) {
       </div>
 
       <div className="header-controls">
+        <Glossary />
         <label className="lang-select">
           <span className="sr-only">{t('nav.language')}</span>
           <select
