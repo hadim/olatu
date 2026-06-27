@@ -5,28 +5,41 @@
 // Spec 0003 batch 1: year-aware x-axis ticks, clipped points, always-present temp panel
 // with an empty-state overlay, a discreet hover value card, a visible zoom selection,
 // a translucent ± spread band on the direction track, and a Raw/Light/Strong smoother.
+// Batch 2: a unified time navigator — presets + per-year/month jumps + a custom date
+// range + a heat-ribbon overview.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
 import { useTheme } from '../lib/theme';
 import { useI18n, type MessageKey } from '../lib/i18n';
 import { compass, fmtNumber, fmtDateTime, fmtAxisTick } from '../lib/format';
 import type { Columnar } from '../lib/parquet';
+import HeatRibbon from './HeatRibbon';
 
 const SYNC_KEY = 'olatu-ts';
 const DAY = 86_400;
 
 const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
+const yStart = (y: number) => Date.UTC(y, 0, 1) / 1000;
+const yEnd = (y: number) => Date.UTC(y + 1, 0, 1) / 1000 - 1;
+const mStart = (y: number, m: number) => Date.UTC(y, m, 1) / 1000;
+const mEnd = (y: number, m: number) => Date.UTC(y, m + 1, 1) / 1000 - 1;
+const toInput = (sec: number) => new Date(sec * 1000).toISOString().slice(0, 10);
+const fromInput = (val: string, end: boolean) => {
+  const [Y, M, D] = val.split('-').map(Number);
+  return Date.UTC(Y, M - 1, D) / 1000 + (end ? DAY - 1 : 0);
+};
+
 interface PanelDef {
   titleKey: MessageKey;
   series: { key: string; colorVar: string; width?: number; fill?: boolean }[];
-  points?: boolean; // render markers instead of a connected line (direction)
+  points?: boolean;
   range?: [number, number];
   ySplits?: number[];
-  spreadKey?: string; // draw a translucent ± band around the first series (direction)
-  emptyKey?: MessageKey; // overlay message when the window has no data (sea temp)
+  spreadKey?: string;
+  emptyKey?: MessageKey;
 }
 
 const PANELS: PanelDef[] = [
@@ -87,7 +100,6 @@ function movingAvg(arr: (number | null)[], radius: number): (number | null)[] {
   return out;
 }
 
-// Compact metrics shown in the hover card (always the RAW value — "exact data").
 const CARD_METRICS: { key: string; labelKey: MessageKey; unit?: string; digits?: number; dir?: boolean; pm?: boolean }[] = [
   { key: 'significant_wave_height_m', labelKey: 'cc.waveHeight', unit: 'm', digits: 1 },
   { key: 'max_wave_height_m', labelKey: 'cc.maxWave', unit: 'm', digits: 1 },
@@ -102,23 +114,58 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
   const { locale, t } = useI18n();
   const hostRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
-  const [preset, setPreset] = useState<string>('1Y');
   const [smooth, setSmooth] = useState<Smooth>('raw');
+
+  const xs = data.t;
+  const T0 = xs.length ? xs[0] : 0;
+  const TN = xs.length ? xs[xs.length - 1] : 0;
+
+  const [range, setRange] = useState<{ min: number; max: number }>(() => ({
+    min: Math.max(T0, TN - 365 * DAY),
+    max: TN,
+  }));
+  const [mode, setMode] = useState<string>('p:1Y');
+  const [navYear, setNavYear] = useState<number | null>(null);
+
+  const years = useMemo(() => {
+    const a: number[] = [];
+    for (let y = new Date(T0 * 1000).getUTCFullYear(); y <= new Date(TN * 1000).getUTCFullYear(); y++) a.push(y);
+    return a;
+  }, [T0, TN]);
+
+  const monthsWithData = useMemo(() => {
+    if (navYear == null) return new Set<number>();
+    const s = new Set<number>();
+    const hsCol = data.significant_wave_height_m as (number | null)[];
+    for (let i = 0; i < xs.length; i++) {
+      const d = new Date(xs[i] * 1000);
+      if (d.getUTCFullYear() === navYear && hsCol[i] != null) s.add(d.getUTCMonth());
+    }
+    return s;
+  }, [navYear, xs, data]);
+
+  const apply = (min: number, max: number, m: string) => {
+    setRange({ min: Math.max(T0, Math.min(min, TN - DAY)), max: Math.min(TN, Math.max(max, T0 + DAY)) });
+    setMode(m);
+  };
 
   const dirLocale = (deg: number) => {
     const tok = ['N', 'E', 'S', 'W'][Math.round(deg / 90) % 4];
     return locale === 'en' ? tok : tok === 'W' ? 'O' : tok;
   };
 
+  const monthLabels = useMemo(
+    () => Array.from({ length: 12 }, (_, m) => new Intl.DateTimeFormat(locale, { month: 'short', timeZone: 'UTC' }).format(new Date(Date.UTC(2001, m, 1)))),
+    [locale],
+  );
+
   useEffect(() => {
     const host = hostRef.current;
-    if (!host || data.t.length === 0) return;
+    if (!host || xs.length === 0) return;
     host.innerHTML = '';
 
-    const xs = data.t;
-    const xmax = xs[xs.length - 1];
-    const preDays = PRESETS.find((p) => p.key === preset)?.days ?? null;
-    const xmin = preDays == null ? xs[0] : xmax - preDays * DAY;
+    const xmin = range.min;
+    const xmax = range.max;
     const radius = SMOOTH_RADIUS[smooth];
 
     const axisColor = cssVar('--text-3');
@@ -126,7 +173,6 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
     const plots: uPlot[] = [];
     let syncing = false;
 
-    // ---- hover value card -------------------------------------------------
     const timeEl = cardRef.current?.querySelector<HTMLElement>('.hover-time') ?? null;
     const statsEl = cardRef.current?.querySelector<HTMLElement>('.hover-stats') ?? null;
     const resetCard = () => {
@@ -164,7 +210,6 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
       host.appendChild(heading);
       host.appendChild(wrap);
 
-      // does this window actually contain data? (drives the temp empty-state)
       const inWindow = (key: string) => {
         const col = data[key] as (number | null)[];
         let n = 0;
@@ -176,7 +221,6 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
       };
       const hasData = panel.series.some((s) => inWindow(s.key));
 
-      // smoothing applies to value lines only; direction (circular) stays raw
       const plotted = (key: string) =>
         panel.points ? (data[key] as (number | null)[]) : movingAvg(data[key] as (number | null)[], radius);
 
@@ -185,7 +229,6 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
       let bands: uPlot.Band[] | undefined;
 
       if (panel.spreadKey) {
-        // direction panel: [hi, lo, dir] so the dir markers draw on top of the band
         const dir = data[panel.series[0].key] as (number | null)[];
         const sp = data[panel.spreadKey] as (number | null)[];
         const hi = dir.map((d, i) => (d == null || sp[i] == null ? null : Math.min(360, d + (sp[i] as number))));
@@ -263,7 +306,6 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
 
       plots.push(new uPlot(opts, chartData, wrap));
 
-      // empty-state overlay (sea temperature, mostly) — keep the x-axis visible
       if (panel.emptyKey && !hasData) {
         const overlay = document.createElement('div');
         overlay.className = 'chart-empty';
@@ -283,37 +325,90 @@ export default function TimeSeries({ data, tz }: { data: Columnar; tz: string })
       ro.disconnect();
       for (const p of plots) p.destroy();
     };
-  }, [data, theme, locale, preset, smooth, tz, t]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, theme, locale, range.min, range.max, smooth, tz, t]);
 
   return (
     <section className="charts-section">
       <div className="charts-toolbar">
         <div className="chip-group" role="group" aria-label={t('chart.range')}>
-          {PRESETS.map((p) => (
-            <button
-              key={p.key}
-              type="button"
-              className={`chip ${preset === p.key ? 'chip--active' : ''}`}
-              onClick={() => setPreset(p.key)}
-            >
-              {p.key}
-            </button>
-          ))}
+          {PRESETS.map((p) => {
+            const key = `p:${p.key}`;
+            return (
+              <button
+                key={p.key}
+                type="button"
+                className={`chip ${mode === key ? 'chip--active' : ''}`}
+                onClick={() => {
+                  setNavYear(null);
+                  apply(p.days == null ? T0 : TN - p.days * DAY, TN, key);
+                }}
+              >
+                {p.key}
+              </button>
+            );
+          })}
         </div>
         <div className="chip-group smoother" role="group" aria-label={t('chart.smoothing')}>
           <span className="smoother-label">{t('chart.smoothing')}</span>
           {(['raw', 'light', 'strong'] as Smooth[]).map((s) => (
-            <button
-              key={s}
-              type="button"
-              className={`chip ${smooth === s ? 'chip--active' : ''}`}
-              onClick={() => setSmooth(s)}
-            >
+            <button key={s} type="button" className={`chip ${smooth === s ? 'chip--active' : ''}`} onClick={() => setSmooth(s)}>
               {t(`chart.smooth.${s}` as MessageKey)}
             </button>
           ))}
         </div>
       </div>
+
+      <div className="time-nav">
+        <div className="chip-row" role="group" aria-label="Year">
+          {years.map((y) => (
+            <button
+              key={y}
+              type="button"
+              className={`chip ${navYear === y || mode === `y:${y}` ? 'chip--active' : ''}`}
+              onClick={() => {
+                setNavYear(y);
+                apply(yStart(y), yEnd(y), `y:${y}`);
+              }}
+            >
+              {y}
+            </button>
+          ))}
+        </div>
+        <label className="custom-range">
+          <input type="date" value={toInput(range.min)} min={toInput(T0)} max={toInput(range.max)} onChange={(e) => e.target.value && apply(fromInput(e.target.value, false), range.max, 'custom')} />
+          <span className="range-sep">–</span>
+          <input type="date" value={toInput(range.max)} min={toInput(range.min)} max={toInput(TN)} onChange={(e) => e.target.value && apply(range.min, fromInput(e.target.value, true), 'custom')} />
+        </label>
+      </div>
+
+      {navYear != null && (
+        <div className="chip-row months" role="group" aria-label={`${navYear}`}>
+          {monthLabels.map((label, m) => (
+            <button
+              key={m}
+              type="button"
+              disabled={!monthsWithData.has(m)}
+              className={`chip ${mode === `m:${navYear}-${m}` ? 'chip--active' : ''}`}
+              onClick={() => apply(mStart(navYear, m), mEnd(navYear, m), `m:${navYear}-${m}`)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <HeatRibbon
+        t={xs}
+        hs={data.significant_wave_height_m as (number | null)[]}
+        min={range.min}
+        max={range.max}
+        onChange={(min, max) => {
+          setNavYear(null);
+          apply(min, max, 'ribbon');
+        }}
+      />
+
       <div className="hover-card" ref={cardRef} aria-live="off">
         <span className="hover-time" />
         <div className="hover-stats" />

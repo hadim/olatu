@@ -54,6 +54,17 @@ export function fmtAxisTick(ms: number, locale: Locale, timeZone: string, incrSe
   return new Intl.DateTimeFormat(locale, opts).format(new Date(ms));
 }
 
+/** Wave-height → sea-state colour (mirrors specs/0002 §6 and the chart legend). */
+export function hsColor(v: number): string {
+  if (v < 0.5) return '#BFE9E0';
+  if (v < 1) return '#6FD3C4';
+  if (v < 1.5) return '#38B8C9';
+  if (v < 2.5) return '#2E8FC4';
+  if (v < 4) return '#3D5FBE';
+  if (v < 6) return '#7A4FC0';
+  return '#B83D8E';
+}
+
 export type Freshness = 'fresh' | 'aging' | 'stale';
 
 export function freshness(ageMs: number): Freshness {

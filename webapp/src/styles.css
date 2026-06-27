@@ -1052,3 +1052,117 @@ body {
   font-size: 0.8rem;
   color: var(--text-3);
 }
+
+/* ---- time navigator ---- */
+.time-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem 1rem;
+  margin-bottom: 0.7rem;
+}
+
+.chip-row {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.chip-row.months {
+  margin-bottom: 0.8rem;
+}
+
+.chip-row .chip {
+  flex: none;
+}
+
+.chip[disabled] {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.chip[disabled]:hover {
+  border-color: var(--hairline);
+  color: var(--text-3);
+}
+
+.custom-range {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.custom-range input[type='date'] {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 0.45rem;
+  padding: 0.3rem 0.5rem;
+}
+
+.custom-range input[type='date']:hover {
+  border-color: var(--accent);
+}
+
+.range-sep {
+  color: var(--text-3);
+}
+
+/* ---- heat ribbon ---- */
+.ribbon-wrap {
+  margin-bottom: 0.9rem;
+}
+
+.ribbon {
+  position: relative;
+  height: 48px;
+  border: 1px solid var(--hairline);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background: var(--surface-2);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.ribbon-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.ribbon-mask {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: color-mix(in oklab, var(--bg) 60%, transparent);
+  pointer-events: none;
+}
+
+.ribbon-window {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 2px solid var(--accent);
+  border-right: 2px solid var(--accent);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+  pointer-events: none;
+}
+
+.ribbon-ticks {
+  position: relative;
+  height: 1rem;
+  margin-top: 2px;
+}
+
+.ribbon-tick {
+  position: absolute;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  color: var(--text-3);
+}
