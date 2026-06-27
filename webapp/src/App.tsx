@@ -50,6 +50,7 @@ export default function App() {
   const { t } = useI18n();
   const [data, setData] = useState<Loaded | null>(null);
   const [history, setHistory] = useState<Columnar | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -72,8 +73,10 @@ export default function App() {
       .then((d) => {
         if (!cancelled) setHistory(d);
       })
-      .catch(() => {
-        /* charts are best-effort; the banner still works without history */
+      .catch((e) => {
+        // charts are best-effort; the banner still works without history
+        console.error('Failed to load history (daily.parquet):', e);
+        if (!cancelled) setHistoryError(e instanceof Error ? e.message : String(e));
       });
     return () => {
       cancelled = true;
@@ -94,6 +97,8 @@ export default function App() {
 
             {history ? (
               <TimeSeries data={history} />
+            ) : historyError ? (
+              <div className="state state--error">{t('state.chartsError')}</div>
             ) : (
               <div className="state">{t('state.loading')}</div>
             )}
