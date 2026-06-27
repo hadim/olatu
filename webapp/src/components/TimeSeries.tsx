@@ -125,9 +125,11 @@ const DETAIL_COLUMNS = [
   'peak_directional_spread_deg',
   'sea_temperature_c',
 ];
-// Below this window span, switch from daily means to the per-year 30-min files.
-// (Detail is most useful on short windows; 6M/1Y/5Y/All stay on the light daily tier.)
-const DETAIL_THRESHOLD = 120 * DAY;
+// Tiered resolution by window span: ≤120 d → per-year 30-min files; ≤~2 yr → hourly
+// means (one cached file); wider → daily means. Finer detail where it reads, lighter
+// loads where it doesn't.
+const DETAIL_30MIN = 120 * DAY;
+const DETAIL_HOURLY = 800 * DAY;
 
 function mergeColumnar(parts: Columnar[]): Columnar {
   const out: Columnar = { t: [] };
@@ -162,6 +164,7 @@ export default function TimeSeries({ data, tz, yearFiles }: { data: Columnar; tz
   const [showJump, setShowJump] = useState(false);
   const [detail, setDetail] = useState<Columnar | null>(null);
   const detailCache = useRef<Map<number, Columnar>>(new Map());
+  const hourlyCache = useRef<Columnar | null>(null);
 
   const years = useMemo(() => {
     const a: number[] = [];
@@ -195,35 +198,39 @@ export default function TimeSeries({ data, tz, yearFiles }: { data: Columnar; tz
     [locale],
   );
 
-  // Tiered detail: for narrow windows, load the per-year 30-min files and plot those
-  // instead of the daily means (real cadence + real timestamps). Wide windows stay on
-  // the daily tier. Loaded years are cached in memory.
+  // Tiered detail: narrow windows plot the per-year 30-min files; mid windows plot
+  // hourly means (one cached file); wide windows fall back to the daily means passed
+  // in. Loaded tiers are cached in memory.
   useEffect(() => {
-    if (range.max - range.min > DETAIL_THRESHOLD) {
-      setDetail(null);
-      return;
-    }
-    const needed: number[] = [];
-    for (let y = new Date(range.min * 1000).getUTCFullYear(); y <= new Date(range.max * 1000).getUTCFullYear(); y++) {
-      if (yearFiles[y]) needed.push(y);
-    }
-    if (needed.length === 0) {
-      setDetail(null);
-      return;
-    }
+    const span = range.max - range.min;
     let cancelled = false;
     (async () => {
       try {
-        const parts: Columnar[] = [];
-        for (const y of needed) {
-          let c = detailCache.current.get(y);
-          if (!c) {
-            c = await loadParquetTier(yearFiles[y], DETAIL_COLUMNS);
-            detailCache.current.set(y, c);
+        if (span <= DETAIL_30MIN) {
+          const needed: number[] = [];
+          for (let y = new Date(range.min * 1000).getUTCFullYear(); y <= new Date(range.max * 1000).getUTCFullYear(); y++) {
+            if (yearFiles[y]) needed.push(y);
           }
-          parts.push(c);
+          if (needed.length === 0) {
+            if (!cancelled) setDetail(null);
+            return;
+          }
+          const parts: Columnar[] = [];
+          for (const y of needed) {
+            let c = detailCache.current.get(y);
+            if (!c) {
+              c = await loadParquetTier(yearFiles[y], DETAIL_COLUMNS);
+              detailCache.current.set(y, c);
+            }
+            parts.push(c);
+          }
+          if (!cancelled) setDetail(mergeColumnar(parts));
+        } else if (span <= DETAIL_HOURLY) {
+          if (!hourlyCache.current) hourlyCache.current = await loadParquetTier('hourly.parquet', DETAIL_COLUMNS);
+          if (!cancelled) setDetail(hourlyCache.current);
+        } else {
+          if (!cancelled) setDetail(null);
         }
-        if (!cancelled) setDetail(mergeColumnar(parts));
       } catch (e) {
         console.error('Failed to load detail tier:', e);
         if (!cancelled) setDetail(null);
