@@ -61,8 +61,15 @@ pixi run webapp-build                # static build for GitHub Pages
 
 ## Current state (2026-06-27)
 
-Phase 1 in progress: specs written; repo cleaned (old synthetic data / notebooks /
-Python package removed); `pixi.toml` + polars ingest done and **validated on real
-data** (214,908 rows, 2013→2026). Next per roadmap: webapp TS migration, then uPlot
-charts replacing Plotly. Data is currently committed to `main` (acknowledged debt;
-migration path in foundation spec §5.3).
+- Specs written; repo cleaned; `pixi.toml` + polars ingest done and **validated on
+  real data** (214,908 rows, 2013→2026). Data committed to `main` (acknowledged
+  debt; migration path in foundation spec §5.3).
+- **Webapp rebuilt to TypeScript** (Plotly removed, ~205 KB bundle). Working shell:
+  data loader for the JSON tiers, current-conditions banner (compass dial, gauges,
+  sea temp, staleness), 30-day sparkline, station facts, footer. **Theme** toggle
+  (dark default + light, CSS-var tokens) and **i18n** (en/fr/es, browser
+  auto-detect, persisted) — both hand-rolled for now (Tailwind/shadcn + Paraglide
+  come later per spec).
+
+Next per roadmap: uPlot synced time-series charts + direction layer, history
+navigation (presets + date picker + heat-ribbon), the map, and the full glossary.
