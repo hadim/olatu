@@ -224,8 +224,8 @@ body {
 
 .banner-grid {
   display: grid;
-  grid-template-columns: minmax(200px, 1fr) 1.1fr auto;
-  gap: 1.5rem;
+  grid-template-columns: minmax(170px, 0.85fr) 1.5fr;
+  gap: 1.75rem 2rem;
   align-items: center;
 }
 
@@ -260,34 +260,40 @@ body {
   fill: var(--accent);
 }
 
+.dial-cone {
+  fill: color-mix(in oklab, var(--accent) 20%, transparent);
+}
+
 .dial-center {
   position: absolute;
   inset: 0;
-  display: grid;
-  grid-auto-flow: column;
-  place-content: center;
-  align-items: baseline;
-  gap: 0.15rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.05rem;
 }
 
-.dial-value {
+.dial-dir {
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: clamp(2rem, 5.5vw, 2.8rem);
-  font-feature-settings: 'tnum' 1;
-  letter-spacing: -0.02em;
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  letter-spacing: -0.01em;
   line-height: 1;
+  color: var(--text);
 }
 
-.dial-unit {
+.dial-deg {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
   color: var(--text-2);
-  font-size: 1rem;
 }
 
 .dial-caption {
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 0.1rem;
   text-align: center;
 }
 
@@ -304,10 +310,61 @@ body {
   color: var(--accent);
 }
 
+.caption-spread {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-3);
+}
+
+/* right-hand readouts: wave height is the hero */
+.banner-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+.metric-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.metric-label {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+
+.metric-value {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(2.7rem, 6vw, 3.5rem);
+  font-feature-settings: 'tnum' 1;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.metric-unit {
+  margin-left: 0.15rem;
+  font-size: 1.15rem;
+  color: var(--text-2);
+}
+
 /* gauges */
 .banner-gauges {
   display: grid;
-  gap: 0.9rem;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem 1.5rem;
+}
+
+.gauge--warm .gauge-value {
+  color: var(--warm);
 }
 
 .gauge {
@@ -332,27 +389,9 @@ body {
   font-feature-settings: 'tnum' 1;
 }
 
-.gauge-unit,
-.dial-unit,
-.temp-unit {
+.gauge-unit {
   color: var(--text-2);
   font-size: 0.9rem;
-}
-
-.banner-temp {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  align-items: flex-end;
-  text-align: right;
-}
-
-.temp-value {
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 2.4rem;
-  color: var(--warm);
-  font-feature-settings: 'tnum' 1;
 }
 
 /* ---- panel / sparkline ---- */
@@ -570,20 +609,22 @@ body {
 @media (max-width: 720px) {
   .banner-grid {
     grid-template-columns: 1fr;
-    gap: 1.25rem;
+    gap: 1.5rem;
     justify-items: center;
   }
+  .banner-metrics {
+    width: 100%;
+    align-items: center;
+  }
+  .metric-hero {
+    align-items: center;
+  }
   .banner-gauges {
-    grid-template-columns: repeat(3, 1fr);
     width: 100%;
     text-align: center;
   }
   .gauge {
     align-items: center;
-  }
-  .banner-temp {
-    align-items: center;
-    text-align: center;
   }
 }
 

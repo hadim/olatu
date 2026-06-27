@@ -3,7 +3,22 @@ import { lastValue, latestTimestamp, type Manifest, type Series } from '../lib/d
 import { compass, fmtNumber, fmtClock, freshness, relativeAgo, type Freshness } from '../lib/format';
 import InfoPopover from './InfoPopover';
 
-function CompassDial({ deg, hs, locale }: { deg: number | null; hs: number | null; locale: string }) {
+// Sector ("cone") path centred on "up" in the dial's local frame, half-angle = spread.
+// The whole group is rotated to the swell's from-direction, so the cone shows how
+// focused vs spread-out (messy) the swell is.
+function conePath(cx: number, cy: number, r: number, halfDeg: number): string {
+  const half = Math.min(Math.max(halfDeg, 2), 88);
+  const a1 = ((-90 - half) * Math.PI) / 180;
+  const a2 = ((-90 + half) * Math.PI) / 180;
+  const x1 = (cx + r * Math.cos(a1)).toFixed(2);
+  const y1 = (cy + r * Math.sin(a1)).toFixed(2);
+  const x2 = (cx + r * Math.cos(a2)).toFixed(2);
+  const y2 = (cy + r * Math.sin(a2)).toFixed(2);
+  return `M${cx} ${cy} L${x1} ${y1} A${r} ${r} 0 0 1 ${x2} ${y2} Z`;
+}
+
+function CompassDial({ deg, spread, locale }: { deg: number | null; spread: number | null; locale: string }) {
+  const dirText = deg != null ? compass(deg, locale as never) : '—';
   return (
     <div className="dial" role="img" aria-label={deg != null ? `from ${compass(deg, locale as never)}` : 'no direction'}>
       <svg viewBox="0 0 120 120" width="100%" height="100%">
@@ -18,22 +33,23 @@ function CompassDial({ deg, hs, locale }: { deg: number | null; hs: number | nul
         })}
         {deg != null && (
           <g transform={`rotate(${deg + 180} 60 60)`}>
-            <path d="M60 22 L52 60 L60 52 L68 60 Z" className="dial-arrow" />
+            {spread != null && <path d={conePath(60, 60, 44, spread)} className="dial-cone" />}
+            <path d="M60 20 L53 60 L60 53 L67 60 Z" className="dial-arrow" />
           </g>
         )}
       </svg>
       <div className="dial-center">
-        <span className="dial-value">{hs != null ? fmtNumber(hs, locale as never, 1) : '—'}</span>
-        <span className="dial-unit">m</span>
+        <span className="dial-dir">{dirText}</span>
+        {deg != null && <span className="dial-deg">{Math.round(deg)}°</span>}
       </div>
     </div>
   );
 }
 
-function Gauge({ label, value, unit, defKey }: { label: string; value: string; unit?: string; defKey: MessageKey }) {
+function Gauge({ label, value, unit, defKey, tone }: { label: string; value: string; unit?: string; defKey: MessageKey; tone?: 'warm' }) {
   const { t } = useI18n();
   return (
-    <div className="gauge">
+    <div className={`gauge${tone ? ` gauge--${tone}` : ''}`}>
       <span className="gauge-label">
         {label}
         <InfoPopover title={label} body={t(defKey)} />
@@ -89,36 +105,46 @@ export default function CurrentConditions({ latest, manifest }: { latest: Series
       </div>
 
       <div className="banner-grid">
+        {/* left: direction-only instrument (arrow + spread cone) */}
         <div className="banner-dial">
-          <CompassDial deg={dir?.value ?? null} hs={hs?.value ?? null} locale={locale} />
+          <CompassDial deg={dir?.value ?? null} spread={spread?.value ?? null} locale={locale} />
           <div className="dial-caption">
             <span className="caption-label">
-              {t('cc.waveHeight')}
-              <InfoPopover title={t('cc.waveHeight')} body={t('def.waveHeight')} />
+              {t('cc.direction')}
+              <InfoPopover title={t('cc.direction')} body={t('def.direction')} />
             </span>
             {dir && (
               <span className="caption-dir">
                 {t('cc.from')} {compass(dir.value, locale)} · {Math.round(dir.value)}°
               </span>
             )}
+            {spread && (
+              <span className="caption-spread">
+                {t('cc.spread')} ±{Math.round(spread.value)}°
+                <InfoPopover title={t('cc.spread')} body={t('def.spread')} />
+              </span>
+            )}
           </div>
         </div>
 
-        <div className="banner-gauges">
-          <Gauge label={t('cc.period')} value={period ? fmtNumber(period.value, locale, 1) : '—'} unit="s" defKey="def.period" />
-          <Gauge label={t('cc.maxWave')} value={hmax ? fmtNumber(hmax.value, locale, 1) : '—'} unit="m" defKey="def.maxWave" />
-          <Gauge label={t('cc.spread')} value={spread ? `±${Math.round(spread.value)}` : '—'} unit="°" defKey="def.spread" />
-        </div>
+        {/* right: the readouts — wave height is the hero */}
+        <div className="banner-metrics">
+          <div className="metric-hero">
+            <span className="metric-label">
+              {t('cc.waveHeight')}
+              <InfoPopover title={t('cc.waveHeight')} body={t('def.waveHeight')} />
+            </span>
+            <span className="metric-value">
+              {hs ? fmtNumber(hs.value, locale, 1) : '—'}
+              <span className="metric-unit">m</span>
+            </span>
+          </div>
 
-        <div className="banner-temp">
-          <span className="gauge-label">
-            {t('cc.seaTemp')}
-            <InfoPopover title={t('cc.seaTemp')} body={t('def.seaTemp')} align="end" />
-          </span>
-          <span className="temp-value">
-            {temp ? fmtNumber(temp.value, locale, 1) : '—'}
-            <span className="temp-unit">°C</span>
-          </span>
+          <div className="banner-gauges">
+            <Gauge label={t('cc.maxWave')} value={hmax ? fmtNumber(hmax.value, locale, 1) : '—'} unit="m" defKey="def.maxWave" />
+            <Gauge label={t('cc.period')} value={period ? fmtNumber(period.value, locale, 1) : '—'} unit="s" defKey="def.period" />
+            <Gauge label={t('cc.seaTemp')} value={temp ? fmtNumber(temp.value, locale, 1) : '—'} unit="°C" defKey="def.seaTemp" tone="warm" />
+          </div>
         </div>
       </div>
     </section>
