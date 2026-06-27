@@ -14,6 +14,21 @@ behind it are written down here so the work stays coherent across many sessions.
 - Each spec carries a `Status:` (`Draft` → `Accepted` → `Implemented` /
   `Superseded`).
 
+## When does work need a spec?
+
+Ask this for **every** request or task (and when in doubt, **ask the owner**):
+
+- **Write/update a spec** for: a new feature or capability, an architecture or
+  tech-stack decision, a data-model/schema change, a UX direction, or anything with
+  non-trivial scope or real trade-offs — i.e. anything a future session would need
+  to understand the *intent* behind.
+- **No spec needed** for: trivial/mechanical edits, small bug fixes, cosmetic tweaks,
+  dependency bumps. (If a fix revealed a non-obvious *learning*, log it in
+  [LEARNINGS](LEARNINGS.md) instead.)
+- A single request that bundles **several things** can map to **one or several**
+  specs — split by coherent topic.
+- Update the spec *as part of* the task, not after; keep code and spec in sync.
+
 ## Index
 
 | Spec | Status | Summary |

@@ -13,7 +13,9 @@ Project memory for AI coding sessions. Keep it short and current.
 
 ## ⚠️ Read the specs first
 
-This project is **spec-driven**. Before implementing, read:
+This project is **spec-driven**. For every request/task, first ask *"does this merit
+a spec?"* — if yes, create/update one (see "When does work need a spec?" in
+[specs/README.md](specs/README.md)); if unsure, ask the owner. Before implementing, read:
 
 - [specs/README.md](specs/README.md) — the workflow + index
 - [specs/2026-06-27-0001-foundation.md](specs/2026-06-27-0001-foundation.md) —
