@@ -17,6 +17,11 @@
   --danger: #ff5c7a;
   --warning: #ffc857;
   --calm: #5fd0a6;
+  --c-height: #38e1c6;
+  --c-max: #8fe9dc;
+  --c-period: #7cc4ff;
+  --c-dir: #b59cf0;
+  --c-temp: #ff8a5b;
   color-scheme: dark;
 }
 
@@ -35,6 +40,11 @@
   --danger: #d63a5a;
   --warning: #c7860a;
   --calm: #2e9e7b;
+  --c-height: #0e8c7a;
+  --c-max: #4fb3a4;
+  --c-period: #2e7fc4;
+  --c-dir: #7a4fc0;
+  --c-temp: #e85c2b;
   color-scheme: light;
 }
 
@@ -437,6 +447,64 @@ body {
 
 .footer-sep {
   color: var(--divider);
+}
+
+/* ---- charts ---- */
+.charts-section {
+  margin-top: 1.5rem;
+}
+
+.charts-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.9rem;
+}
+
+.chip {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 0.5rem;
+  padding: 0.32rem 0.7rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.chip:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.chip--active {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.charts {
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: 1rem;
+  padding: 0.75rem 1rem 1rem;
+}
+
+.chart-panel-title {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-3);
+  margin: 0.6rem 0 0.1rem 0.2rem;
+}
+
+.chart-panel {
+  width: 100%;
+}
+
+.u-cursor-pt {
+  border: none !important;
 }
 
 /* ---- responsive ---- */

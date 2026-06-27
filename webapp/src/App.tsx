@@ -1,16 +1,25 @@
 import { useEffect, useState } from 'react';
 import Header from './components/Header';
 import CurrentConditions from './components/CurrentConditions';
-import Sparkline from './components/Sparkline';
+import TimeSeries from './components/TimeSeries';
 import Footer from './components/Footer';
 import { useI18n } from './lib/i18n';
 import { loadManifest, loadLatest, loadRecent, type Manifest, type Series } from './lib/data';
+import { loadParquetTier, type Columnar } from './lib/parquet';
 
 interface Loaded {
   manifest: Manifest;
   latest: Series;
   recent: Series;
 }
+
+const HISTORY_COLUMNS = [
+  'significant_wave_height_m',
+  'max_wave_height_m',
+  'peak_period_s',
+  'peak_direction_deg',
+  'sea_temperature_c',
+];
 
 function StationFacts({ manifest }: { manifest: Manifest }) {
   const { t } = useI18n();
@@ -40,6 +49,7 @@ function StationFacts({ manifest }: { manifest: Manifest }) {
 export default function App() {
   const { t } = useI18n();
   const [data, setData] = useState<Loaded | null>(null);
+  const [history, setHistory] = useState<Columnar | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -50,6 +60,20 @@ export default function App() {
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadParquetTier('daily.parquet', HISTORY_COLUMNS)
+      .then((d) => {
+        if (!cancelled) setHistory(d);
+      })
+      .catch(() => {
+        /* charts are best-effort; the banner still works without history */
       });
     return () => {
       cancelled = true;
@@ -68,10 +92,11 @@ export default function App() {
           <>
             <CurrentConditions latest={data.latest} manifest={data.manifest} />
 
-            <section className="panel">
-              <h2 className="panel-title">{t('cc.last30days')}</h2>
-              <Sparkline t={data.recent.t} values={data.recent.significant_wave_height_m} />
-            </section>
+            {history ? (
+              <TimeSeries data={history} />
+            ) : (
+              <div className="state">{t('state.loading')}</div>
+            )}
 
             <StationFacts manifest={data.manifest} />
           </>

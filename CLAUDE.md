@@ -64,12 +64,19 @@ pixi run webapp-build                # static build for GitHub Pages
 - Specs written; repo cleaned; `pixi.toml` + polars ingest done and **validated on
   real data** (214,908 rows, 2013→2026). Data committed to `main` (acknowledged
   debt; migration path in foundation spec §5.3).
-- **Webapp rebuilt to TypeScript** (Plotly removed, ~205 KB bundle). Working shell:
-  data loader for the JSON tiers, current-conditions banner (compass dial, gauges,
-  sea temp, staleness), 30-day sparkline, station facts, footer. **Theme** toggle
-  (dark default + light, CSS-var tokens) and **i18n** (en/fr/es, browser
-  auto-detect, persisted) — both hand-rolled for now (Tailwind/shadcn + Paraglide
-  come later per spec).
+- **Webapp rebuilt to TypeScript** (Plotly removed). Working: data loader for the
+  JSON tiers + a current-conditions banner (compass dial, gauges, sea temp,
+  staleness); **theme** toggle (dark default + light, CSS-var tokens) and **i18n**
+  (en/fr/es, browser auto-detect, persisted) — both hand-rolled for now
+  (Tailwind/shadcn + Paraglide come later per spec).
+- **uPlot synced multi-panel charts** (canvas) fed from `daily.parquet` via
+  hyparquet (parquet-in-browser): wave height (Hs + Hmax), period, direction;
+  range presets (1M/6M/1Y/5Y/All), shared crosshair + synced zoom, theme-aware.
+  Panels with too little data auto-hide (temp, until the realtime feed accumulates).
+- **Live**: https://hadim.github.io/olatu/ — deployed by `.github/workflows/deploy.yml`
+  (official GitHub Pages Actions flow; Pages source = GitHub Actions). Pushes that
+  touch `webapp/**` redeploy automatically.
 
-Next per roadmap: uPlot synced time-series charts + direction layer, history
-navigation (presets + date picker + heat-ribbon), the map, and the full glossary.
+Next per roadmap: 30-min detail via year parquet + the direction glyph/cyclical
+layer, history navigation (date picker + heat-ribbon), the map, the full glossary,
+and migrating theme/i18n/styling to Tailwind + shadcn + Paraglide.
