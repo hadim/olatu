@@ -67,6 +67,10 @@ const PANELS: PanelDef[] = [
 ];
 
 const PRESETS: { key: string; days: number | null }[] = [
+  { key: '1D', days: 1 },
+  { key: '2D', days: 2 },
+  { key: '5D', days: 5 },
+  { key: '10D', days: 10 },
   { key: '1M', days: 30 },
   { key: '6M', days: 182 },
   { key: '1Y', days: 365 },
