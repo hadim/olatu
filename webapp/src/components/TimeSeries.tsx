@@ -254,6 +254,14 @@ export default function TimeSeries({ data, tz, yearFiles, lastT }: { data: Colum
     const xmin = range.min;
     const xmax = range.max;
     const radius = SMOOTH_RADIUS[smooth];
+    // Breathing room so the first/last points (and y-extremes) aren't half-clipped at
+    // the plot edges — uPlot clips series to the plot rect, so this lives in the SCALE,
+    // not the outer padding. x-pad is identical on every panel, so x stays aligned.
+    const xpad = Math.max((xmax - xmin) * 0.02, 1);
+    const padY = (lo: number, hi: number, f: number): [number, number] => {
+      const d = hi - lo || 1;
+      return [lo - d * f, hi + d * f];
+    };
 
     // Insert null break-points across real outages so the line never bridges a gap
     // (daily.parquet omits empty days). gxs/gcols are the gap-aware arrays the charts
@@ -287,9 +295,31 @@ export default function TimeSeries({ data, tz, yearFiles, lastT }: { data: Colum
 
     const timeEl = cardRef.current?.querySelector<HTMLElement>('.hover-time') ?? null;
     const statsEl = cardRef.current?.querySelector<HTMLElement>('.hover-stats') ?? null;
+    const chipsHTML = (idx: number) => {
+      const chips: string[] = [];
+      for (const m of CARD_METRICS) {
+        const v = gcols[m.key]?.[idx];
+        if (v == null) continue;
+        const val = m.dir
+          ? `${compass(v, locale)} · ${Math.round(v)}°`
+          : `${m.pm ? '±' : ''}${fmtNumber(v, locale, m.digits ?? 1)}${m.unit ? ` ${m.unit}` : ''}`;
+        chips.push(`<span class="hover-chip"><span class="hover-chip-label">${t(m.labelKey)}</span><span class="hover-chip-value">${val}</span></span>`);
+      }
+      return chips.join('');
+    };
+    // Index of the most recent sample that has any data — the card's default content.
+    const lastIdx = (() => {
+      for (let i = gxs.length - 1; i >= 0; i--) {
+        if (CARD_METRICS.some((m) => gcols[m.key]?.[i] != null)) return i;
+      }
+      return -1;
+    })();
+    // Default (no hover): keep the "hover to read" hint in the time slot, but ALWAYS
+    // render the latest values so the card is at its full height from the start — no
+    // layout jump when you hover (height is width-robust, not a guessed min-height).
     const resetCard = () => {
       if (timeEl) timeEl.textContent = t('chart.hoverHint');
-      if (statsEl) statsEl.innerHTML = '';
+      if (statsEl) statsEl.innerHTML = lastIdx >= 0 ? chipsHTML(lastIdx) : '';
     };
     const renderCard = (idx: number | null | undefined) => {
       if (idx == null) {
@@ -297,18 +327,7 @@ export default function TimeSeries({ data, tz, yearFiles, lastT }: { data: Colum
         return;
       }
       if (timeEl) timeEl.textContent = fmtDateTime(gxs[idx] * 1000, locale, tz);
-      if (!statsEl) return;
-      const chips: string[] = [];
-      for (const m of CARD_METRICS) {
-        const col = gcols[m.key];
-        const v = col?.[idx];
-        if (v == null) continue;
-        let val: string;
-        if (m.dir) val = `${compass(v, locale)} · ${Math.round(v)}°`;
-        else val = `${m.pm ? '±' : ''}${fmtNumber(v, locale, m.digits ?? 1)}${m.unit ? ` ${m.unit}` : ''}`;
-        chips.push(`<span class="hover-chip"><span class="hover-chip-label">${t(m.labelKey)}</span><span class="hover-chip-value">${val}</span></span>`);
-      }
-      statsEl.innerHTML = chips.join('');
+      if (statsEl) statsEl.innerHTML = chipsHTML(idx);
     };
     resetCard();
 
@@ -393,9 +412,16 @@ export default function TimeSeries({ data, tz, yearFiles, lastT }: { data: Colum
       const opts: uPlot.Options = {
         width: host.clientWidth || 800,
         height: panel.points ? 140 : 124,
+        // Fixed right padding on EVERY panel. Only the last panel shows x-axis labels,
+        // and uPlot would otherwise auto-reserve right-edge space for its last tick
+        // label on that panel alone — making it narrower than the others, so the same
+        // timestamp lands at a different x and the curves look ~1 h misaligned.
+        padding: [8, 12, 0, 0],
         scales: {
-          x: { time: true, min: xmin, max: xmax },
-          y: panel.range ? { range: () => panel.range! } : {},
+          x: { time: true, min: xmin - xpad, max: xmax + xpad },
+          y: panel.range
+            ? { range: () => padY(panel.range![0], panel.range![1], 0.08) }
+            : { range: (_u, dMin, dMax) => padY(dMin, dMax, 0.12) },
         },
         // Place ticks on the buoy's timezone boundaries for every visitor (not the
         // browser's), so axis labels stay round regardless of where you open the app.

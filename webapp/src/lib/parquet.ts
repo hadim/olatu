@@ -18,7 +18,10 @@ export interface Columnar {
 
 /** Load a Parquet tier (e.g. "daily.parquet"), decoding only the wanted columns. */
 export async function loadParquetTier(name: string, columns: string[]): Promise<Columnar> {
-  const res = await fetch(`${DATA_BASE}${name}`);
+  // Revalidate every load: HF serves parquet with no cache-control, so the browser
+  // would heuristically cache a stale copy — making the chart lag the (no-cache) JSON
+  // banner by a refresh cycle. `no-cache` returns a cheap 304 when unchanged.
+  const res = await fetch(`${DATA_BASE}${name}`, { cache: 'no-cache' });
   if (!res.ok) throw new Error(`Failed to load ${name} (${res.status})`);
   const file = await res.arrayBuffer();
 
