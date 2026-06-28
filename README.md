@@ -11,7 +11,7 @@ this repo and rendered in your browser. Deployed on GitHub Pages.
 
 ![Olatu — live & historical sea state for the Saint-Jean-de-Luz wave buoy](docs/screenshot.png)
 
-- **Live:** https://hadim.github.io/olatu/
+- **Live:** https://olatu.io
 - **Data source:** [CANDHIS](https://candhis.cerema.fr) — the French national
   in-situ wave-measurement network, operated by [Cerema](https://www.cerema.fr).
   Buoy **06403, Saint-Jean-de-Luz** (43.408° N, 1.682° W), ~3 km off the Belharra

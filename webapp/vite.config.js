@@ -5,10 +5,13 @@ import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Static site served from GitHub Pages under /olatu/.
-// The generated data tiers live in public/data/ and are served as-is (dev + build).
+// Static site for GitHub Pages. A RELATIVE base ('./') makes one build work both at
+// the apex custom domain (https://olatu.io/) and at the project path
+// (https://hadim.github.io/olatu/), so flipping the domain never breaks asset URLs.
+// Assets referenced via import.meta.env.BASE_URL (favicon, map mosaics) resolve
+// relative to the document. Data tiers are fetched from an absolute HF URL (data.ts).
 export default defineConfig({
-  base: '/olatu/',
+  base: './',
   plugins: [react()],
   resolve: {
     alias: {

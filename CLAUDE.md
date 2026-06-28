@@ -94,9 +94,16 @@ One-time seed of the dataset: `pixi run update --campaign 06403 --seed-src /User
   hyparquet (parquet-in-browser): wave height (Hs + Hmax), period, direction;
   range presets (1M/6M/1Y/5Y/All), shared crosshair + synced zoom, theme-aware.
   Panels with too little data auto-hide (temp, until the realtime feed accumulates).
-- **Live**: https://hadim.github.io/olatu/ — deployed by `.github/workflows/deploy.yml`
+- **Live**: https://olatu.io (custom apex domain; also reachable at
+  https://hadim.github.io/olatu/) — deployed by `.github/workflows/deploy.yml`
   (official GitHub Pages Actions flow; Pages source = GitHub Actions). Pushes that
-  touch `webapp/**` redeploy automatically.
+  touch `webapp/**` redeploy automatically. Vite `base` is `./` (relative) so one
+  build works at both the apex and the project path; `webapp/public/CNAME` (=`olatu.io`)
+  ships in the artifact. Apex DNS → GitHub Pages A/AAAA records; `www` CNAME → `hadim.github.io`.
+- **Live auto-refresh**: the webapp polls `manifest.json` (every 5 min + on tab focus)
+  and, when `generated_at` advances, pulls fresh `latest`/`recent` so the banner updates
+  without a reload; the relative "ago"/freshness ticks via `useNow`. History parquet is
+  not auto-reloaded (daily means barely move in 30 min).
 - **Realtime scraper** (`ingest/scrape.py`): grows the live tail + sea-temperature
   history by parsing the CANDHIS realtime HTML table (one GET, no Valider/POST) into a
   per-year `*_reel.csv` accumulator. `build.py assemble()` does an archive-preferred

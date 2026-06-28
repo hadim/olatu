@@ -23,7 +23,7 @@ The Vite build outputs static assets to `dist/`. The configuration copies `../da
 
 ## Deployment
 
-The Vite `base` option is set to `/wave-buoys-viewer/` to support GitHub Pages deployments from this repository. Publish the `dist/` directory (for example via GitHub Actions) to serve the site at `https://<username>.github.io/wave-buoys-viewer/`.
+The Vite `base` option is `./` (relative), so the same `dist/` works at both the custom domain and the project path. The site is published to GitHub Pages by `.github/workflows/deploy.yml` and served at the custom domain **https://olatu.io** (a `CNAME` file in `public/` ships in the build artifact; it also stays reachable at `https://hadim.github.io/olatu/`).
 
 ## Project structure
 
