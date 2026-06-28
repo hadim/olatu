@@ -5,8 +5,10 @@ Project memory for AI coding sessions. Keep it short and current.
 ## What this is
 
 **Olatu** — a fully static web app (GitHub Pages, no backend) that visualizes live
-+ historical data from a single CANDHIS wave buoy: **06403, Saint-Jean-de-Luz**
-(Atlantic / Basque coast). Data is read from committed Parquet/JSON in the browser.
++ historical data from CANDHIS wave buoys on the French Atlantic coast: **06403
+Saint-Jean-de-Luz** (default) and **06402 Anglet** (Basque, full history), plus **03302
+Cap Ferret** (Gironde, realtime-only — no archive yet). Switchable in the UI (and via a
+`?buoy=<id>` URL); data tiers are read in the browser from the HF dataset `hadim/olatu`.
 
 > The GitHub repo is **`hadim/olatu`**. The local working directory may still be
 > named `wave-buoys-viewer` (cosmetic; rename optional).
@@ -26,8 +28,8 @@ a spec?"* — if yes, create/update one (see "When does work need a spec?" in
 ## Layout
 
 ```
-ingest/        Python (polars). NOT an installable package.
-  schema.py    canonical column mapping, units, sentinel, headline/direction vars
+ingest/        Python (polars). NOT an installable package. All steps take --campaign.
+  schema.py    per-buoy identity registry (BUOYS) + column mapping, units, sentinel, headline/direction vars
   scrape.py    fetch the CANDHIS realtime HTML table -> per-year reel CSV (coalesce-merge)
   build.py     CSV -> tiered Parquet/JSON (archive-preferred coalesce)
   update.py    pull → scrape → build → upload to the HF dataset (OIDC in CI)
@@ -40,8 +42,8 @@ specs/         decisions
 > **Data lives in the HF dataset `hadim/olatu`, NOT in git** (see specs/0004).
 > Layout: `<campaign>/raw/*.csv` (archive + reel accumulator) + `<campaign>/data/…`
 > (manifest/latest/recent.json, year/*.parquet, hourly/daily.parquet). The webapp
-> fetches `…/resolve/main/06403/data/…` (CORS-served). `hfdata/` (local working mirror)
-> and `webapp/public/data/` (optional local build) are gitignored.
+> fetches `…/resolve/main/<campaign>/data/…` (CORS-served) for the selected buoy.
+> `hfdata/` (local working mirror) and `webapp/public/data/` are gitignored.
 
 ## Commands
 
@@ -71,8 +73,17 @@ One-time seed of the dataset: `pixi run update --campaign 06403 --seed-src /User
   accumulates forward. Handle missing-temp as a first-class UI state, not an empty chart.
 - **Series has real gaps** (largest 50 days) → break the line, never interpolate across.
 - **GitHub Pages base path:** fetch webapp assets via `import.meta.env.BASE_URL`,
-  never a leading `/`. **Data tiers are different** — fetch them via `DATA_BASE`
-  (`webapp/src/lib/data.ts`), the HF dataset resolve URL, not BASE_URL.
+  never a leading `/`. **Data tiers are different** — fetch them via
+  `dataBase(campaign)` (`webapp/src/lib/data.ts`) = `DATA_ROOT` + `<campaign>/data/`
+  (the HF dataset resolve URL), not BASE_URL. `VITE_DATA_BASE_URL` overrides the root.
+- **Multi-buoy:** the buoy registry is `ingest/schema.py` `BUOYS` (Python) +
+  `webapp/src/lib/buoys.ts` (frontend) — keep lat/lon in sync. Selected campaign is
+  persisted (`olatu.campaign`) **and** deep-linked (`?buoy=<id>`, URL wins on load,
+  replaceState on switch); loaded tiers are tagged with their campaign so a switch never
+  pairs the new buoy with the old manifest (see specs/0005).
+- **Realtime-only buoys:** a campaign with no `*_arch.csv` (e.g. Cap Ferret) builds from
+  the scraped reel alone — `build.read_archive` returns None and history accumulates
+  forward. Drop archive CSVs into the campaign's `raw/` later to backfill (they coalesce).
 - **Parquet:** Snappy + `row_group_size≈1440` (multi-row-group, CI-asserted) so
   hyparquet range requests + column projection work.
 
@@ -109,7 +120,14 @@ One-time seed of the dataset: `pixi run update --campaign 06403 --seed-src /User
   per-year `*_reel.csv` accumulator. `build.py assemble()` does an archive-preferred
   column coalesce so the tail never clobbers the archive. See spec 0004.
 - Chart range presets are 1D/2D/5D/10D/1M/6M/1Y/5Y/All; **default is 1D**.
+- **Multi-buoy shipped** (specs/0005): **3 buoys** — 06403 Saint-Jean-de-Luz + 06402
+  Anglet (archive 2009/2013→2026, seeded) + 03302 Cap Ferret (realtime-only). Top
+  **station bar** (app intro + data-source links) with a **segmented switcher** + a
+  **lazy MapLibre locator map** (click a buoy to switch; inactive markers are dots,
+  active shows its name). The ingest is campaign-parameterized end-to-end and tolerates
+  no-archive buoys; `refresh-data.yml` is a matrix over all campaigns. Switching reloads
+  the selected buoy's tiers; choice is persisted + URL-deep-linked (`?buoy=<id>`).
 
-Next per roadmap: the direction glyph/cyclical layer, history navigation (date picker
-+ heat-ribbon) polish, the full glossary, multi-buoy (06402 Anglet staged), and
-migrating theme/i18n/styling to Tailwind + shadcn + Paraglide.
+Next per roadmap: the direction glyph/cyclical layer, history navigation polish, the
+full glossary, side-by-side buoy comparison (0005 left it out), and migrating
+theme/i18n/styling to Tailwind + shadcn + Paraglide.

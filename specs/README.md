@@ -37,6 +37,7 @@ Ask this for **every** request or task (and when in doubt, **ask the owner**):
 | [0002 — Data dictionary](2026-06-27-0002-data-dictionary.md) | Draft | Buoy identity + canonical schema + plain-language definition of every variable |
 | [0003 — UX refinement](2026-06-27-0003-ux-refinement.md) | Draft | First owner-feedback polish pass: chart fixes, banner/staleness, terminology (vague/houle), definitions, time nav |
 | [0004 — Realtime scraper](2026-06-27-0004-realtime-scraper.md) | Accepted | The live-growing tail: scrape CANDHIS realtime HTML (single GET, no Valider/POST) → per-year reel CSV; coalesce merge so temperature history accumulates without clobbering the archive |
+| [0005 — Multi-buoy](2026-06-27-0005-multi-buoy.md) | Accepted | Add CANDHIS 06402 Anglet; finish the campaign parameterization (build.py); webapp buoy switch (segmented control + lazy map picker), top station bar, HF data-source surfacing |
 | [LEARNINGS](LEARNINGS.md) | Living | Running log of significant findings (gzip/parquet, etc.) — update on every big finding |
 
 ## Conventions
@@ -47,5 +48,6 @@ Ask this for **every** request or task (and when in doubt, **ask the owner**):
   UI source strings). User-facing copy is then translated (EN / FR / ES).
 - **Units & time:** SI-ish marine units (m, s, °, °C). All timestamps are stored
   **UTC** and rendered in the buoy's local zone (**Europe/Paris**).
-- **One buoy for now:** CANDHIS campaign **06403 — Saint-Jean-de-Luz**. The schema
-  is multi-buoy ready (`campaign_id` is a column) but the app ships single-buoy.
+- **Two buoys:** CANDHIS **06403 — Saint-Jean-de-Luz** (default) and **06402 — Anglet**
+  (see [0005](2026-06-27-0005-multi-buoy.md)). The schema is multi-buoy ready
+  (`campaign_id` is a column); the app shows one buoy at a time with a switch.
