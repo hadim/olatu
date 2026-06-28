@@ -9,6 +9,35 @@ Format per entry: **date — title** · what we found · why it matters · resol
 
 ---
 
+## 2026-06-27 — The CANDHIS realtime "browser table" *is* the API (one GET, no Valider/POST)
+
+**Finding.** `campagne.php` looks hostile to automate — PHP, a campaign must be
+"selected", and the UI tells you to click **Valider** then **Télécharger**. None of
+that is needed for realtime. Reverse-engineered live with a browser + a cold `httpx`
+client: (1) the campaign is chosen by a **base64 query string**, not a session POST —
+`campagne.php?Y2FtcD0wNjQwMw==` is literally `base64("camp=06403")`; (2) that single GET
+**server-renders the full last-~48 h realtime table in the HTML** (≈97 rows incl.
+`Temp. mer`), with no cookies/session priming; (3) the `Valider`→`Télécharger` dance
+belongs to the *Archives* date-range CSV export (`?datA=YYYY-MM-DD+YYYY-MM-DD`), and the
+form's `BtnTeleReel`/`BtnTeleArch` buttons have no JS — a bare POST just re-renders the
+page; (4) the HTML values are **lossless** vs. the CSV (realtime is quantized — H 0.1 m,
+period 0.1 s, dir 1°, temp 0.1 °C — so `0.6` == `0.6000`).
+
+**Why it matters.** The whole "live-growing tail" (0001 §2.4) — and therefore *all*
+sea-temperature history — hinges on automating this page. It turns out to be a trivial
+`GET` + table parse, not a fragile multi-step form/session scrape.
+
+**Resolution.** Built `ingest/scrape.py` (`pixi run scrape` / `pixi run update`): GET the
+base64 URL → parse the HTML table → coalesce-merge into per-year `Candhis_06403_<YEAR>_reel.csv`.
+Also hardened `build.py assemble()` from realtime-last-wins to **archive-preferred
+column coalesce**, so accumulated realtime never clobbers the archive's rich/QC'd columns
+once they overlap. Full design + safety rules in
+[0004 — Realtime scraper](2026-06-27-0004-realtime-scraper.md).
+
+**Refs.** `ingest/scrape.py`; `ingest/build.py` (`assemble`); spec 0004.
+
+---
+
 ## 2026-06-27 — uPlot places ticks in the *browser's* timezone unless you set `tzDate`
 
 **Finding.** Our axis tick labels are formatted via `Intl.DateTimeFormat({timeZone:

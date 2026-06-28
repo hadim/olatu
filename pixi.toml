@@ -10,9 +10,16 @@ platforms = ["osx-arm64", "linux-64"]
 
 [tasks]
 # --- Data pipeline ---
+# Scrape the CANDHIS realtime feed (incl. sea temperature) into per-year reel CSVs
+# under --src; run regularly (<= ~36 h apart) so the series grows continuously:
+#   pixi run scrape [--src /path/to/csv]
+scrape = "python -m ingest.scrape"
 # Build the tiered data files. Override paths, e.g.:
 #   pixi run ingest --src /path/to/csv --out data
 ingest = "python -m ingest.build"
+# Scrape the latest realtime data, then rebuild the tiers (the usual refresh):
+#   pixi run update
+update = { cmd = "python -m ingest.build", depends-on = ["scrape"] }
 
 # --- Webapp (frontend) ---
 webapp-install = { cmd = "npm install", cwd = "webapp" }

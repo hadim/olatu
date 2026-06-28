@@ -102,7 +102,13 @@ def read_realtime(src: Path) -> pl.DataFrame | None:
 def assemble(archive: pl.DataFrame, realtime: pl.DataFrame | None) -> pl.DataFrame:
     """Merge archive + realtime into one canonical series, one row per timestamp.
 
-    Realtime wins on overlapping timestamps (it is fresher and carries temperature).
+    Column-wise coalesce, ARCHIVE-PREFERRED: where both feeds carry a timestamp, the
+    archive value wins per column and realtime only *fills gaps*. That fills
+    sea_temperature_c (realtime-only) and the live tail the archive has not yet
+    published, while preserving the archive's rich columns (Tp, Hm0, spectral) and its
+    QC'd values once accumulated realtime ages into archive coverage. (A plain
+    last-wins dedup would let the 6-column realtime quick-look clobber the 30-column
+    archive record -- see specs/2026-06-27-0004-realtime-scraper.md.)
     """
     archive = archive.with_columns(pl.lit(0, dtype=pl.Int8).alias("_src"))
     parts = [archive]
@@ -117,9 +123,14 @@ def assemble(archive: pl.DataFrame, realtime: pl.DataFrame | None) -> pl.DataFra
             merged = merged.with_columns(pl.lit(None, dtype=pl.Float64).alias(col))
     merged = merged.with_columns(pl.lit(CAMPAIGN_ID).alias("campaign_id"))
 
-    # dedup: prefer realtime (_src=1) on a tie
+    # one row per timestamp: sort archive (_src=0) before realtime (_src=1), then take
+    # the first non-null per column -> archive-preferred coalesce, realtime fills gaps.
+    value_cols = [c for c in merged.columns if c not in (DT, "_src")]
     merged = (
-        merged.sort([DT, "_src"]).unique(subset=[DT], keep="last").sort(DT).drop("_src")
+        merged.sort([DT, "_src"])
+        .group_by(DT, maintain_order=True)
+        .agg([pl.col(c).drop_nulls().first().alias(c) for c in value_cols])
+        .sort(DT)
     )
     return merged.select([c for c in CANONICAL_ORDER if c in merged.columns])
 

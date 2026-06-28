@@ -38,7 +38,9 @@ specs/         decisions
 ## Commands
 
 ```bash
-pixi run ingest                      # build data/ from CANDHIS CSVs (default src /Users/hadim/Data/fff)
+pixi run scrape                      # grow realtime reel CSVs from the live CANDHIS feed (incl. sea temp)
+pixi run update                      # scrape, then rebuild the tiers (usual refresh)
+pixi run ingest                      # build data/ from CANDHIS CSVs (default src /Users/hadim/Data/olatu)
 pixi run ingest --src DIR --out DIR  # override paths
 pixi run check                       # ruff format + lint
 pixi run webapp                      # start the frontend dev server (bundled Node)
@@ -80,6 +82,10 @@ pixi run webapp-build                # static build for GitHub Pages
 - **Live**: https://hadim.github.io/olatu/ — deployed by `.github/workflows/deploy.yml`
   (official GitHub Pages Actions flow; Pages source = GitHub Actions). Pushes that
   touch `webapp/**` redeploy automatically.
+- **Realtime scraper** (`ingest/scrape.py`, `pixi run scrape`/`update`): grows the live
+  tail + sea-temperature history by parsing the CANDHIS realtime HTML table (one GET,
+  no Valider/POST) into per-year `*_reel.csv`. `build.py assemble()` now does an
+  archive-preferred column coalesce so the tail never clobbers the archive. See spec 0004.
 
 Next per roadmap: 30-min detail via year parquet + the direction glyph/cyclical
 layer, history navigation (date picker + heat-ribbon), the map, the full glossary,
