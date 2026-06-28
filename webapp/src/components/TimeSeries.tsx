@@ -15,6 +15,7 @@ import { useTheme } from '../lib/theme';
 import { useI18n, type MessageKey } from '../lib/i18n';
 import { compass, fmtNumber, fmtDateTime, fmtAxisTick } from '../lib/format';
 import { loadParquetTier, type Columnar } from '../lib/parquet';
+import { iconSvg, type IconName } from './icons';
 import HeatRibbon from './HeatRibbon';
 
 const SYNC_KEY = 'olatu-ts';
@@ -108,14 +109,23 @@ function movingAvg(arr: (number | null)[], radius: number): (number | null)[] {
   return out;
 }
 
-const CARD_METRICS: { key: string; labelKey: MessageKey; unit?: string; digits?: number; dir?: boolean; pm?: boolean }[] = [
-  { key: 'significant_wave_height_m', labelKey: 'cc.waveHeight', unit: 'm', digits: 1 },
-  { key: 'max_wave_height_m', labelKey: 'cc.maxWave', unit: 'm', digits: 1 },
-  { key: 'significant_period_s', labelKey: 'cc.period', unit: 's', digits: 1 },
-  { key: 'peak_direction_deg', labelKey: 'cc.direction', dir: true },
-  { key: 'peak_directional_spread_deg', labelKey: 'cc.spread', unit: '°', digits: 0, pm: true },
-  { key: 'sea_temperature_c', labelKey: 'cc.seaTemp', unit: '°C', digits: 1 },
+const CARD_METRICS: { key: string; labelKey: MessageKey; unit?: string; digits?: number; dir?: boolean; pm?: boolean; icon: IconName; colorVar: string }[] = [
+  { key: 'significant_wave_height_m', labelKey: 'cc.waveHeight', unit: 'm', digits: 1, icon: 'waveHeight', colorVar: '--c-height' },
+  { key: 'max_wave_height_m', labelKey: 'cc.maxWave', unit: 'm', digits: 1, icon: 'maxWave', colorVar: '--c-max' },
+  { key: 'significant_period_s', labelKey: 'cc.period', unit: 's', digits: 1, icon: 'period', colorVar: '--c-period' },
+  { key: 'peak_direction_deg', labelKey: 'cc.direction', dir: true, icon: 'direction', colorVar: '--c-dir' },
+  { key: 'peak_directional_spread_deg', labelKey: 'cc.spread', unit: '°', digits: 0, pm: true, icon: 'spread', colorVar: '--c-dir' },
+  { key: 'sea_temperature_c', labelKey: 'cc.seaTemp', unit: '°C', digits: 1, icon: 'temp', colorVar: '--c-temp' },
 ];
+
+// Panel title → icon (the wave-height panel carries both Hs and Hmax, so its title
+// uses the wave-height glyph). Tinted with the panel's primary series colour.
+const PANEL_ICON: Partial<Record<MessageKey, IconName>> = {
+  'cc.waveHeight': 'waveHeight',
+  'cc.period': 'period',
+  'cc.direction': 'direction',
+  'cc.seaTemp': 'temp',
+};
 
 const DETAIL_COLUMNS = [
   'significant_wave_height_m',
@@ -303,7 +313,8 @@ export default function TimeSeries({ data, tz, yearFiles, lastT }: { data: Colum
         const val = m.dir
           ? `${compass(v, locale)} · ${Math.round(v)}°`
           : `${m.pm ? '±' : ''}${fmtNumber(v, locale, m.digits ?? 1)}${m.unit ? ` ${m.unit}` : ''}`;
-        chips.push(`<span class="hover-chip"><span class="hover-chip-label">${t(m.labelKey)}</span><span class="hover-chip-value">${val}</span></span>`);
+        const icon = iconSvg(m.icon, { className: 'hover-chip-icon', color: `var(${m.colorVar})` });
+        chips.push(`<span class="hover-chip">${icon}<span class="hover-chip-label">${t(m.labelKey)}</span><span class="hover-chip-value">${val}</span></span>`);
       }
       return chips.join('');
     };
@@ -337,7 +348,9 @@ export default function TimeSeries({ data, tz, yearFiles, lastT }: { data: Colum
       wrap.className = 'chart-panel';
       const heading = document.createElement('div');
       heading.className = 'chart-panel-title';
-      heading.textContent = t(panel.titleKey);
+      const panelIcon = PANEL_ICON[panel.titleKey];
+      const titleIcon = panelIcon ? iconSvg(panelIcon, { className: 'label-icon', color: `var(${panel.series[0].colorVar})` }) : '';
+      heading.innerHTML = `${titleIcon}<span>${t(panel.titleKey)}</span>`;
       host.appendChild(heading);
       host.appendChild(wrap);
 

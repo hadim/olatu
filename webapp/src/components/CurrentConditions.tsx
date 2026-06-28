@@ -1,6 +1,9 @@
+import type { ReactNode } from 'react';
 import { useI18n, type MessageKey } from '../lib/i18n';
 import { lastValue, latestTimestamp, type Manifest, type Series } from '../lib/data';
 import { compass, fmtNumber, fmtClock, freshness, relativeAgo, type Freshness } from '../lib/format';
+import { useNow } from '../lib/useNow';
+import { WaveHeightIcon, MaxWaveIcon, PeriodIcon, DirectionIcon, TempIcon } from './icons';
 import InfoPopover from './InfoPopover';
 
 // Annular ("ring") sector centred on "up" in the dial's local frame, half-angle =
@@ -43,11 +46,12 @@ function CompassDial({ deg, spread, locale }: { deg: number | null; spread: numb
   );
 }
 
-function Gauge({ label, value, unit, defKey, tone }: { label: string; value: string; unit?: string; defKey: MessageKey; tone?: 'warm' }) {
+function Gauge({ label, value, unit, defKey, tone, icon }: { label: string; value: string; unit?: string; defKey: MessageKey; tone?: 'warm'; icon?: ReactNode }) {
   const { t } = useI18n();
   return (
     <div className={`gauge${tone ? ` gauge--${tone}` : ''}`}>
       <span className="gauge-label">
+        {icon}
         {label}
         <InfoPopover title={label} body={t(defKey)} />
       </span>
@@ -59,12 +63,12 @@ function Gauge({ label, value, unit, defKey, tone }: { label: string; value: str
   );
 }
 
-function StalenessBadge({ fresh, stampMs, tz }: { fresh: Freshness; stampMs: number | null; tz: string }) {
+function StalenessBadge({ fresh, stampMs, tz, now }: { fresh: Freshness; stampMs: number | null; tz: string; now: number }) {
   const { t, locale } = useI18n();
-  const now = Date.now();
   const ago = stampMs != null ? relativeAgo(stampMs, locale, now) : null;
+  const clock = stampMs != null ? fmtClock(stampMs, locale, tz) : null;
   const help = t(`cc.${fresh}.help` as MessageKey);
-  const body = stampMs != null ? `${help} · ${t('cc.updated')} ${fmtClock(stampMs, locale, tz)}` : help;
+  const body = stampMs != null ? `${help} · ${t('cc.updated')} ${clock}` : help;
   return (
     <InfoPopover
       title={t(`cc.${fresh}` as MessageKey)}
@@ -75,6 +79,7 @@ function StalenessBadge({ fresh, stampMs, tz }: { fresh: Freshness; stampMs: num
     >
       <span className={`status-dot status-dot--${fresh}`} aria-hidden="true" />
       {ago && <span className="status-ago">{ago}</span>}
+      {clock && <span className="status-stamp">· {clock}</span>}
     </InfoPopover>
   );
 }
@@ -82,7 +87,7 @@ function StalenessBadge({ fresh, stampMs, tz }: { fresh: Freshness; stampMs: num
 export default function CurrentConditions({ latest, manifest }: { latest: Series; manifest: Manifest }) {
   const { t, locale } = useI18n();
   const tz = manifest.timezone;
-  const now = Date.now();
+  const now = useNow(30_000);
 
   const hs = lastValue(latest, 'significant_wave_height_m');
   const hmax = lastValue(latest, 'max_wave_height_m');
@@ -98,7 +103,7 @@ export default function CurrentConditions({ latest, manifest }: { latest: Series
     <section className={`banner banner--${fresh}`} aria-label={t('cc.title')}>
       <div className="banner-head">
         <span className="banner-eyebrow">{t('cc.title')}</span>
-        <StalenessBadge fresh={fresh} stampMs={stampMs} tz={tz} />
+        <StalenessBadge fresh={fresh} stampMs={stampMs} tz={tz} now={now} />
       </div>
 
       <div className="banner-grid">
@@ -107,6 +112,7 @@ export default function CurrentConditions({ latest, manifest }: { latest: Series
           <CompassDial deg={dir?.value ?? null} spread={spread?.value ?? null} locale={locale} />
           <div className="dial-caption">
             <span className="caption-label">
+              <DirectionIcon className="label-icon" style={{ color: 'var(--c-dir)' }} />
               {t('cc.direction')}
               <InfoPopover title={t('cc.direction')} body={t('def.direction')} />
             </span>
@@ -128,6 +134,7 @@ export default function CurrentConditions({ latest, manifest }: { latest: Series
         <div className="banner-metrics">
           <div className="metric-hero">
             <span className="metric-label">
+              <WaveHeightIcon className="label-icon" style={{ color: 'var(--c-height)' }} />
               {t('cc.waveHeight')}
               <InfoPopover title={t('cc.waveHeight')} body={t('def.waveHeight')} />
             </span>
@@ -138,9 +145,9 @@ export default function CurrentConditions({ latest, manifest }: { latest: Series
           </div>
 
           <div className="banner-gauges">
-            <Gauge label={t('cc.maxWave')} value={hmax ? fmtNumber(hmax.value, locale, 1) : '—'} unit="m" defKey="def.maxWave" />
-            <Gauge label={t('cc.period')} value={period ? fmtNumber(period.value, locale, 1) : '—'} unit="s" defKey="def.period" />
-            <Gauge label={t('cc.seaTemp')} value={temp ? fmtNumber(temp.value, locale, 1) : '—'} unit="°C" defKey="def.seaTemp" tone="warm" />
+            <Gauge label={t('cc.maxWave')} value={hmax ? fmtNumber(hmax.value, locale, 1) : '—'} unit="m" defKey="def.maxWave" icon={<MaxWaveIcon className="label-icon" style={{ color: 'var(--c-max)' }} />} />
+            <Gauge label={t('cc.period')} value={period ? fmtNumber(period.value, locale, 1) : '—'} unit="s" defKey="def.period" icon={<PeriodIcon className="label-icon" style={{ color: 'var(--c-period)' }} />} />
+            <Gauge label={t('cc.seaTemp')} value={temp ? fmtNumber(temp.value, locale, 1) : '—'} unit="°C" defKey="def.seaTemp" tone="warm" icon={<TempIcon className="label-icon" style={{ color: 'var(--c-temp)' }} />} />
           </div>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Header from './components/Header';
 import CurrentConditions from './components/CurrentConditions';
 import TimeSeries from './components/TimeSeries';
@@ -64,12 +64,17 @@ export default function App() {
   const [history, setHistory] = useState<Columnar | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The build's stamp; used to detect when the HF dataset has a fresh upload so a
+  // background refresh only swaps state when there is genuinely something new.
+  const generatedAtRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     Promise.all([loadManifest(), loadLatest(), loadRecent()])
       .then(([manifest, latest, recent]) => {
-        if (!cancelled) setData({ manifest, latest, recent });
+        if (cancelled) return;
+        generatedAtRef.current = manifest.generated_at;
+        setData({ manifest, latest, recent });
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -78,6 +83,49 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  // Auto-refresh: the data refreshes on the HF dataset every ~30 min (refresh-data.yml).
+  // Poll the manifest periodically (and whenever the tab regains focus); when its
+  // generated_at advances, pull the fresh live tiers so the current-conditions banner
+  // updates on its own — no page reload. Failures are non-fatal: we keep the last good
+  // data. (The heavy history parquet is left as-is; daily means barely move in 30 min.)
+  const refresh = useCallback(async () => {
+    try {
+      const manifest = await loadManifest();
+      if (manifest.generated_at === generatedAtRef.current) return;
+      const [latest, recent] = await Promise.all([loadLatest(), loadRecent()]);
+      generatedAtRef.current = manifest.generated_at;
+      setData({ manifest, latest, recent });
+    } catch (e) {
+      console.error('Background data refresh failed:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    const REFRESH_MS = 5 * 60_000;
+    const id = window.setInterval(refresh, REFRESH_MS);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [refresh]);
+
+  // Stable across the periodic banner refresh: identity only changes when a fresh build
+  // arrives, so the charts' detail tiers aren't reloaded on every tick.
+  const yearFiles = useMemo(
+    () => Object.fromEntries((data?.manifest.years ?? []).map((y) => [y.year, y.file])),
+    [data?.manifest],
+  );
+  const lastT = useMemo(
+    () => (data ? Math.floor(Date.parse(data.manifest.span.end) / 1000) : 0),
+    [data?.manifest],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -111,8 +159,8 @@ export default function App() {
               <TimeSeries
                 data={history}
                 tz={data.manifest.timezone}
-                lastT={Math.floor(Date.parse(data.manifest.span.end) / 1000)}
-                yearFiles={Object.fromEntries(data.manifest.years.map((y) => [y.year, y.file]))}
+                lastT={lastT}
+                yearFiles={yearFiles}
               />
             ) : historyError ? (
               <div className="state state--error">{t('state.chartsError')}</div>

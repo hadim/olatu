@@ -672,6 +672,8 @@ body {
 }
 
 .chart-panel-title {
+  display: inline-flex;
+  align-items: center;
   font-size: 0.74rem;
   text-transform: uppercase;
   letter-spacing: 0.07em;
@@ -756,9 +758,10 @@ body {
 /* ---- banner head + staleness badge ---- */
 .banner-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.5rem 1rem;
   margin-bottom: 1.1rem;
 }
 
@@ -802,6 +805,18 @@ body {
 
 .status-ago {
   white-space: nowrap;
+}
+
+/* exact reading timestamp, shown next to the relative "ago" */
+.status-stamp {
+  white-space: nowrap;
+  color: var(--text-3);
+}
+
+/* discreet per-metric line icons in the banner labels */
+.label-icon {
+  flex: none;
+  margin-right: 0.35rem;
 }
 
 /* ---- info popover (definitions + staleness explanation) ---- */
@@ -903,8 +918,12 @@ body {
 
 .hover-chip {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.35rem;
+}
+
+.hover-chip-icon {
+  flex: none;
 }
 
 .hover-chip-label {
