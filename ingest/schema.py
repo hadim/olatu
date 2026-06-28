@@ -1,14 +1,13 @@
-"""Canonical schema for CANDHIS buoy 06403 (Saint-Jean-de-Luz).
+"""Canonical schema for CANDHIS Basque-coast buoys (06403 Saint-Jean-de-Luz, 06402 Anglet).
 
 Single source of truth for: the archive/realtime -> canonical column mapping, units,
 which variables are "headline", which are angular (need circular means when
-aggregating), and the missing-value sentinel. Mirrors
-specs/2026-06-27-0002-data-dictionary.md -- keep them in sync.
+aggregating), and the missing-value sentinel. The column maps/units are CANDHIS-wide
+(shared by every campaign); only the per-buoy identity is keyed by campaign in BUOYS.
+Mirrors specs/2026-06-27-0002-data-dictionary.md and 0005 -- keep them in sync.
 """
 
 from __future__ import annotations
-
-CAMPAIGN_ID = "06403"
 
 # CANDHIS encodes "no valid measurement" as 999.999. A 999.999 m height / s period /
 # deg direction is physically impossible, so we null any value at/above the threshold
@@ -18,19 +17,61 @@ CAMPAIGN_ID = "06403"
 SENTINEL = 999.999
 SENTINEL_MIN = 999.99
 
-BUOY = {
-    "campaign_id": CAMPAIGN_ID,
-    "name": "Saint-Jean-de-Luz",
-    "network": "CANDHIS",
-    "operator": "Cerema",
-    "lat": 43.408333,
-    "lon": -1.681667,
-    "coast": "Atlantic / Basque coast (Bay of Biscay)",
-    "sensor": "Datawell directional Waverider",
-    "cadence_minutes": 30,
-    "water_depth_m": None,  # not published in open docs
-    "timezone": "Europe/Paris",
+# Per-buoy identity, keyed by CANDHIS campaign id. The default campaign is 06403 (the
+# original Saint-Jean-de-Luz buoy); 06402 (Anglet) was added in spec 0005. The CANDHIS
+# data dialect is identical across campaigns, so only this table differs per buoy.
+BUOYS = {
+    "06403": {
+        "campaign_id": "06403",
+        "name": "Saint-Jean-de-Luz",
+        "network": "CANDHIS",
+        "operator": "Cerema",
+        "lat": 43.408333,
+        "lon": -1.681667,
+        "coast": "Atlantic / Basque coast (Bay of Biscay)",
+        "sensor": "Datawell directional Waverider",
+        "cadence_minutes": 30,
+        "water_depth_m": None,  # not published in open docs
+        "timezone": "Europe/Paris",
+    },
+    "06402": {
+        "campaign_id": "06402",
+        "name": "Anglet",
+        "network": "CANDHIS",
+        "operator": "Cerema",
+        "lat": 43.5322,
+        "lon": -1.6150,
+        "coast": "Atlantic / Basque coast (Anglet, Adour estuary)",
+        "sensor": "Datawell directional Waverider",
+        "cadence_minutes": 30,
+        "water_depth_m": None,  # not published in open docs
+        "timezone": "Europe/Paris",
+    },
+    # 03302 Cap Ferret (Gironde / Arcachon). Added realtime-only (no downloaded archive
+    # yet) -- its history accumulates forward from the scraper's first run (spec 0005).
+    "03302": {
+        "campaign_id": "03302",
+        "name": "Cap Ferret",
+        "network": "CANDHIS",
+        "operator": "Cerema",
+        "lat": 44.6525,
+        "lon": -1.44667,
+        "coast": "Atlantic coast (Gironde, off Cap Ferret / Arcachon)",
+        "sensor": "Datawell directional Waverider",
+        "cadence_minutes": 30,
+        "water_depth_m": None,  # not published in open docs
+        "timezone": "Europe/Paris",
+    },
 }
+
+# Default campaign (back-compat for call-sites / CLIs that don't pass --campaign).
+CAMPAIGN_ID = "06403"
+
+
+def buoy(campaign: str = CAMPAIGN_ID) -> dict:
+    """Return the identity dict for a campaign id (raises KeyError if unknown)."""
+    return BUOYS[campaign]
+
 
 # Archive CSV column -> canonical name. `DateHeure` is handled separately.
 # The 43 columns that are 100% empty for 06403 (QUALITE, NBSYS, *_S1..S4) are simply

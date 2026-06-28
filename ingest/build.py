@@ -1,17 +1,18 @@
 """Build the tiered static data files for the Olatu webapp from CANDHIS CSVs.
 
-Reads the archive (`Candhis_06403_YYYY_arch.csv`) and realtime
-(`Candhis_06403_*_reel.csv`) exports, cleans + normalizes them to one canonical
-half-hourly series, and emits:
+Reads the archive (`Candhis_<campaign>_YYYY_arch.csv`) and realtime
+(`Candhis_<campaign>_*_reel.csv`) exports for one campaign, cleans + normalizes them
+to one canonical half-hourly series, and emits:
 
     <out>/manifest.json          buoy meta + variable dict + span + year files + coverage
     <out>/latest.json            last 48h @ 30min (incl. sea temperature) -- eager
     <out>/recent.json            last 30 days @ 30min, merged -- prefetched
-    <out>/year/06403_YYYY.parquet  full canonical schema per year (Snappy, multi-row-group)
+    <out>/year/<campaign>_YYYY.parquet  full canonical schema per year (Snappy, multi-row-group)
     <out>/hourly.parquet         hourly means of headline vars (full archive)
     <out>/daily.parquet          daily means of headline vars (full archive)
 
-Run via `pixi run ingest` (see pixi.toml). See specs/2026-06-27-0001-foundation.md §5.
+Campaign defaults to 06403 (Saint-Jean-de-Luz); pass --campaign 06402 for Anglet
+(spec 0005). Run via `pixi run ingest`. See specs/2026-06-27-0001-foundation.md §5.
 """
 
 from __future__ import annotations
@@ -27,7 +28,6 @@ import pyarrow.parquet as pq
 
 from .schema import (
     ARCH_MAP,
-    BUOY,
     CAMPAIGN_ID,
     CANONICAL_ORDER,
     DIRECTION_VARS,
@@ -36,6 +36,7 @@ from .schema import (
     REEL_MAP,
     SENTINEL_MIN,
     UNITS,
+    buoy,
     variable_source,
 )
 
@@ -61,10 +62,12 @@ def _clean_numeric(df: pl.DataFrame, cols: list[str]) -> pl.DataFrame:
     )
 
 
-def read_archive(src: Path) -> pl.DataFrame:
-    files = sorted(glob.glob(str(src / f"Candhis_{CAMPAIGN_ID}_*_arch.csv")))
+def read_archive(src: Path, campaign: str = CAMPAIGN_ID) -> pl.DataFrame | None:
+    # A realtime-only buoy (no downloaded archive, e.g. a newly-added campaign whose
+    # history accumulates forward from the scraper) simply has no *_arch.csv yet.
+    files = sorted(glob.glob(str(src / f"Candhis_{campaign}_*_arch.csv")))
     if not files:
-        raise FileNotFoundError(f"No archive CSVs found in {src}")
+        return None
     frames = []
     for f in files:
         # read everything as Utf8 so empty fields -> null deterministically
@@ -79,8 +82,8 @@ def read_archive(src: Path) -> pl.DataFrame:
     return pl.concat(frames, how="diagonal_relaxed")
 
 
-def read_realtime(src: Path) -> pl.DataFrame | None:
-    files = sorted(glob.glob(str(src / f"Candhis_{CAMPAIGN_ID}_*_reel.csv")))
+def read_realtime(src: Path, campaign: str = CAMPAIGN_ID) -> pl.DataFrame | None:
+    files = sorted(glob.glob(str(src / f"Candhis_{campaign}_*_reel.csv")))
     if not files:
         return None
     frames = []
@@ -99,7 +102,11 @@ def read_realtime(src: Path) -> pl.DataFrame | None:
 # ----------------------------------------------------------------------- assemble
 
 
-def assemble(archive: pl.DataFrame, realtime: pl.DataFrame | None) -> pl.DataFrame:
+def assemble(
+    archive: pl.DataFrame | None,
+    realtime: pl.DataFrame | None,
+    campaign: str = CAMPAIGN_ID,
+) -> pl.DataFrame:
     """Merge archive + realtime into one canonical series, one row per timestamp.
 
     Column-wise coalesce, ARCHIVE-PREFERRED: where both feeds carry a timestamp, the
@@ -109,9 +116,13 @@ def assemble(archive: pl.DataFrame, realtime: pl.DataFrame | None) -> pl.DataFra
     QC'd values once accumulated realtime ages into archive coverage. (A plain
     last-wins dedup would let the 6-column realtime quick-look clobber the 30-column
     archive record -- see specs/2026-06-27-0004-realtime-scraper.md.)
+
+    Either feed may be absent: a realtime-only buoy (no archive yet) builds purely from
+    the scraped tail, and forward-grows like sea temperature does (spec 0005).
     """
-    archive = archive.with_columns(pl.lit(0, dtype=pl.Int8).alias("_src"))
-    parts = [archive]
+    parts = []
+    if archive is not None:
+        parts.append(archive.with_columns(pl.lit(0, dtype=pl.Int8).alias("_src")))
     if realtime is not None:
         parts.append(realtime.with_columns(pl.lit(1, dtype=pl.Int8).alias("_src")))
 
@@ -121,7 +132,7 @@ def assemble(archive: pl.DataFrame, realtime: pl.DataFrame | None) -> pl.DataFra
     for col in CANONICAL_ORDER:
         if col not in merged.columns and col != "campaign_id":
             merged = merged.with_columns(pl.lit(None, dtype=pl.Float64).alias(col))
-    merged = merged.with_columns(pl.lit(CAMPAIGN_ID).alias("campaign_id"))
+    merged = merged.with_columns(pl.lit(campaign).alias("campaign_id"))
 
     # one row per timestamp: sort archive (_src=0) before realtime (_src=1), then take
     # the first non-null per column -> archive-preferred coalesce, realtime fills gaps.
@@ -199,15 +210,20 @@ def coverage(df: pl.DataFrame, col: str) -> dict | None:
 # --------------------------------------------------------------------------- main
 
 
-def build(src: Path, out: Path) -> None:
-    print(f"reading CSVs from {src}")
-    archive = read_archive(src)
-    realtime = read_realtime(src)
+def build(src: Path, out: Path, campaign: str = CAMPAIGN_ID) -> None:
+    print(f"reading {campaign} CSVs from {src}")
+    archive = read_archive(src, campaign)
+    realtime = read_realtime(src, campaign)
+    if archive is None and realtime is None:
+        raise FileNotFoundError(
+            f"No archive or realtime CSVs for {campaign} in {src} (nothing to build)"
+        )
     print(
-        f"  archive rows={archive.height}  realtime rows={0 if realtime is None else realtime.height}"
+        f"  archive rows={0 if archive is None else archive.height}  "
+        f"realtime rows={0 if realtime is None else realtime.height}"
     )
 
-    merged = assemble(archive, realtime)
+    merged = assemble(archive, realtime, campaign)
     print(
         f"  merged rows={merged.height}  span={merged[DT].min()} -> {merged[DT].max()}"
     )
@@ -219,7 +235,7 @@ def build(src: Path, out: Path) -> None:
     year_files = []
     for y in years:
         g = merged.filter(pl.col(DT).dt.year() == y)
-        rel = f"year/{CAMPAIGN_ID}_{y}.parquet"
+        rel = f"year/{campaign}_{y}.parquet"
         size = write_parquet(out / rel, g, ROW_GROUP_SIZE)
         year_files.append(
             {"year": y, "file": rel, "rows": g.height, "byteLength": size}
@@ -246,10 +262,11 @@ def build(src: Path, out: Path) -> None:
     )
 
     # manifest
+    meta = buoy(campaign)
     manifest = {
-        "buoy": BUOY,
+        "buoy": meta,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "timezone": BUOY["timezone"],
+        "timezone": meta["timezone"],
         "span": {
             "start": merged[DT].min().replace(tzinfo=timezone.utc).isoformat(),
             "end": merged[DT].max().replace(tzinfo=timezone.utc).isoformat(),
@@ -281,10 +298,15 @@ def build(src: Path, out: Path) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(description="Build Olatu data tiers from CANDHIS CSVs.")
     p.add_argument(
+        "--campaign",
+        default=CAMPAIGN_ID,
+        help=f"CANDHIS campaign id (default: {CAMPAIGN_ID})",
+    )
+    p.add_argument(
         "--src",
         type=Path,
         default=Path("/Users/hadim/Data/olatu"),
-        help="Directory containing Candhis_06403_*_arch.csv and *_reel.csv",
+        help="Directory containing Candhis_<campaign>_*_arch.csv and *_reel.csv",
     )
     p.add_argument(
         "--out",
@@ -293,7 +315,7 @@ def main() -> None:
         help="Output directory for the tiered files (default: webapp/public/data, served by Vite)",
     )
     args = p.parse_args()
-    build(args.src, args.out)
+    build(args.src, args.out, args.campaign)
 
 
 if __name__ == "__main__":

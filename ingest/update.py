@@ -184,7 +184,7 @@ def update(
     if do_scrape:
         scrape_mod.scrape(raw, campaign)
 
-    build_mod.build(raw, data)
+    build_mod.build(raw, data, campaign)
 
     if do_upload:
         # When seeding, push the archive too (first time only); otherwise reel-only.

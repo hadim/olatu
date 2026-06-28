@@ -340,10 +340,10 @@ def _atomic_write(path: Path, text: str) -> None:
 
 
 @contextlib.contextmanager
-def _lock(src: Path):
+def _lock(src: Path, campaign: str = CAMPAIGN_ID):
     """Exclusive, non-blocking lock so two overlapping runs can't race the merge."""
     src.mkdir(parents=True, exist_ok=True)
-    lock_path = src / f".scrape_{CAMPAIGN_ID}.lock"
+    lock_path = src / f".scrape_{campaign}.lock"
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
     try:
         try:
@@ -377,7 +377,7 @@ def scrape(src: Path, campaign_id: str = CAMPAIGN_ID) -> dict[int, int]:
         f"  scraped {scraped.height} valid rows  span {scraped[DT].min()} -> {scraped[DT].max()}"
     )
 
-    with _lock(src):
+    with _lock(src, campaign_id):
         # Plan every year's merge in memory first; only write once all pass validation,
         # so a failure mid-way never leaves a half-updated set on disk.
         plans: list[tuple[Path, pl.DataFrame, list[Path]]] = []
