@@ -3,10 +3,69 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="description" content="Live and historical wave conditions from the Saint-Jean-de-Luz buoy (CANDHIS 06403)." />
+
+    <!-- Primary SEO -->
+    <title>Olatu — live wave &amp; swell at French Atlantic buoys</title>
+    <meta
+      name="description"
+      content="Live &amp; historical sea state — wave height, swell period &amp; direction, sea temperature — from the CANDHIS wave buoys at Saint-Jean-de-Luz, Anglet &amp; Cap Ferret. Free, no account."
+    />
+    <meta name="robots" content="index, follow" />
     <link rel="canonical" href="https://olatu.io/" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0a1622" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#eef4f6" />
+
+    <!-- Icons -->
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
-    <title>Olatu — Saint-Jean-de-Luz wave buoy</title>
+    <link rel="mask-icon" href="%BASE_URL%favicon.svg" color="#38e1c6" />
+    <link rel="apple-touch-icon" href="%BASE_URL%favicon.svg" />
+
+    <!-- Open Graph (link previews) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Olatu" />
+    <meta property="og:title" content="🌊 Olatu — live wave &amp; swell buoys" />
+    <meta
+      property="og:description"
+      content="Live &amp; historical sea state — wave height, swell &amp; sea temperature — from the CANDHIS buoys at Saint-Jean-de-Luz, Anglet &amp; Cap Ferret. Pick a buoy on the map."
+    />
+    <meta property="og:url" content="https://olatu.io/" />
+    <meta property="og:image" content="https://olatu.io/og.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Olatu — a map of the CANDHIS wave buoys and a live sea-state dashboard" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:locale:alternate" content="fr_FR" />
+    <meta property="og:locale:alternate" content="es_ES" />
+
+    <!-- Twitter / X card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="🌊 Olatu — live wave &amp; swell buoys" />
+    <meta
+      name="twitter:description"
+      content="Live &amp; historical sea state from the CANDHIS wave buoys at Saint-Jean-de-Luz, Anglet &amp; Cap Ferret. Pick a buoy on the map."
+    />
+    <meta name="twitter:image" content="https://olatu.io/og.png" />
+    <meta name="twitter:image:alt" content="Olatu — a map of the CANDHIS wave buoys and a live sea-state dashboard" />
+
+    <!-- Structured data -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Olatu",
+        "url": "https://olatu.io/",
+        "description": "Live and historical sea state — wave height, swell and sea temperature — from the CANDHIS wave buoys of the French Atlantic coast (Saint-Jean-de-Luz, Anglet, Cap Ferret).",
+        "applicationCategory": "UtilitiesApplication",
+        "operatingSystem": "Web",
+        "browserRequirements": "Requires JavaScript",
+        "isAccessibleForFree": true,
+        "inLanguage": ["en", "fr", "es"],
+        "image": "https://olatu.io/og.png",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" }
+      }
+    </script>
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
