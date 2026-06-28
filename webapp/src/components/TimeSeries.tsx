@@ -257,7 +257,7 @@ export default function TimeSeries({ data, tz, yearFiles, lastT }: { data: Colum
     // Breathing room so the first/last points (and y-extremes) aren't half-clipped at
     // the plot edges — uPlot clips series to the plot rect, so this lives in the SCALE,
     // not the outer padding. x-pad is identical on every panel, so x stays aligned.
-    const xpad = Math.max((xmax - xmin) * 0.02, 1);
+    const xpad = Math.max((xmax - xmin) * 0.04, 1);
     const padY = (lo: number, hi: number, f: number): [number, number] => {
       const d = hi - lo || 1;
       return [lo - d * f, hi + d * f];
