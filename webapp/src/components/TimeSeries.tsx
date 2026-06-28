@@ -1,22 +1,24 @@
 // Synced multi-panel time-series (uPlot, canvas). One instance per panel, sharing
 // the x-axis + crosshair. Theme-aware (re-created when the theme changes).
-// v1 feeds from daily means (full history); 30-min detail + direction glyphs come later.
+// Feeds from tiered files: 30-min detail on narrow windows, hourly/daily means on wider.
 //
 // Spec 0003 batch 1: year-aware x-axis ticks, clipped points, always-present temp panel
 // with an empty-state overlay, a discreet hover value card, a visible zoom selection,
-// a translucent ± spread band on the direction track, and a Raw/Light/Strong smoother.
-// Batch 2: a unified time navigator — presets + per-year/month jumps + a custom date
-// range + a heat-ribbon overview.
+// and a Raw/Light/Strong smoother. Batch 2: a unified time navigator — presets +
+// per-year/month jumps + a calendar date-range cherry-picker + a heat-ribbon overview.
+// Phase 3: the direction track is a custom cyclical-hue arrow-glyph layer with a
+// wrap-aware spread band (drawn straight onto the canvas; see drawDirectionLayer).
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
 import { useTheme } from '../lib/theme';
 import { useI18n, type MessageKey } from '../lib/i18n';
-import { compass, fmtNumber, fmtDateTime, fmtAxisTick } from '../lib/format';
+import { compass, dirColor, fmtNumber, fmtDateTime, fmtAxisTick } from '../lib/format';
 import { loadParquetTier, type Columnar } from '../lib/parquet';
 import { iconSvg, type IconName } from './icons';
 import HeatRibbon from './HeatRibbon';
+import DatePicker from './DatePicker';
 
 const SYNC_KEY = 'olatu-ts';
 const DAY = 86_400;
@@ -27,16 +29,85 @@ const yStart = (y: number) => Date.UTC(y, 0, 1) / 1000;
 const yEnd = (y: number) => Date.UTC(y + 1, 0, 1) / 1000 - 1;
 const mStart = (y: number, m: number) => Date.UTC(y, m, 1) / 1000;
 const mEnd = (y: number, m: number) => Date.UTC(y, m + 1, 1) / 1000 - 1;
-const toInput = (sec: number) => new Date(sec * 1000).toISOString().slice(0, 10);
-const fromInput = (val: string, end: boolean) => {
-  const [Y, M, D] = val.split('-').map(Number);
-  return Date.UTC(Y, M - 1, D) / 1000 + (end ? DAY - 1 : 0);
-};
+/** Custom direction track drawn straight onto uPlot's canvas: a wrap-aware translucent
+ *  spread band (tiled per sample so the 0/360° seam is honest), with density-thinned
+ *  arrow glyphs on top — each rotated to the swell's travel direction and coloured by
+ *  its cyclical from-direction hue (spec 0001 §7.1, 0002 §4.6). Total pixel control is
+ *  the whole point: a degree-line can't render the cyclical wrap or the arrow cue. */
+function drawDirectionLayer(u: uPlot, xs: number[], dir: (number | null)[], spread: (number | null)[], dpr: number) {
+  const ctx = u.ctx;
+  const { left, top, width, height } = u.bbox;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(left, top, width, height);
+  ctx.clip();
+
+  const xAt = (i: number) => u.valToPos(xs[i], 'x', true);
+  const yAt = (deg: number) => u.valToPos(deg, 'y', true);
+  const inX = (px: number) => px >= left - 2 && px <= left + width + 2;
+
+  // Spread band: one tile per sample (midpoint→midpoint), split at the wrap boundary so
+  // dir ± spread crossing 0°/360° draws on both edges instead of clamping flat.
+  for (let i = 0; i < xs.length; i++) {
+    const d = dir[i];
+    const sp = spread[i];
+    if (d == null || sp == null) continue;
+    const px = xAt(i);
+    if (!inX(px)) continue;
+    const xl = i > 0 && dir[i - 1] != null ? (xAt(i - 1) + px) / 2 : px - dpr;
+    const xr = i < xs.length - 1 && dir[i + 1] != null ? (px + xAt(i + 1)) / 2 : px + dpr;
+    const half = Math.min(Math.max(sp, 1), 80);
+    ctx.fillStyle = dirColor(d) + '24';
+    const seg = (lo: number, hi: number) => {
+      const yT = yAt(hi);
+      ctx.fillRect(xl, yT, Math.max(1, xr - xl), yAt(lo) - yT);
+    };
+    const lo = d - half;
+    const hi = d + half;
+    if (lo < 0) {
+      seg(0, hi);
+      seg(lo + 360, 360);
+    } else if (hi > 360) {
+      seg(lo, 360);
+      seg(0, hi - 360);
+    } else {
+      seg(lo, hi);
+    }
+  }
+
+  // Arrow glyphs, thinned to a minimum pixel spacing so they never overlap.
+  const minGap = 17 * dpr;
+  const s = 4.6 * dpr;
+  let lastX = -Infinity;
+  for (let i = 0; i < xs.length; i++) {
+    const d = dir[i];
+    if (d == null) continue;
+    const px = xAt(i);
+    if (!inX(px) || px - lastX < minGap) continue;
+    lastX = px;
+    ctx.save();
+    ctx.translate(px, yAt(d));
+    ctx.rotate(((d + 180) * Math.PI) / 180); // local "up" → the way the swell travels
+    ctx.beginPath();
+    ctx.moveTo(0, -s);
+    ctx.lineTo(s * 0.66, s * 0.55);
+    ctx.lineTo(s * 0.2, s * 0.55);
+    ctx.lineTo(s * 0.2, s);
+    ctx.lineTo(-s * 0.2, s);
+    ctx.lineTo(-s * 0.2, s * 0.55);
+    ctx.lineTo(-s * 0.66, s * 0.55);
+    ctx.closePath();
+    ctx.fillStyle = dirColor(d);
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+}
 
 interface PanelDef {
   titleKey: MessageKey;
   series: { key: string; colorVar: string; width?: number; fill?: boolean }[];
-  points?: boolean;
+  glyph?: boolean;
   range?: [number, number];
   ySplits?: number[];
   spreadKey?: string;
@@ -55,7 +126,7 @@ const PANELS: PanelDef[] = [
   {
     titleKey: 'cc.direction',
     series: [{ key: 'peak_direction_deg', colorVar: '--c-dir' }],
-    points: true,
+    glyph: true,
     range: [0, 360],
     ySplits: [0, 90, 180, 270, 360],
     spreadKey: 'peak_directional_spread_deg',
@@ -196,6 +267,17 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
     return s;
   }, [navYear, xs, data]);
 
+  // Daily wave height keyed by UTC day-index — lets the calendar mark which days carry
+  // data and flag the big-swell ones (it reads the same daily tier the charts plot).
+  const dayHs = useMemo(() => {
+    const m = new Map<number, number>();
+    const hsCol = data.significant_wave_height_m as (number | null)[];
+    for (let i = 0; i < xs.length; i++) {
+      if (hsCol[i] != null) m.set(Math.floor(xs[i] / DAY), hsCol[i] as number);
+    }
+    return m;
+  }, [xs, data]);
+
   const apply = (min: number, max: number, m: string) => {
     setRange({ min: Math.max(T0, Math.min(min, TN - DAY)), max: Math.min(TN, Math.max(max, T0 + DAY)) });
     setMode(m);
@@ -300,6 +382,7 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
 
     const axisColor = cssVar('--text-3');
     const gridColor = cssVar('--hairline');
+    const DPR = window.devicePixelRatio || 1; // uPlot draws in device px; glyphs match
     const plots: uPlot[] = [];
     let syncing = false;
 
@@ -365,28 +448,19 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
       };
       const hasData = panel.series.some((s) => inWindow(s.key));
 
-      const plotted = (key: string) =>
-        panel.points ? gcols[key] : movingAvg(gcols[key], radius);
+      const plotted = (key: string) => movingAvg(gcols[key], radius);
 
       let chartData: uPlot.AlignedData;
       let series: uPlot.Series[];
-      let bands: uPlot.Band[] | undefined;
 
-      if (panel.spreadKey) {
-        const dir = gcols[panel.series[0].key];
-        const sp = gcols[panel.spreadKey];
-        const hi = dir.map((d, i) => (d == null || sp[i] == null ? null : Math.min(360, d + (sp[i] as number))));
-        const lo = dir.map((d, i) => (d == null || sp[i] == null ? null : Math.max(0, d - (sp[i] as number))));
-        const color = cssVar(panel.series[0].colorVar);
-        const invisible = (): uPlot.Series => ({ stroke: 'transparent', width: 1, points: { show: false }, value: () => '' });
-        chartData = [gxs, hi, lo, dir];
+      if (panel.glyph) {
+        // Direction: an invisible data series feeds uPlot's scale + cursor index; the
+        // visible band + arrow glyphs are painted in the draw hook (drawDirectionLayer).
+        chartData = [gxs, gcols[panel.series[0].key]];
         series = [
           {},
-          invisible(),
-          invisible(),
-          { label: panel.series[0].key, stroke: color, width: 1, paths: () => null, points: { show: true, size: 3, fill: color, stroke: color }, value: (_u, v) => (v == null ? '—' : `${Math.round(v)}°`) },
+          { label: panel.series[0].key, stroke: 'transparent', width: 0, points: { show: false }, paths: () => null, value: (_u, v) => (v == null ? '—' : `${Math.round(v)}°`) },
         ];
-        bands = [{ series: [1, 2], fill: color + '24' }];
       } else {
         chartData = [gxs, ...panel.series.map((s) => plotted(s.key))];
         series = [
@@ -422,9 +496,27 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
         values: (_u, splits, _ai, _space, incr) => splits.map((s) => fmtAxisTick(s * 1000, locale, tz, incr)),
       };
 
+      const hooks: uPlot.Hooks.Arrays = {
+        setCursor: [(u) => renderCard(u.cursor.idx)],
+        setScale: [
+          (u, key) => {
+            if (key !== 'x' || syncing) return;
+            syncing = true;
+            const { min, max } = u.scales.x;
+            for (const o of plots) if (o !== u && min != null && max != null) o.setScale('x', { min, max });
+            syncing = false;
+          },
+        ],
+      };
+      if (panel.glyph) {
+        const dirArr = gcols[panel.series[0].key];
+        const spreadArr = gcols[panel.spreadKey!];
+        hooks.draw = [(u) => drawDirectionLayer(u, gxs, dirArr, spreadArr, DPR)];
+      }
+
       const opts: uPlot.Options = {
         width: host.clientWidth || 800,
-        height: panel.points ? 140 : 124,
+        height: panel.glyph ? 140 : 124,
         // Fixed right padding on EVERY panel. Only the last panel shows x-axis labels,
         // and uPlot would otherwise auto-reserve right-edge space for its last tick
         // label on that panel alone — making it narrower than the others, so the same
@@ -441,21 +533,9 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
         tzDate: (ts: number) => uPlot.tzDate(new Date(ts * 1000), tz),
         axes: [xAxis, yAxis],
         series,
-        bands,
         legend: { show: false },
         cursor: { sync: { key: SYNC_KEY }, points: { size: 6 } },
-        hooks: {
-          setCursor: [(u) => renderCard(u.cursor.idx)],
-          setScale: [
-            (u, key) => {
-              if (key !== 'x' || syncing) return;
-              syncing = true;
-              const { min, max } = u.scales.x;
-              for (const o of plots) if (o !== u && min != null && max != null) o.setScale('x', { min, max });
-              syncing = false;
-            },
-          ],
-        },
+        hooks,
       };
 
       plots.push(new uPlot(opts, chartData, wrap));
@@ -538,11 +618,17 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
             </button>
           ))}
         </div>
-        <label className="custom-range">
-          <input type="date" value={toInput(range.min)} min={toInput(T0)} max={toInput(range.max)} onChange={(e) => e.target.value && apply(fromInput(e.target.value, false), range.max, 'custom')} />
-          <span className="range-sep">–</span>
-          <input type="date" value={toInput(range.max)} min={toInput(range.min)} max={toInput(TN)} onChange={(e) => e.target.value && apply(range.min, fromInput(e.target.value, true), 'custom')} />
-        </label>
+        <DatePicker
+          min={range.min}
+          max={range.max}
+          t0={T0}
+          tn={TN}
+          dayHs={dayHs}
+          onChange={(mn, mx) => {
+            setNavYear(null);
+            apply(mn, mx, 'custom');
+          }}
+        />
       </div>
       )}
 

@@ -4,15 +4,21 @@
 
 import { useEffect, useState } from 'react';
 import { useI18n, type MessageKey } from '../lib/i18n';
+import { compass, dirColor } from '../lib/format';
 
-const TERMS: { labelKey: MessageKey; defKey: MessageKey }[] = [
-  { labelKey: 'cc.waveHeight', defKey: 'def.waveHeight' },
-  { labelKey: 'cc.maxWave', defKey: 'def.maxWave' },
-  { labelKey: 'cc.period', defKey: 'def.period' },
-  { labelKey: 'cc.direction', defKey: 'def.direction' },
-  { labelKey: 'cc.spread', defKey: 'def.spread' },
-  { labelKey: 'cc.seaTemp', defKey: 'def.seaTemp' },
+// Each term carries its CANDHIS source field (the original code, language-neutral) and a
+// typical-range hint, so the slide-over is the full tier-3 reference (spec 0001 §6.5).
+const TERMS: { labelKey: MessageKey; defKey: MessageKey; src: string; rangeKey: MessageKey }[] = [
+  { labelKey: 'cc.waveHeight', defKey: 'def.waveHeight', src: 'H1/3 · H13D', rangeKey: 'gloss.range.waveHeight' },
+  { labelKey: 'cc.maxWave', defKey: 'def.maxWave', src: 'Hmax · HMAXD', rangeKey: 'gloss.range.maxWave' },
+  { labelKey: 'cc.period', defKey: 'def.period', src: 'Th1/3 · TH13D', rangeKey: 'gloss.range.period' },
+  { labelKey: 'cc.direction', defKey: 'def.direction', src: 'DirPic · THETAP', rangeKey: 'gloss.range.direction' },
+  { labelKey: 'cc.spread', defKey: 'def.spread', src: 'EtalPic · SIGMAP', rangeKey: 'gloss.range.spread' },
+  { labelKey: 'cc.seaTemp', defKey: 'def.seaTemp', src: 'TempMer', rangeKey: 'gloss.range.seaTemp' },
 ];
+
+// Cardinal anchors of the cyclical direction hue (mirrors format.ts DIR_ANCHORS).
+const DIR_LEGEND = [0, 90, 180, 270];
 
 // Sea-state reference scale — mirrors specs/0002 §6 and the chart wave-height colours.
 const SEA_STATE: { key: MessageKey; range: string; color: string }[] = [
@@ -34,7 +40,7 @@ function BookIcon() {
 }
 
 export default function Glossary() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -85,9 +91,27 @@ export default function Glossary() {
                   <div key={term.labelKey}>
                     <dt>{t(term.labelKey)}</dt>
                     <dd>{t(term.defKey)}</dd>
+                    <div className="glossary-meta">
+                      <span className="glossary-src">{term.src}</span>
+                      <span className="glossary-typical">{t('glossary.typical')}: {t(term.rangeKey)}</span>
+                    </div>
                   </div>
                 ))}
               </dl>
+            </section>
+
+            <section className="glossary-section">
+              <h3>{t('glossary.directionScale')}</h3>
+              <p className="glossary-note">{t('glossary.directionScaleNote')}</p>
+              <ul className="dir-scale">
+                {DIR_LEGEND.map((deg) => (
+                  <li key={deg}>
+                    <span className="dir-swatch" style={{ background: dirColor(deg) }} aria-hidden="true" />
+                    <span className="sea-label">{compass(deg, locale)}</span>
+                    <span className="sea-range">{deg}°</span>
+                  </li>
+                ))}
+              </ul>
             </section>
 
             <section className="glossary-section">

@@ -1,9 +1,22 @@
 // Heat-ribbon timeline (spec 0001 §6.3): a "storm skyline" of the whole record —
 // each day a bar, height ∝ wave height, coloured by the sea-state scale. The current
-// view window is highlighted; click recenters it, drag selects a new range.
+// view window is highlighted; drag an edge handle to resize it, drag inside it to pan,
+// drag empty track to select a fresh window, click to recentre. Charts commit on release.
 
 import { useEffect, useRef, useState } from 'react';
 import { hsColor } from '../lib/format';
+
+const DAY = 86_400;
+
+type Mode = 'select' | 'resize-l' | 'resize-r' | 'pan';
+interface Drag {
+  mode: Mode;
+  startMin: number;
+  startMax: number;
+  grab: number; // time grabbed at pointer-down
+  cur: number; // current pointer time
+  moved: boolean;
+}
 
 interface Props {
   t: number[]; // epoch seconds, ascending
@@ -16,12 +29,13 @@ interface Props {
 export default function HeatRibbon({ t, hs, min, max, onChange }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [drag, setDrag] = useState<{ a: number; b: number; moved: boolean } | null>(null);
+  const [drag, setDrag] = useState<Drag | null>(null);
   const [width, setWidth] = useState(0);
 
   const T0 = t[0];
   const TN = t[t.length - 1];
   const span = Math.max(1, TN - T0);
+  const MINW = Math.min(DAY, span); // smallest window a handle drag can shrink to
 
   // draw the skyline
   useEffect(() => {
@@ -65,35 +79,49 @@ export default function HeatRibbon({ t, hs, min, max, onChange }: Props) {
     return T0 + frac * span;
   };
 
+  // The window the drag would produce, given its mode (live preview; committed on up).
+  const previewOf = (d: Drag): [number, number] => {
+    if (d.mode === 'resize-l') return [Math.min(d.cur, d.startMax - MINW), d.startMax];
+    if (d.mode === 'resize-r') return [d.startMin, Math.max(d.cur, d.startMin + MINW)];
+    if (d.mode === 'pan') {
+      const w = d.startMax - d.startMin;
+      const mn = Math.min(Math.max(d.startMin + (d.cur - d.grab), T0), TN - w);
+      return [mn, mn + w];
+    }
+    return [Math.min(d.grab, d.cur), Math.max(d.grab, d.cur)];
+  };
+
   const onDown = (e: React.PointerEvent) => {
-    const a = pxToTime(e.clientX);
-    setDrag({ a, b: a, moved: false });
+    const time = pxToTime(e.clientX);
+    const handle = (e.target as HTMLElement).dataset.handle;
+    const mode: Mode = handle === 'l' ? 'resize-l' : handle === 'r' ? 'resize-r' : time >= min && time <= max ? 'pan' : 'select';
+    setDrag({ mode, startMin: min, startMax: max, grab: time, cur: time, moved: false });
     e.currentTarget.setPointerCapture(e.pointerId);
   };
   const onMove = (e: React.PointerEvent) => {
     if (!drag) return;
-    const b = pxToTime(e.clientX);
-    setDrag((d) => (d ? { ...d, b, moved: d.moved || Math.abs(b - d.a) > span * 0.004 } : d));
+    const cur = pxToTime(e.clientX);
+    setDrag((d) => (d ? { ...d, cur, moved: d.moved || d.mode !== 'select' || Math.abs(cur - d.grab) > span * 0.004 } : d));
   };
   const onUp = () => {
     if (!drag) return;
     if (drag.moved) {
-      onChange(Math.min(drag.a, drag.b), Math.max(drag.a, drag.b));
-    } else {
-      // click: recenter the current window on the clicked instant
-      const width = max - min;
-      let nmin = drag.a - width / 2;
-      let nmax = drag.a + width / 2;
-      if (nmin < T0) [nmin, nmax] = [T0, T0 + width];
-      if (nmax > TN) [nmin, nmax] = [TN - width, TN];
+      const [a, b] = previewOf(drag);
+      onChange(Math.max(T0, a), Math.min(TN, b));
+    } else if (drag.mode === 'select' || drag.mode === 'pan') {
+      // a click (no drag): recentre the current window on the clicked instant
+      const w = max - min;
+      let nmin = drag.grab - w / 2;
+      let nmax = drag.grab + w / 2;
+      if (nmin < T0) [nmin, nmax] = [T0, T0 + w];
+      if (nmax > TN) [nmin, nmax] = [TN - w, TN];
       onChange(Math.max(T0, nmin), Math.min(TN, nmax));
     }
     setDrag(null);
   };
 
-  // selection (live during drag, else the active window)
-  const selMin = drag && drag.moved ? Math.min(drag.a, drag.b) : min;
-  const selMax = drag && drag.moved ? Math.max(drag.a, drag.b) : max;
+  // selection (live during a drag, else the active window)
+  const [selMin, selMax] = drag && drag.moved ? previewOf(drag) : [min, max];
   const leftPct = ((selMin - T0) / span) * 100;
   const rightPct = ((selMax - T0) / span) * 100;
 
@@ -127,6 +155,8 @@ export default function HeatRibbon({ t, hs, min, max, onChange }: Props) {
         <div className="ribbon-mask" style={{ left: 0, width: `${Math.max(0, leftPct)}%` }} />
         <div className="ribbon-mask" style={{ left: `${Math.min(100, rightPct)}%`, right: 0 }} />
         <div className="ribbon-window" style={{ left: `${leftPct}%`, width: `${Math.max(0.4, rightPct - leftPct)}%` }} />
+        <div className="ribbon-handle ribbon-handle--l" data-handle="l" style={{ left: `${leftPct}%` }} aria-hidden="true" />
+        <div className="ribbon-handle ribbon-handle--r" data-handle="r" style={{ left: `${rightPct}%` }} aria-hidden="true" />
       </div>
       <div className="ribbon-ticks">
         {ticks.map((tk) => (

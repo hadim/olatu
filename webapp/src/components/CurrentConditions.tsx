@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useI18n, type MessageKey } from '../lib/i18n';
 import { lastValue, latestTimestamp, type Manifest, type Series } from '../lib/data';
-import { compass, fmtNumber, fmtClock, freshness, relativeAgo, type Freshness } from '../lib/format';
+import { compass, dirColor, fmtNumber, fmtClock, freshness, relativeAgo, type Freshness } from '../lib/format';
 import { useNow } from '../lib/useNow';
 import { WaveHeightIcon, MaxWaveIcon, PeriodIcon, DirectionIcon, TempIcon } from './icons';
 import InfoPopover from './InfoPopover';
@@ -19,6 +19,9 @@ function conePath(cx: number, cy: number, ri: number, ro: number, halfDeg: numbe
 
 function CompassDial({ deg, spread, locale }: { deg: number | null; spread: number | null; locale: string }) {
   const dirText = deg != null ? compass(deg, locale as never) : '—';
+  // The dial shares the charts' cyclical from-direction hue so the banner and the
+  // direction track read as one system (N teal · E blue · S gold · W pink).
+  const hue = deg != null ? dirColor(deg) : null;
   return (
     <div className="dial" role="img" aria-label={deg != null ? `from ${compass(deg, locale as never)}` : 'no direction'}>
       <svg viewBox="0 0 120 120" width="100%" height="100%">
@@ -33,8 +36,8 @@ function CompassDial({ deg, spread, locale }: { deg: number | null; spread: numb
         })}
         {deg != null && (
           <g transform={`rotate(${deg + 180} 60 60)`}>
-            {spread != null && <path d={conePath(60, 60, 30, 50, spread)} className="dial-cone" />}
-            <path d="M60 13 L54.5 31 L65.5 31 Z" className="dial-arrow" />
+            {spread != null && <path d={conePath(60, 60, 30, 50, spread)} className="dial-cone" style={hue ? { fill: `${hue}33` } : undefined} />}
+            <path d="M60 13 L54.5 31 L65.5 31 Z" className="dial-arrow" style={hue ? { fill: hue } : undefined} />
           </g>
         )}
       </svg>

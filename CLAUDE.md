@@ -128,6 +128,16 @@ One-time seed of the dataset: `pixi run update --campaign 06403 --seed-src /User
   no-archive buoys; `refresh-data.yml` is a matrix over all campaigns. Switching reloads
   the selected buoy's tiers; choice is persisted + URL-deep-linked (`?buoy=<id>`).
 
-Next per roadmap: the direction glyph/cyclical layer, history navigation polish, the
-full glossary, side-by-side buoy comparison (0005 left it out), and migrating
-theme/i18n/styling to Tailwind + shadcn + Paraglide.
+- **Direction-glyph layer + history/glossary polish shipped** (2026-06-28, see specs/0003
+  §6): the chart direction panel is now a custom canvas layer (`TimeSeries.drawDirectionLayer`)
+  — density-thinned **arrow glyphs** coloured by a **cyclical OKLCH from-direction hue**
+  (`format.dirColor`, 360-entry LUT: N teal/E blue/S gold/W pink) over a **wrap-aware**
+  spread band; the same hue tints the banner dial. The date inputs became a **dual-month
+  calendar cherry-picker** (`DatePicker.tsx`, data-marked + big-swell-flagged days); the
+  **heat-ribbon** gained draggable edge handles + in-window pan. The glossary slide-over
+  now carries each variable's **CANDHIS field + typical range** and a **direction-colour
+  legend**.
+
+Next per roadmap: side-by-side buoy comparison (0005 left it out), and migrating
+theme/i18n/styling to Tailwind + shadcn + Paraglide (incl. the per-locale glossary JSON
++ CI key-parity check from 0001 §8).
