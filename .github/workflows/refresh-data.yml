@@ -1,13 +1,13 @@
 name: Refresh data (CANDHIS → HF dataset)
 
-# Every 30 min: pull the realtime accumulator from the HF dataset, scrape the live
-# CANDHIS feed, rebuild the tiers, and upload them back to datasets/hadim/olatu.
-# The webapp reads those tiers at runtime, so this NEVER rebuilds or redeploys the
-# site — it is a tiny Python-only job. See specs/0004 §6.
+# Every 30 min, for EACH buoy: pull the realtime accumulator from the HF dataset, scrape
+# the live CANDHIS feed, rebuild the tiers, and upload them back to datasets/hadim/olatu.
+# The webapp reads those tiers at runtime, so this NEVER rebuilds or redeploys the site —
+# it is a tiny Python-only job. See specs/0004 §6 and 0005 §4.
 #
-# Auth is keyless via OIDC Trusted Publishers (no HF_TOKEN secret): configure a
-# trusted publisher on the dataset hadim/olatu → Settings → Trusted Publishers with
-# claims  repository=hadim/olatu  branch=main  workflow=refresh-data.yml.
+# Auth is keyless via OIDC Trusted Publishers (no HF_TOKEN secret): configure a trusted
+# publisher on the dataset hadim/olatu → Settings → Trusted Publishers with claims
+# repository=hadim/olatu  branch=main  workflow=refresh-data.yml.
 
 on:
   schedule:
@@ -26,6 +26,13 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    strategy:
+      # One buoy at a time: both jobs commit to the same HF repo (different campaign
+      # paths), so serialize them to avoid racing concurrent commits.
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        campaign: ['06403', '06402', '03302']
     steps:
       - uses: actions/checkout@v7
 
@@ -35,10 +42,10 @@ jobs:
           cache: true
 
       - name: Cache the immutable archive (so we don't re-download it each run)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
-          path: hfdata/06403/raw
-          key: candhis-raw-06403-v1
+          path: hfdata/${{ matrix.campaign }}/raw
+          key: candhis-raw-${{ matrix.campaign }}-v1
 
       - name: Refresh (pull → scrape → build → upload to HF)
-        run: pixi run update --campaign 06403
+        run: pixi run update --campaign ${{ matrix.campaign }}
