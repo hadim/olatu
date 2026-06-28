@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Header from './components/Header';
 import StationBar from './components/StationBar';
 import CurrentConditions from './components/CurrentConditions';
 import TimeSeries from './components/TimeSeries';
 import MiniMap from './components/MiniMap';
 import Footer from './components/Footer';
-import { useI18n } from './lib/i18n';
+import { useLocale } from '@/lib/i18n';
+import { m } from '@/paraglide/messages';
 import { loadManifest, loadLatest, loadRecent, type Manifest, type Series } from './lib/data';
 import { loadParquetTier, type Columnar } from './lib/parquet';
 import { initialCampaign, persistCampaign, campaignUrl } from './lib/buoys';
@@ -32,40 +33,36 @@ const HISTORY_COLUMNS = [
 function StationLocation({ manifest }: { manifest: Manifest }) {
   const b = manifest.buoy;
   return (
-    <section className="station-location">
+    <section className="mt-6 grid grid-cols-[minmax(240px,360px)_1fr] items-stretch gap-5 max-[720px]:grid-cols-1">
       <MiniMap lat={b.lat} lon={b.lon} label={b.name} />
       <StationFacts manifest={manifest} />
     </section>
   );
 }
 
+function Fact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-[0.2rem]">
+      <dt className="text-[0.76rem] uppercase tracking-[0.06em] text-faint">{label}</dt>
+      <dd className="m-0 font-mono text-[0.95rem] text-fg">{children}</dd>
+    </div>
+  );
+}
+
 function StationFacts({ manifest }: { manifest: Manifest }) {
-  const { t } = useI18n();
   const b = manifest.buoy;
   return (
-    <dl className="station-facts">
-      <div>
-        <dt>{t('station.position')}</dt>
-        <dd>{b.lat.toFixed(4)}°N, {Math.abs(b.lon).toFixed(4)}°W</dd>
-      </div>
-      <div>
-        <dt>{t('station.depth')}</dt>
-        <dd>{b.water_depth_m != null ? `${b.water_depth_m} m` : t('station.notPublished')}</dd>
-      </div>
-      <div>
-        <dt>{t('station.sensor')}</dt>
-        <dd>{b.sensor}</dd>
-      </div>
-      <div>
-        <dt>{t('station.operator')}</dt>
-        <dd>{b.operator}</dd>
-      </div>
+    <dl className="m-0 grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] content-center gap-4 rounded-2xl border border-line px-[1.3rem] py-[1.1rem]">
+      <Fact label={m.station_position()}>{b.lat.toFixed(4)}°N, {Math.abs(b.lon).toFixed(4)}°W</Fact>
+      <Fact label={m.station_depth()}>{b.water_depth_m != null ? `${b.water_depth_m} m` : m.station_not_published()}</Fact>
+      <Fact label={m.station_sensor()}>{b.sensor}</Fact>
+      <Fact label={m.station_operator()}>{b.operator}</Fact>
     </dl>
   );
 }
 
 export default function App() {
-  const { t } = useI18n();
+  useLocale();
   const [campaign, setCampaignState] = useState<string>(initialCampaign);
   const [data, setData] = useState<Loaded | null>(null);
   const [history, setHistory] = useState<{ campaign: string; cols: Columnar } | null>(null);
@@ -204,14 +201,20 @@ export default function App() {
   }, [campaign]);
 
   return (
-    <div className="app">
+    <div className="mx-auto max-w-[1100px] px-5 pb-12 pt-5">
       <Header buoy={ready?.manifest.buoy ?? null} />
 
       <main>
         <StationBar campaign={campaign} onSelect={setCampaign} />
 
-        {error && <div className="state state--error">{t('state.error')}<br /><code>{error}</code></div>}
-        {!error && !ready && <div className="state">{t('state.loading')}</div>}
+        {error && (
+          <div className="mt-8 text-base text-danger">
+            {m.state_error()}
+            <br />
+            <code className="font-mono text-[0.82rem] text-faint">{error}</code>
+          </div>
+        )}
+        {!error && !ready && <div className="mt-8 text-base text-muted">{m.state_loading()}</div>}
 
         {ready && (
           <>
@@ -227,9 +230,9 @@ export default function App() {
                 yearFiles={yearFiles}
               />
             ) : historyError ? (
-              <div className="state state--error">{t('state.chartsError')}</div>
+              <div className="mt-8 text-base text-danger">{m.state_charts_error()}</div>
             ) : (
-              <div className="state">{t('state.loading')}</div>
+              <div className="mt-8 text-base text-muted">{m.state_loading()}</div>
             )}
 
             <StationLocation manifest={ready.manifest} />

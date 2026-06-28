@@ -9,6 +9,44 @@ Format per entry: **date — title** · what we found · why it matters · resol
 
 ---
 
+## 2026-06-28 — Paraglide lowercases message keys; use snake_case from the start
+
+**Finding.** Migrating i18n to **Paraglide JS v2** (spec 0006), the first pass kept the
+old dot-keys naively snaked to camelCase (`cc.waveHeight` → `cc_waveHeight`). The
+messageFormat plugin **lowercases identifiers** and de-duplicates collisions by appending
+numeric suffixes — so `picker.mapLabel`/`picker.mapHint` compiled to
+`picker_maplabel1`/`picker_maphint1`, and only **56 of 90** message files survived
+(camelCase keys collided when lowercased and silently overwrote each other). Export names
+became unpredictable, breaking `m.cc_waveHeight()` call sites.
+
+**Why it matters.** Silent message loss + non-deterministic export names would have
+shipped missing/empty strings. The fix is to author keys as **lowercase snake_case**
+(`cc_wave_height`), which is Paraglide's own convention — then export name === JSON key,
+deterministically (verified: 90 files, exact match).
+
+**Resolution.** Regenerated `messages/{en,fr,es}.json` with a `camelCase→snake_case`
+transform + a build-time collision assert. Static calls use `m.cc_wave_height()`; the
+few dynamic keys use `m[`cc_${fresh}_help` as MessageKey]()`. The generated
+`src/paraglide/` is gitignored and recompiled by the Vite plugin (and `npm run paraglide`
+for standalone `tsc`). Refs: [0006](2026-06-28-0006-stack-migration-a11y.md) §5.
+
+## 2026-06-28 — Tailwind v4 `@theme inline` keeps runtime theme-switching working
+
+**Finding.** The canvas charts, inline SVG tints, MapLibre markers and `iconSvg()` read
+the **raw CSS variables** (`--accent`, `--c-height`, `--text-3`…) and switch via
+`[data-theme]`. A naive Tailwind v4 `@theme { --color-bg: #… }` would freeze those at
+build time and break the dark/light toggle for utility-styled markup. Using
+**`@theme inline { --color-bg: var(--bg) }`** makes utilities emit `var(--bg)` (a
+reference, not a copy), so `bg-surface` stays theme-aware and the canvas keeps reading the
+same raw vars. Consequence: components almost never need a `dark:` variant — the *token*
+is theme-aware, so the whole dual-theme behaviour lives in ~40 lines of token defs.
+
+**AA contrast.** The faint token `--text-3` failed WCAG AA for normal text (≈3.2–4.1 on
+both themes). Nudged to `#7593a3` (dark) / `#566b78` (light) to clear 4.5 on every
+surface, keeping it visibly secondary. The brand `--accent` (spec-chosen) is used for
+large numbers / dots / borders (AA-large/UI thresholds) and is left as-is. Refs:
+[0006](2026-06-28-0006-stack-migration-a11y.md) §3/§6.
+
 ## 2026-06-28 — HF **datasets** serve the browser (CORS + range); **buckets** don't (yet)
 
 **Finding.** To get the churning data off git (a 30-min refresh would otherwise bloat

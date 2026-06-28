@@ -1,74 +1,38 @@
-// Small accessible click-to-open popover. Powers the per-metric definitions and the
-// staleness badge explanation (spec 0003: keep the colour badge, explain on click).
+// Click-to-open definition popover, on the Radix Popover primitive (spec 0006 §4):
+// focus return, Esc, outside-click and ARIA come from the primitive. Powers the
+// per-metric "i" definitions and the staleness-badge explanation.
 //
-// Pass `children` to use a custom trigger (e.g. the staleness badge); omit it to get
-// the default quiet "i" button next to a metric label.
+// Pass `children` for a custom trigger (e.g. the staleness badge) + `triggerClassName`
+// for its styling; omit them to get the default quiet "i" button next to a label.
 
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { useI18n } from '../lib/i18n';
+import { type ReactNode } from 'react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { m } from '@/paraglide/messages';
 
 interface InfoPopoverProps {
   title: string;
   body: string;
-  children?: ReactNode; // custom trigger; defaults to an "i" button
-  align?: 'start' | 'end'; // which edge the panel aligns to
+  children?: ReactNode;
+  align?: 'start' | 'end';
   triggerClassName?: string;
-  triggerLabel?: string; // accessible name for the trigger
+  triggerLabel?: string;
 }
 
-export default function InfoPopover({
-  title,
-  body,
-  children,
-  align = 'start',
-  triggerClassName,
-  triggerLabel,
-}: InfoPopoverProps) {
-  const { t } = useI18n();
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLSpanElement>(null);
-  const panelId = useId();
+const DEFAULT_TRIGGER =
+  'inline-flex items-center justify-center w-[1.1rem] h-[1.1rem] ml-1.5 rounded-full border border-line bg-transparent text-faint font-display text-[0.72rem] italic leading-none cursor-pointer transition-colors hover:border-accent hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
 
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
+export default function InfoPopover({ title, body, children, align = 'start', triggerClassName, triggerLabel }: InfoPopoverProps) {
   return (
-    <span className="info-pop" ref={rootRef}>
-      <button
-        type="button"
-        className={triggerClassName ?? 'info-pop-btn'}
-        aria-label={triggerLabel ?? t('a11y.whatIsThis')}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        aria-controls={panelId}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {children ?? <span aria-hidden="true">i</span>}
-      </button>
-      {open && (
-        <span
-          id={panelId}
-          role="dialog"
-          aria-label={title}
-          className={`info-pop-panel info-pop-panel--${align}`}
-        >
-          <span className="info-pop-title">{title}</span>
-          <span className="info-pop-body">{body}</span>
-        </span>
-      )}
-    </span>
+    <Popover>
+      <PopoverTrigger asChild>
+        <button type="button" aria-label={triggerLabel ?? m.a11y_what_is_this()} className={triggerClassName ?? DEFAULT_TRIGGER}>
+          {children ?? <span aria-hidden="true">i</span>}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align={align} role="dialog" aria-label={title} className="flex w-[17rem] flex-col gap-1.5 normal-case tracking-normal">
+        <span className="font-display text-[0.92rem] font-semibold text-fg">{title}</span>
+        <span className="text-sm leading-relaxed text-muted">{body}</span>
+      </PopoverContent>
+    </Popover>
   );
 }

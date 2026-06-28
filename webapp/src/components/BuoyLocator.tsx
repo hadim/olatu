@@ -11,7 +11,8 @@ import { useEffect, useRef } from 'react';
 import type { Map as MlMap, Marker as MlMarker } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useTheme } from '../lib/theme';
-import { useI18n } from '../lib/i18n';
+import { useLocale } from '@/lib/i18n';
+import { m } from '@/paraglide/messages';
 import { BUOYS } from '../lib/buoys';
 
 function rasterStyle(theme: string): unknown {
@@ -38,7 +39,7 @@ export default function BuoyLocator({
   onSelect: (campaign: string) => void;
 }) {
   const { theme } = useTheme();
-  const { t } = useI18n();
+  useLocale();
   const mapEl = useRef<HTMLDivElement>(null);
   const markers = useRef<Record<string, HTMLButtonElement>>({});
   // Keep the latest onSelect/selected for the (theme-scoped) marker click handlers
@@ -109,9 +110,16 @@ export default function BuoyLocator({
   }, [selected]);
 
   return (
-    <div className="locator">
-      <div className="locator-canvas" ref={mapEl} aria-label={t('picker.mapLabel')} role="group" />
-      <span className="locator-hint">{t('picker.mapHint')}</span>
+    <div className="relative w-full">
+      <div
+        className="relative aspect-[16/10] w-full overflow-hidden rounded-2xl border border-line bg-surface-2"
+        ref={mapEl}
+        aria-label={m.picker_map_label()}
+        role="group"
+      />
+      <span className="pointer-events-none absolute bottom-[0.5rem] left-[0.55rem] z-[1] rounded-[0.4rem] bg-[color-mix(in_oklab,var(--surface)_82%,transparent)] px-2 py-[0.2rem] font-mono text-[0.66rem] text-muted">
+        {m.picker_map_hint()}
+      </span>
     </div>
   );
 }

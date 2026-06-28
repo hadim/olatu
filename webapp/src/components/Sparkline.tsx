@@ -33,7 +33,7 @@ export default function Sparkline({ t, values, width = 640, height = 96 }: Props
   });
 
   return (
-    <svg className="sparkline" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img">
+    <svg className="block h-24 w-full" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img">
       <path d={d.trim()} fill="none" stroke="var(--accent)" strokeWidth="2" vectorEffect="non-scaling-stroke" />
     </svg>
   );

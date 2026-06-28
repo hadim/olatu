@@ -1,5 +1,7 @@
-import { useI18n, LOCALES, LOCALE_LABELS, type Locale } from '../lib/i18n';
+import { useLocale, LOCALES, LOCALE_LABELS, type Locale } from '@/lib/i18n';
+import { m } from '@/paraglide/messages';
 import { useTheme } from '../lib/theme';
+import { Button } from '@/components/ui/button';
 import type { Buoy } from '../lib/data';
 import Glossary from './Glossary';
 
@@ -21,29 +23,30 @@ function MoonIcon() {
 }
 
 export default function Header({ buoy }: { buoy: Buoy | null }) {
-  const { t, locale, setLocale } = useI18n();
+  const { locale, setLocale } = useLocale();
   const { theme, toggle } = useTheme();
 
   return (
-    <header className="app-header">
-      <div className="brand">
-        <span className="brand-mark" aria-hidden="true">🌊</span>
+    <header className="mb-6 flex items-center justify-between gap-4 border-b border-accent pb-4 max-[560px]:flex-col max-[560px]:items-stretch max-[560px]:gap-3.5">
+      <div className="flex items-center gap-[0.7rem]">
+        <span className="text-[1.6rem] leading-none" aria-hidden="true">🌊</span>
         <div>
-          <h1>Olatu</h1>
-          <p className="eyebrow">
-            {buoy ? `CANDHIS ${buoy.campaign_id} · ${buoy.name}` : t('app.tagline')}
+          <h1 className="m-0 font-display text-2xl font-semibold tracking-[-0.01em] max-[560px]:text-[1.35rem]">Olatu</h1>
+          <p className="mt-[0.15rem] font-mono text-[0.72rem] uppercase tracking-[0.04em] text-faint">
+            {buoy ? `CANDHIS ${buoy.campaign_id} · ${buoy.name}` : m.app_tagline()}
           </p>
         </div>
       </div>
 
-      <div className="header-controls">
+      <div className="flex items-center gap-2 max-[560px]:justify-start">
         <Glossary />
-        <label className="lang-select">
-          <span className="sr-only">{t('nav.language')}</span>
+        <label>
+          <span className="sr-only">{m.nav_language()}</span>
           <select
-            aria-label={t('nav.language')}
+            aria-label={m.nav_language()}
             value={locale}
             onChange={(e) => setLocale(e.target.value as Locale)}
+            className="h-[38px] cursor-pointer rounded-lg border border-line bg-surface px-2.5 font-body text-[0.85rem] text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg max-md:h-11"
           >
             {LOCALES.map((l) => (
               <option key={l} value={l}>
@@ -53,9 +56,9 @@ export default function Header({ buoy }: { buoy: Buoy | null }) {
           </select>
         </label>
 
-        <button type="button" className="icon-button" onClick={toggle} aria-label={t('nav.theme')} title={t('nav.theme')}>
+        <Button variant="outline" size="icon" onClick={toggle} aria-label={m.nav_theme()} title={m.nav_theme()}>
           {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
-        </button>
+        </Button>
       </div>
     </header>
   );

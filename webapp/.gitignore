@@ -1,0 +1,9 @@
+# Paraglide compile output (regenerated from messages/ + project.inlang by the Vite plugin)
+src/paraglide/
+
+# inlang local cache
+.inlang/
+project.inlang/cache/
+
+# Playwright MCP screenshot scratch
+.playwright-mcp/

@@ -1,6 +1,8 @@
-import { useI18n } from '../lib/i18n';
+import { useLocale } from '@/lib/i18n';
+import { m } from '@/paraglide/messages';
 
 const REPO_URL = 'https://github.com/hadim/olatu';
+const LINK = 'text-muted no-underline hover:text-accent';
 
 function GitHubMark() {
   return (
@@ -11,27 +13,27 @@ function GitHubMark() {
 }
 
 export default function Footer() {
-  const { t } = useI18n();
+  useLocale();
   return (
-    <footer className="site-footer">
-      <a className="gh-link" href={REPO_URL} target="_blank" rel="noopener noreferrer">
+    <footer className="mt-10 flex flex-wrap items-center gap-2 border-t border-line pt-5 text-[0.88rem] text-faint">
+      <a className={`inline-flex items-center gap-1.5 font-semibold ${LINK}`} href={REPO_URL} target="_blank" rel="noopener noreferrer">
         <GitHubMark />
-        <span>{t('footer.openSource')}</span>
+        <span>{m.footer_open_source()}</span>
       </a>
-      <span className="footer-sep" aria-hidden="true">·</span>
-      <a href={`${REPO_URL}/issues`} target="_blank" rel="noopener noreferrer">
-        {t('footer.reportBug')}
+      <span className="text-divider" aria-hidden="true">·</span>
+      <a className={LINK} href={`${REPO_URL}/issues`} target="_blank" rel="noopener noreferrer">
+        {m.footer_report_bug()}
       </a>
-      <span className="footer-sep" aria-hidden="true">·</span>
-      <span className="footer-attribution">
-        {t('footer.dataBy')}{' '}
-        <a href="https://candhis.cerema.fr" target="_blank" rel="noopener noreferrer">
+      <span className="text-divider" aria-hidden="true">·</span>
+      <span>
+        {m.footer_data_by()}{' '}
+        <a className={LINK} href="https://candhis.cerema.fr" target="_blank" rel="noopener noreferrer">
           Cerema / CANDHIS
         </a>
       </span>
-      <span className="footer-sep" aria-hidden="true">·</span>
-      <a href="https://huggingface.co/datasets/hadim/olatu" target="_blank" rel="noopener noreferrer">
-        {t('footer.dataset')} ↗
+      <span className="text-divider" aria-hidden="true">·</span>
+      <a className={LINK} href="https://huggingface.co/datasets/hadim/olatu" target="_blank" rel="noopener noreferrer">
+        {m.footer_dataset()} ↗
       </a>
     </footer>
   );

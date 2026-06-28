@@ -38,6 +38,7 @@ Ask this for **every** request or task (and when in doubt, **ask the owner**):
 | [0003 — UX refinement](2026-06-27-0003-ux-refinement.md) | Draft | First owner-feedback polish pass: chart fixes, banner/staleness, terminology (vague/houle), definitions, time nav |
 | [0004 — Realtime scraper](2026-06-27-0004-realtime-scraper.md) | Accepted | The live-growing tail: scrape CANDHIS realtime HTML (single GET, no Valider/POST) → per-year reel CSV; coalesce merge so temperature history accumulates without clobbering the archive |
 | [0005 — Multi-buoy](2026-06-27-0005-multi-buoy.md) | Accepted | Add CANDHIS 06402 Anglet; finish the campaign parameterization (build.py); webapp buoy switch (segmented control + lazy map picker), top station bar, HF data-source surfacing |
+| [0006 — Stack migration & a11y](2026-06-28-0006-stack-migration-a11y.md) | Accepted | Pay down stack debt (theme/i18n/styling → Tailwind v4 + shadcn/Radix + Paraglide, full utility rewrite) + Phase-7 polish/mobile/a11y (chart fallback table, pinch-zoom, reduced-motion, ARIA, AA contrast) |
 | [LEARNINGS](LEARNINGS.md) | Living | Running log of significant findings (gzip/parquet, etc.) — update on every big finding |
 
 ## Conventions

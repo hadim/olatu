@@ -120,6 +120,22 @@ export default function HeatRibbon({ t, hs, min, max, onChange }: Props) {
     setDrag(null);
   };
 
+  // Keyboard control for the slider (spec 0006 §6): ←/→ pan the window, Home/End jump to
+  // the record ends. Window width is preserved; commits immediately (like a click).
+  const onKey = (e: React.KeyboardEvent) => {
+    const w = max - min;
+    const step = Math.max(DAY, span * 0.05);
+    let nmin = min;
+    if (e.key === 'ArrowLeft') nmin = min - step;
+    else if (e.key === 'ArrowRight') nmin = min + step;
+    else if (e.key === 'Home') nmin = T0;
+    else if (e.key === 'End') nmin = TN - w;
+    else return;
+    e.preventDefault();
+    nmin = Math.max(T0, Math.min(nmin, TN - w));
+    onChange(nmin, nmin + w);
+  };
+
   // selection (live during a drag, else the active window)
   const [selMin, selMax] = drag && drag.moved ? previewOf(drag) : [min, max];
   const leftPct = ((selMin - T0) / span) * 100;
@@ -137,13 +153,14 @@ export default function HeatRibbon({ t, hs, min, max, onChange }: Props) {
     .map((year) => ({ year, pct: ((Date.UTC(year, 0, 1) / 1000 - T0) / span) * 100 }));
 
   return (
-    <div className="ribbon-wrap">
+    <div className="mb-[0.9rem]">
       <div
-        className="ribbon"
+        className="relative h-12 cursor-crosshair touch-none overflow-hidden rounded-[0.5rem] border border-line bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         ref={wrapRef}
         onPointerDown={onDown}
         onPointerMove={onMove}
         onPointerUp={onUp}
+        onKeyDown={onKey}
         role="slider"
         aria-label="Timeline"
         aria-valuemin={T0}
@@ -151,16 +168,20 @@ export default function HeatRibbon({ t, hs, min, max, onChange }: Props) {
         aria-valuenow={Math.round((selMin + selMax) / 2)}
         tabIndex={0}
       >
-        <canvas ref={canvasRef} className="ribbon-canvas" />
-        <div className="ribbon-mask" style={{ left: 0, width: `${Math.max(0, leftPct)}%` }} />
-        <div className="ribbon-mask" style={{ left: `${Math.min(100, rightPct)}%`, right: 0 }} />
-        <div className="ribbon-window" style={{ left: `${leftPct}%`, width: `${Math.max(0.4, rightPct - leftPct)}%` }} />
-        <div className="ribbon-handle ribbon-handle--l" data-handle="l" style={{ left: `${leftPct}%` }} aria-hidden="true" />
-        <div className="ribbon-handle ribbon-handle--r" data-handle="r" style={{ left: `${rightPct}%` }} aria-hidden="true" />
+        <canvas ref={canvasRef} className="absolute inset-0 block" />
+        <div className="pointer-events-none absolute bottom-0 top-0 bg-[color-mix(in_oklab,var(--bg)_60%,transparent)]" style={{ left: 0, width: `${Math.max(0, leftPct)}%` }} />
+        <div className="pointer-events-none absolute bottom-0 top-0 bg-[color-mix(in_oklab,var(--bg)_60%,transparent)]" style={{ left: `${Math.min(100, rightPct)}%`, right: 0 }} />
+        <div className="pointer-events-none absolute bottom-0 top-0 border-x-2 border-accent bg-[color-mix(in_oklab,var(--accent)_8%,transparent)]" style={{ left: `${leftPct}%`, width: `${Math.max(0.4, rightPct - leftPct)}%` }} />
+        <div className="group absolute bottom-0 top-0 z-[2] w-[14px] -translate-x-1/2 cursor-ew-resize touch-none" data-handle="l" style={{ left: `${leftPct}%` }} aria-hidden="true">
+          <span className="pointer-events-none absolute left-1/2 top-1/2 h-[22px] w-[4px] -translate-x-1/2 -translate-y-1/2 rounded-[2px] bg-accent shadow-[0_0_0_2px_var(--surface-2)] group-hover:bg-accent-deep" />
+        </div>
+        <div className="group absolute bottom-0 top-0 z-[2] w-[14px] -translate-x-1/2 cursor-ew-resize touch-none" data-handle="r" style={{ left: `${rightPct}%` }} aria-hidden="true">
+          <span className="pointer-events-none absolute left-1/2 top-1/2 h-[22px] w-[4px] -translate-x-1/2 -translate-y-1/2 rounded-[2px] bg-accent shadow-[0_0_0_2px_var(--surface-2)] group-hover:bg-accent-deep" />
+        </div>
       </div>
-      <div className="ribbon-ticks">
+      <div className="relative mt-0.5 h-4">
         {ticks.map((tk) => (
-          <span key={tk.year} className="ribbon-tick" style={{ left: `${tk.pct}%` }}>
+          <span key={tk.year} className="absolute -translate-x-1/2 font-mono text-[0.64rem] text-faint" style={{ left: `${tk.pct}%` }}>
             {tk.year}
           </span>
         ))}

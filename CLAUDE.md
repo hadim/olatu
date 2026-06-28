@@ -98,9 +98,21 @@ One-time seed of the dataset: `pixi run update --campaign 06403 --seed-src /User
   change). Sea-temperature history accumulates forward from the scraper's first run.
 - **Webapp rebuilt to TypeScript** (Plotly removed). Working: data loader for the
   JSON tiers + a current-conditions banner (compass dial, gauges, sea temp,
-  staleness); **theme** toggle (dark default + light, CSS-var tokens) and **i18n**
-  (en/fr/es, browser auto-detect, persisted) — both hand-rolled for now
-  (Tailwind/shadcn + Paraglide come later per spec).
+  staleness); **theme** toggle (dark default + light, CSS-var tokens).
+- **Stack debt paid down (2026-06-28, specs/0006): Tailwind v4 + shadcn/Radix +
+  Paraglide, full utility rewrite.** Styling is now Tailwind utilities everywhere;
+  the design tokens live as raw `[data-theme]` CSS vars bridged into Tailwind via
+  **`@theme inline`** (so `bg-surface`/`text-fg`/`text-accent` stay theme-aware and the
+  canvas keeps reading the same `--c-*` raw vars — components rarely need `dark:`).
+  i18n is **Paraglide JS** (`messages/{en,fr,es}.json`, **lowercase snake_case keys**,
+  `m.cc_wave_height()`; a `LocaleProvider` switches with `reload:false` so chart
+  range/zoom survive). UI primitives are shadcn-style **copy-ins on Radix** in
+  `src/components/ui/` (Popover, Dialog, Sheet, Tooltip, ToggleGroup, Button) — the
+  hand-rolled InfoPopover/Glossary/DatePicker/buoy-switch now ride them for free focus
+  trap / ARIA / keyboard. The language switch is a styled native `<select>`. Only CSS
+  that survives `styles.css`: tokens, keyframes, uPlot/MapLibre-injected overrides, the
+  hatched no-data band. **`src/paraglide/` is generated (gitignored)** — the Vite plugin
+  builds it; `npm run paraglide` feeds standalone `tsc` (`npm run typecheck`).
 - **uPlot synced multi-panel charts** (canvas) fed from `daily.parquet` via
   hyparquet (parquet-in-browser): wave height (Hs + Hmax), period, direction;
   range presets (1M/6M/1Y/5Y/All), shared crosshair + synced zoom, theme-aware.
@@ -138,6 +150,14 @@ One-time seed of the dataset: `pixi run update --campaign 06403 --seed-src /User
   now carries each variable's **CANDHIS field + typical range** and a **direction-colour
   legend**.
 
-Next per roadmap: side-by-side buoy comparison (0005 left it out), and migrating
-theme/i18n/styling to Tailwind + shadcn + Paraglide (incl. the per-locale glossary JSON
-+ CI key-parity check from 0001 §8).
+- **Phase 7 polish/mobile/a11y shipped** (2026-06-28, specs/0006 §6): accessible
+  per-window **chart summary table** (`sr-only`, live region) so the canvases are
+  readable to assistive tech, each panel `role="img"`; uPlot **touch pinch-zoom + drag-pan**
+  (`lib/uplotTouch.ts`) with a **Reset** affordance; the heat-ribbon slider got
+  **keyboard** control (←/→ pan, Home/End); every animation is `motion-safe`/`motion-reduce`
+  gated; **AA contrast** verified both themes (faint `--text-3` nudged to clear 4.5 — see
+  LEARNINGS); mobile touch targets ≥44 px. Radix primitives supply focus-trap/ARIA.
+
+Next per roadmap: side-by-side buoy comparison (0005 left it out), and the per-locale
+**glossary JSON** + CI **key-parity** check (0001 §8) — the glossary still lives inline in
+the Paraglide message dict for now.
