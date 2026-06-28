@@ -26,13 +26,6 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    strategy:
-      # One buoy at a time: both jobs commit to the same HF repo (different campaign
-      # paths), so serialize them to avoid racing concurrent commits.
-      max-parallel: 1
-      fail-fast: false
-      matrix:
-        campaign: ['06403', '06402', '03302']
     steps:
       - uses: actions/checkout@v7
 
@@ -41,11 +34,17 @@ jobs:
         with:
           cache: true
 
-      - name: Cache the immutable archive (so we don't re-download it each run)
+      - name: Cache the immutable archives (so we don't re-download them each run)
         uses: actions/cache@v6
         with:
-          path: hfdata/${{ matrix.campaign }}/raw
-          key: candhis-raw-${{ matrix.campaign }}-v1
+          path: |
+            hfdata/06403/raw
+            hfdata/06402/raw
+            hfdata/03302/raw
+          key: candhis-raw-v1
 
-      - name: Refresh (pull → scrape → build → upload to HF)
-        run: pixi run update --campaign ${{ matrix.campaign }}
+      # All buoys in one job: one checkout, one env, and crucially ONE OIDC token
+      # exchange shared across campaigns (avoids the per-buoy 429s). update.py refreshes
+      # each buoy independently and exits non-zero if any failed (fail-fast off).
+      - name: Refresh every buoy (pull → scrape → build → upload to HF)
+        run: pixi run update --campaign 06403 06402 03302
