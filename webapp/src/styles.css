@@ -147,6 +147,35 @@
     opacity: 1;
   }
 }
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* Ghost/skeleton block: a discreet light band sweeping across a surface-2 base, so the
+   whole widget layout shows on first paint while data loads (spec 0006 §6 polish).
+   Reduced-motion falls back to a flat block — the ghost layout still reads as "loading". */
+.skeleton {
+  border-radius: 0.5rem;
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 0%,
+    color-mix(in oklab, var(--hairline) 55%, var(--surface-2)) 50%,
+    var(--surface-2) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+    background: var(--surface-2);
+  }
+}
 
 /* ---- kept rules: things utilities can't express, or DOM injected by uPlot/MapLibre.
    Everything else lives as Tailwind utilities in the components (spec 0006 §2). ---- */

@@ -5,6 +5,7 @@ import CurrentConditions from './components/CurrentConditions';
 import TimeSeries from './components/TimeSeries';
 import MiniMap from './components/MiniMap';
 import Footer from './components/Footer';
+import { BannerSkeleton, ChartsSkeleton, StationLocationSkeleton } from './components/Skeletons';
 import { useLocale } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
 import { loadManifest, loadLatest, loadRecent, type Manifest, type Series } from './lib/data';
@@ -214,7 +215,14 @@ export default function App() {
             <code className="font-mono text-[0.82rem] text-faint">{error}</code>
           </div>
         )}
-        {!error && !ready && <div className="mt-8 text-base text-muted">{m.state_loading()}</div>}
+        {!error && !ready && (
+          <>
+            <p className="sr-only" role="status">{m.state_loading()}</p>
+            <BannerSkeleton />
+            <ChartsSkeleton />
+            <StationLocationSkeleton />
+          </>
+        )}
 
         {ready && (
           <>
@@ -232,7 +240,10 @@ export default function App() {
             ) : historyError ? (
               <div className="mt-8 text-base text-danger">{m.state_charts_error()}</div>
             ) : (
-              <div className="mt-8 text-base text-muted">{m.state_loading()}</div>
+              <>
+                <p className="sr-only" role="status">{m.state_loading()}</p>
+                <ChartsSkeleton />
+              </>
             )}
 
             <StationLocation manifest={ready.manifest} />

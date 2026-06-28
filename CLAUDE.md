@@ -157,6 +157,11 @@ One-time seed of the dataset: `pixi run update --campaign 06403 --seed-src /User
   **keyboard** control (←/→ pan, Home/End); every animation is `motion-safe`/`motion-reduce`
   gated; **AA contrast** verified both themes (faint `--text-3` nudged to clear 4.5 — see
   LEARNINGS); mobile touch targets ≥44 px. Radix primitives supply focus-trap/ARIA.
+- **Ghost/skeleton load state** (`components/Skeletons.tsx`): on first paint (and on a
+  buoy switch) the full data-widget charpente — banner, chart wells, map+facts — shows
+  as shimmering placeholders (`.skeleton`, reduced-motion gated) instead of a bare
+  "Loading…" line; an `sr-only role=status` carries the announcement. Mirrors the real
+  layout so there's no jump when data lands.
 
 Next per roadmap: side-by-side buoy comparison (0005 left it out), and the per-locale
 **glossary JSON** + CI **key-parity** check (0001 §8) — the glossary still lives inline in
