@@ -156,10 +156,10 @@ export default function TimeSeries({ data, tz, yearFiles }: { data: Columnar; tz
   const TN = xs.length ? xs[xs.length - 1] : 0;
 
   const [range, setRange] = useState<{ min: number; max: number }>(() => ({
-    min: Math.max(T0, TN - 365 * DAY),
+    min: Math.max(T0, TN - 1 * DAY),
     max: TN,
   }));
-  const [mode, setMode] = useState<string>('p:1Y');
+  const [mode, setMode] = useState<string>('p:1D');
   const [navYear, setNavYear] = useState<number | null>(null);
   const [showJump, setShowJump] = useState(false);
   const [detail, setDetail] = useState<Columnar | null>(null);
