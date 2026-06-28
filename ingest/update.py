@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 
 import httpx
@@ -42,8 +43,34 @@ from .schema import CAMPAIGN_ID
 DEFAULT_REPO = "hadim/olatu"  # HF dataset id
 HF_AUD = "https://huggingface.co"
 
+# HF rate-limits bursts of OIDC token exchanges (the every-30-min cron occasionally
+# trips a 429); unlike huggingface_hub's own calls, our raw httpx exchange has no
+# retry, so a single transient blip aborts the whole run. Back off and retry.
+_RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+
+# Sentinel: lets update() resolve its own token (library use) while main() resolves
+# once and shares it across campaigns (one OIDC exchange per run, not one per buoy).
+_RESOLVE_TOKEN = object()
+
 
 # ------------------------------------------------------------------------ auth
+
+
+def _post_with_retry(url: str, *, attempts: int = 5, **kwargs) -> httpx.Response:
+    """POST, retrying transient 429/5xx with Retry-After-aware exponential backoff."""
+    resp = httpx.post(url, **kwargs)
+    for i in range(attempts - 1):
+        if resp.status_code not in _RETRY_STATUS:
+            return resp
+        retry_after = resp.headers.get("retry-after", "")
+        delay = float(retry_after) if retry_after.isdigit() else 2.0**i
+        print(
+            f"  HF returned {resp.status_code}; retrying in {delay:.0f}s",
+            file=sys.stderr,
+        )
+        time.sleep(delay)
+        resp = httpx.post(url, **kwargs)
+    return resp
 
 
 def resolve_token(repo: str) -> str | None:
@@ -69,7 +96,7 @@ def resolve_token(repo: str) -> str | None:
         .raise_for_status()
         .json()["value"]
     )
-    resp = httpx.post(
+    resp = _post_with_retry(
         f"{HF_AUD}/oauth/token",
         timeout=30,
         json={
@@ -165,10 +192,12 @@ def update(
     do_scrape: bool = True,
     do_upload: bool = True,
     seed_src: Path | None = None,
+    token=_RESOLVE_TOKEN,
 ) -> None:
     raw = _raw_dir(work, campaign)
     data = _data_dir(work, campaign)
-    token = resolve_token(repo) if (do_pull or do_upload) else None
+    if token is _RESOLVE_TOKEN:
+        token = resolve_token(repo) if (do_pull or do_upload) else None
 
     if seed_src is not None:
         # One-time seed: take raw inputs from a local directory instead of HF.
@@ -207,7 +236,11 @@ def main() -> None:
         description="Refresh Olatu data: pull → scrape → build → upload to the HF dataset."
     )
     p.add_argument(
-        "--campaign", default=CAMPAIGN_ID, help="CANDHIS campaign id (default: 06403)"
+        "--campaign",
+        nargs="+",
+        default=[CAMPAIGN_ID],
+        help="CANDHIS campaign id(s); pass several to refresh every buoy in one run "
+        "(one shared OIDC exchange). Default: 06403",
     )
     p.add_argument(
         "--repo", default=DEFAULT_REPO, help="HF dataset id (default: hadim/olatu)"
@@ -238,18 +271,38 @@ def main() -> None:
         help="One-time: take raw CSVs from this local dir (e.g. /Users/hadim/Data/olatu/06403) and upload the archive too",
     )
     args = p.parse_args()
+    do_pull, do_upload = not args.no_pull, not args.no_upload
+
+    # Resolve the HF token ONCE and share it across campaigns: every buoy is a path in
+    # the same dataset, so one OIDC exchange authorizes them all (the every-30-min cron
+    # otherwise made 3 exchanges/run and occasionally tripped HF's 429 rate limit).
     try:
-        update(
-            campaign=args.campaign,
-            repo=args.repo,
-            work=args.work,
-            do_pull=not args.no_pull,
-            do_scrape=not args.no_scrape,
-            do_upload=not args.no_upload,
-            seed_src=args.seed_src,
-        )
-    except (scrape_mod.ScrapeError, RuntimeError) as e:
+        token = resolve_token(args.repo) if (do_pull or do_upload) else None
+    except RuntimeError as e:
         print(f"update aborted: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Refresh each buoy independently: one buoy's failure (e.g. its CANDHIS feed is
+    # down) must not skip the others, but the run as a whole still reports failure.
+    failed: list[str] = []
+    for campaign in args.campaign:
+        try:
+            update(
+                campaign=campaign,
+                repo=args.repo,
+                work=args.work,
+                do_pull=do_pull,
+                do_scrape=not args.no_scrape,
+                do_upload=do_upload,
+                seed_src=args.seed_src,
+                token=token,
+            )
+        except (scrape_mod.ScrapeError, RuntimeError) as e:
+            print(f"update aborted for {campaign}: {e}", file=sys.stderr)
+            failed.append(campaign)
+
+    if failed:
+        print(f"done with failures: {', '.join(failed)}", file=sys.stderr)
         sys.exit(1)
     print("done")
 
