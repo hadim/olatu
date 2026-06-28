@@ -154,7 +154,7 @@ function mergeColumnar(parts: Columnar[]): Columnar {
   return out;
 }
 
-export default function TimeSeries({ data, tz, yearFiles, lastT }: { data: Columnar; tz: string; yearFiles: Record<number, string>; lastT?: number }) {
+export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { campaign: string; data: Columnar; tz: string; yearFiles: Record<number, string>; lastT?: number }) {
   const { theme } = useTheme();
   const { locale, t } = useI18n();
   const hostRef = useRef<HTMLDivElement>(null);
@@ -232,14 +232,14 @@ export default function TimeSeries({ data, tz, yearFiles, lastT }: { data: Colum
           for (const y of needed) {
             let c = detailCache.current.get(y);
             if (!c) {
-              c = await loadParquetTier(yearFiles[y], DETAIL_COLUMNS);
+              c = await loadParquetTier(campaign, yearFiles[y], DETAIL_COLUMNS);
               detailCache.current.set(y, c);
             }
             parts.push(c);
           }
           if (!cancelled) setDetail(mergeColumnar(parts));
         } else if (span <= DETAIL_HOURLY) {
-          if (!hourlyCache.current) hourlyCache.current = await loadParquetTier('hourly.parquet', DETAIL_COLUMNS);
+          if (!hourlyCache.current) hourlyCache.current = await loadParquetTier(campaign, 'hourly.parquet', DETAIL_COLUMNS);
           if (!cancelled) setDetail(hourlyCache.current);
         } else {
           if (!cancelled) setDetail(null);
@@ -252,7 +252,7 @@ export default function TimeSeries({ data, tz, yearFiles, lastT }: { data: Colum
     return () => {
       cancelled = true;
     };
-  }, [range.min, range.max, yearFiles]);
+  }, [campaign, range.min, range.max, yearFiles]);
 
   useEffect(() => {
     const host = hostRef.current;

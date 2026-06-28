@@ -29,9 +29,9 @@ export default function Header({ buoy }: { buoy: Buoy | null }) {
       <div className="brand">
         <span className="brand-mark" aria-hidden="true">🌊</span>
         <div>
-          <h1>{buoy?.name ?? 'Olatu'}</h1>
+          <h1>Olatu</h1>
           <p className="eyebrow">
-            {buoy ? `CANDHIS ${buoy.campaign_id} · ${buoy.coast}` : t('app.tagline')}
+            {buoy ? `CANDHIS ${buoy.campaign_id} · ${buoy.name}` : t('app.tagline')}
           </p>
         </div>
       </div>

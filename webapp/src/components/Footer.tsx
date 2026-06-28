@@ -29,6 +29,10 @@ export default function Footer() {
           Cerema / CANDHIS
         </a>
       </span>
+      <span className="footer-sep" aria-hidden="true">·</span>
+      <a href="https://huggingface.co/datasets/hadim/olatu" target="_blank" rel="noopener noreferrer">
+        {t('footer.dataset')} ↗
+      </a>
     </footer>
   );
 }

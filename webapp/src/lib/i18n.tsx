@@ -23,6 +23,16 @@ type Dict = Record<string, string>;
 const MESSAGES = {
   en: {
     'app.tagline': 'Live & historical sea state',
+    'picker.eyebrow': 'Real-time wave data',
+    'intro.description':
+      'Olatu reads what the sea is doing at CANDHIS wave buoys on the French Atlantic coast — live, and across their history.',
+    'picker.choose': 'Choose a buoy',
+    'picker.mapLabel': 'Buoy locator map',
+    'picker.mapHint': 'Pick a buoy on the map',
+    'data.source': 'Data',
+    'data.live': 'live from CANDHIS',
+    'data.dataset': 'open dataset on Hugging Face',
+    'footer.dataset': 'Open dataset',
     'cc.title': 'Current conditions',
     'cc.waveHeight': 'Wave height',
     'cc.maxWave': 'Max wave',
@@ -91,6 +101,16 @@ const MESSAGES = {
   },
   fr: {
     'app.tagline': 'État de la mer en direct et historique',
+    'picker.eyebrow': 'Données de houle en temps réel',
+    'intro.description':
+      'Olatu montre l’état de la mer aux bouées de houle CANDHIS de la côte atlantique française — en direct, et sur leur historique.',
+    'picker.choose': 'Choisir une bouée',
+    'picker.mapLabel': 'Carte de localisation des bouées',
+    'picker.mapHint': 'Choisissez une bouée sur la carte',
+    'data.source': 'Données',
+    'data.live': 'en direct de CANDHIS',
+    'data.dataset': 'jeu de données ouvert sur Hugging Face',
+    'footer.dataset': 'Jeu de données ouvert',
     'cc.title': 'Conditions actuelles',
     'cc.waveHeight': 'Hauteur des vagues',
     'cc.maxWave': 'Vague max',
@@ -159,6 +179,16 @@ const MESSAGES = {
   },
   es: {
     'app.tagline': 'Estado del mar en vivo e histórico',
+    'picker.eyebrow': 'Datos de oleaje en tiempo real',
+    'intro.description':
+      'Olatu muestra el estado del mar en las boyas de oleaje CANDHIS de la costa atlántica francesa — en directo y en su histórico.',
+    'picker.choose': 'Elegir una boya',
+    'picker.mapLabel': 'Mapa de ubicación de las boyas',
+    'picker.mapHint': 'Elige una boya en el mapa',
+    'data.source': 'Datos',
+    'data.live': 'en directo de CANDHIS',
+    'data.dataset': 'conjunto de datos abierto en Hugging Face',
+    'footer.dataset': 'Conjunto de datos abierto',
     'cc.title': 'Condiciones actuales',
     'cc.waveHeight': 'Altura de las olas',
     'cc.maxWave': 'Ola máx.',

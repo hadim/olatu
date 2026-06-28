@@ -1334,3 +1334,216 @@ body {
 .map-modal-foot a:hover {
   color: var(--accent);
 }
+
+/* ---- station bar: intro + buoy picker + locator map (spec 0005) ---- */
+.station-bar {
+  display: grid;
+  grid-template-columns: 1fr minmax(280px, 30rem);
+  gap: 1.5rem;
+  align-items: start;
+  margin-bottom: 1.5rem;
+  padding: 1.15rem 1.35rem;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 1rem;
+}
+
+.station-bar-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.station-bar-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.station-bar-desc {
+  margin: 0;
+  max-width: 48ch;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.station-bar-source {
+  margin: 0.15rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-3);
+}
+.station-bar-source a {
+  color: var(--text-2);
+  text-decoration: none;
+  border-bottom: 1px solid var(--hairline);
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.station-bar-source a:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* segmented buoy selector */
+.buoy-switch {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.15rem;
+}
+.buoy-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.5rem 0.85rem;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: 0.7rem;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text-2);
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+.buoy-option:hover {
+  border-color: var(--divider);
+  color: var(--text);
+}
+.buoy-option--active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: color-mix(in oklab, var(--accent) 12%, var(--surface-2));
+}
+.buoy-option-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--text-3);
+  flex: none;
+}
+.buoy-option--active .buoy-option-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent);
+}
+.buoy-option-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+  text-align: left;
+}
+.buoy-option-name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+.buoy-option-id {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.03em;
+  color: var(--text-3);
+}
+
+/* locator map */
+.station-bar-map {
+  min-width: 0;
+}
+.locator {
+  position: relative;
+  width: 100%;
+}
+.locator-canvas {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border: 1px solid var(--hairline);
+  border-radius: 1rem;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+/* themed placeholder until MapLibre mounts (Suspense fallback + pre-load) */
+.locator--loading,
+.locator-canvas:empty {
+  aspect-ratio: 16 / 10;
+  width: 100%;
+  border: 1px solid var(--hairline);
+  border-radius: 1rem;
+  background: radial-gradient(
+    120% 100% at 30% 0%,
+    color-mix(in oklab, var(--accent) 8%, var(--surface-2)),
+    var(--surface-2)
+  );
+}
+.locator-hint {
+  position: absolute;
+  left: 0.55rem;
+  bottom: 0.5rem;
+  z-index: 1;
+  padding: 0.2rem 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--text-2);
+  background: color-mix(in oklab, var(--surface) 82%, transparent);
+  border-radius: 0.4rem;
+  pointer-events: none;
+}
+
+/* custom HTML markers placed on the locator map */
+.locator-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem 0.2rem 0.4rem;
+  background: color-mix(in oklab, var(--surface) 88%, transparent);
+  border: 1px solid var(--divider);
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text-2);
+  white-space: nowrap;
+  box-shadow: 0 2px 9px -4px rgba(0, 0, 0, 0.55);
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+.locator-marker:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.locator-marker--active {
+  color: var(--text);
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 20%, var(--surface));
+}
+.locator-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-3);
+  flex: none;
+}
+.locator-marker--active .locator-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 30%, transparent);
+}
+.locator-name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.78rem;
+}
+/* Declutter when buoys sit close together: only the active marker shows its name;
+   others are dots that reveal their name on hover. Keeps the map readable at any zoom. */
+.locator-marker:not(.locator-marker--active):not(:hover) .locator-name {
+  display: none;
+}
+
+/* selected-buoy name in the current-conditions eyebrow */
+.banner-buoy {
+  color: var(--text-2);
+}
+
+@media (max-width: 720px) {
+  .station-bar {
+    grid-template-columns: 1fr;
+    gap: 1.15rem;
+  }
+}

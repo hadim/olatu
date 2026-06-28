@@ -1,6 +1,6 @@
 // Read a Parquet tier in the browser via hyparquet (zero-dep, no WASM).
 //
-// Tiers are served from the HF dataset (see data.ts / DATA_BASE). We fetch the WHOLE
+// Tiers are served from the HF dataset (see data.ts / dataBase). We fetch the WHOLE
 // file as an ArrayBuffer rather than using HTTP range requests: a CDN may transparently
 // gzip the response and serve byte-ranges against the *compressed* stream, which
 // corrupts hyparquet's offset-based reads ("footer != PAR1"). A full fetch lets the
@@ -9,20 +9,20 @@
 // in full anyway.
 
 import { parquetReadObjects } from 'hyparquet';
-import { DATA_BASE } from './data';
+import { dataBase } from './data';
 
 export interface Columnar {
   t: number[]; // epoch seconds
   [variable: string]: (number | null)[];
 }
 
-/** Load a Parquet tier (e.g. "daily.parquet"), decoding only the wanted columns. */
-export async function loadParquetTier(name: string, columns: string[]): Promise<Columnar> {
+/** Load a Parquet tier (e.g. "daily.parquet") for a campaign, decoding only the wanted columns. */
+export async function loadParquetTier(campaign: string, name: string, columns: string[]): Promise<Columnar> {
   // Revalidate every load: HF serves parquet with no cache-control, so the browser
   // would heuristically cache a stale copy — making the chart lag the (no-cache) JSON
   // banner by a refresh cycle. `no-cache` returns a cheap 304 when unchanged.
-  const res = await fetch(`${DATA_BASE}${name}`, { cache: 'no-cache' });
-  if (!res.ok) throw new Error(`Failed to load ${name} (${res.status})`);
+  const res = await fetch(`${dataBase(campaign)}${name}`, { cache: 'no-cache' });
+  if (!res.ok) throw new Error(`Failed to load ${campaign}/${name} (${res.status})`);
   const file = await res.arrayBuffer();
 
   const rows = (await parquetReadObjects({

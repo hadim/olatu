@@ -1,15 +1,22 @@
 // Loads the static data tiers produced by the polars ingest (see specs §5).
 //
-// The tiers are served at runtime from the Hugging Face dataset `hadim/olatu`
-// (resolve/main/<campaign>/data/...), so the deployed site and its data are
-// decoupled: the every-30-min refresh re-uploads the data to HF without ever
-// rebuilding or redeploying the webapp (specs/0004 §6). HF dataset URLs are public
-// with CORS, which a bucket is not — hence a dataset. Override the source with
-// VITE_DATA_BASE_URL (must end in `/`), e.g. a fork's dataset or a local `…/data/`.
+// The tiers are served at runtime from the Hugging Face dataset `hadim/olatu`, laid
+// out per campaign (`resolve/main/<campaign>/data/...`), so the deployed site and its
+// data are decoupled: the every-30-min refresh re-uploads the data to HF without ever
+// rebuilding or redeploying the webapp (specs/0004 §6, 0005). HF dataset URLs are
+// public with CORS, which a bucket is not — hence a dataset.
+//
+// Multi-buoy: the base is the dataset ROOT and `<campaign>/data/` is appended per call.
+// Override the root with VITE_DATA_BASE_URL (must end in `/`), e.g. a fork's dataset.
 
-export const DATA_BASE: string =
+export const DATA_ROOT: string =
   import.meta.env.VITE_DATA_BASE_URL ??
-  'https://huggingface.co/datasets/hadim/olatu/resolve/main/06403/data/';
+  'https://huggingface.co/datasets/hadim/olatu/resolve/main/';
+
+/** Base URL for one campaign's data tiers (ends in `/`). */
+export function dataBase(campaign: string): string {
+  return `${DATA_ROOT}${campaign}/data/`;
+}
 
 export interface Buoy {
   campaign_id: string;
@@ -50,22 +57,22 @@ export interface Series {
   [variable: string]: (number | null)[];
 }
 
-async function loadJSON<T>(name: string): Promise<T> {
-  const res = await fetch(`${DATA_BASE}${name}`, { cache: 'no-cache' });
-  if (!res.ok) throw new Error(`Failed to load ${name} (${res.status})`);
+async function loadJSON<T>(campaign: string, name: string): Promise<T> {
+  const res = await fetch(`${dataBase(campaign)}${name}`, { cache: 'no-cache' });
+  if (!res.ok) throw new Error(`Failed to load ${campaign}/${name} (${res.status})`);
   return (await res.json()) as T;
 }
 
-export function loadManifest() {
-  return loadJSON<Manifest>('manifest.json');
+export function loadManifest(campaign: string) {
+  return loadJSON<Manifest>(campaign, 'manifest.json');
 }
 
-export function loadLatest() {
-  return loadJSON<Series>('latest.json');
+export function loadLatest(campaign: string) {
+  return loadJSON<Series>(campaign, 'latest.json');
 }
 
-export function loadRecent() {
-  return loadJSON<Series>('recent.json');
+export function loadRecent(campaign: string) {
+  return loadJSON<Series>(campaign, 'recent.json');
 }
 
 /** Latest non-null value of a variable in a columnar series, with its timestamp (ms). */

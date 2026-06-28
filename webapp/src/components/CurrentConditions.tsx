@@ -102,7 +102,10 @@ export default function CurrentConditions({ latest, manifest }: { latest: Series
   return (
     <section className={`banner banner--${fresh}`} aria-label={t('cc.title')}>
       <div className="banner-head">
-        <span className="banner-eyebrow">{t('cc.title')}</span>
+        <span className="banner-eyebrow">
+          {t('cc.title')}
+          <span className="banner-buoy"> · {manifest.buoy.name}</span>
+        </span>
         <StalenessBadge fresh={fresh} stampMs={stampMs} tz={tz} now={now} />
       </div>
 
