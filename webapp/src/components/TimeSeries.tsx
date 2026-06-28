@@ -144,7 +144,7 @@ function mergeColumnar(parts: Columnar[]): Columnar {
   return out;
 }
 
-export default function TimeSeries({ data, tz, yearFiles }: { data: Columnar; tz: string; yearFiles: Record<number, string> }) {
+export default function TimeSeries({ data, tz, yearFiles, lastT }: { data: Columnar; tz: string; yearFiles: Record<number, string>; lastT?: number }) {
   const { theme } = useTheme();
   const { locale, t } = useI18n();
   const hostRef = useRef<HTMLDivElement>(null);
@@ -153,7 +153,10 @@ export default function TimeSeries({ data, tz, yearFiles }: { data: Columnar; tz
 
   const xs = data.t;
   const T0 = xs.length ? xs[0] : 0;
-  const TN = xs.length ? xs[xs.length - 1] : 0;
+  // `data` is the daily tier — its last point is today's *daily bucket* (~00:00 UTC),
+  // not the freshest 30-min reading. Bound the chart by the real latest timestamp
+  // (manifest span end, same value the banner uses) so short windows reach "now".
+  const TN = Math.max(xs.length ? xs[xs.length - 1] : 0, lastT ?? 0);
 
   const [range, setRange] = useState<{ min: number; max: number }>(() => ({
     min: Math.max(T0, TN - 1 * DAY),

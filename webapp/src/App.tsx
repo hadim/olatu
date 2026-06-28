@@ -111,6 +111,7 @@ export default function App() {
               <TimeSeries
                 data={history}
                 tz={data.manifest.timezone}
+                lastT={Math.floor(Date.parse(data.manifest.span.end) / 1000)}
                 yearFiles={Object.fromEntries(data.manifest.years.map((y) => [y.year, y.file]))}
               />
             ) : historyError ? (
