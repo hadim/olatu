@@ -1,7 +1,15 @@
 // Loads the static data tiers produced by the polars ingest (see specs §5).
-// All assets are fetched relative to the Vite base so they resolve under /olatu/.
+//
+// The tiers are served at runtime from the Hugging Face dataset `hadim/olatu`
+// (resolve/main/<campaign>/data/...), so the deployed site and its data are
+// decoupled: the every-30-min refresh re-uploads the data to HF without ever
+// rebuilding or redeploying the webapp (specs/0004 §6). HF dataset URLs are public
+// with CORS, which a bucket is not — hence a dataset. Override the source with
+// VITE_DATA_BASE_URL (must end in `/`), e.g. a fork's dataset or a local `…/data/`.
 
-const BASE = import.meta.env.BASE_URL;
+export const DATA_BASE: string =
+  import.meta.env.VITE_DATA_BASE_URL ??
+  'https://huggingface.co/datasets/hadim/olatu/resolve/main/06403/data/';
 
 export interface Buoy {
   campaign_id: string;
@@ -43,7 +51,7 @@ export interface Series {
 }
 
 async function loadJSON<T>(name: string): Promise<T> {
-  const res = await fetch(`${BASE}data/${name}`, { cache: 'no-cache' });
+  const res = await fetch(`${DATA_BASE}${name}`, { cache: 'no-cache' });
   if (!res.ok) throw new Error(`Failed to load ${name} (${res.status})`);
   return (await res.json()) as T;
 }

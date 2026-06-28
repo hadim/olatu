@@ -1,16 +1,15 @@
-// Read a committed Parquet tier in the browser via hyparquet (zero-dep, no WASM).
+// Read a Parquet tier in the browser via hyparquet (zero-dep, no WASM).
 //
-// NOTE: we fetch the WHOLE file as an ArrayBuffer rather than using HTTP range
-// requests. GitHub Pages (Fastly) gzips `application/octet-stream` when the browser
-// sends `Accept-Encoding: gzip`, and serves byte-ranges against the *compressed*
-// stream — which corrupts hyparquet's offset-based reads ("footer != PAR1"). Fetching
-// the full file lets the browser transparently decompress; hyparquet then reads from
-// the in-memory buffer (column projection still applies in-memory). The tiers we load
-// this way (daily/hourly) are small and plotted in full anyway.
+// Tiers are served from the HF dataset (see data.ts / DATA_BASE). We fetch the WHOLE
+// file as an ArrayBuffer rather than using HTTP range requests: a CDN may transparently
+// gzip the response and serve byte-ranges against the *compressed* stream, which
+// corrupts hyparquet's offset-based reads ("footer != PAR1"). A full fetch lets the
+// browser decompress; hyparquet then reads from the in-memory buffer (column projection
+// still applies). The tiers we load this way (daily/hourly/year) are small and plotted
+// in full anyway.
 
 import { parquetReadObjects } from 'hyparquet';
-
-const BASE = import.meta.env.BASE_URL;
+import { DATA_BASE } from './data';
 
 export interface Columnar {
   t: number[]; // epoch seconds
@@ -19,7 +18,7 @@ export interface Columnar {
 
 /** Load a Parquet tier (e.g. "daily.parquet"), decoding only the wanted columns. */
 export async function loadParquetTier(name: string, columns: string[]): Promise<Columnar> {
-  const res = await fetch(`${BASE}data/${name}`);
+  const res = await fetch(`${DATA_BASE}${name}`);
   if (!res.ok) throw new Error(`Failed to load ${name} (${res.status})`);
   const file = await res.arrayBuffer();
 

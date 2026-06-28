@@ -13,6 +13,13 @@
 > pins how that scraper works and the merge-safety changes it requires. It refines
 > 0001 §5; it does not supersede it.
 
+> **Revision 2026-06-28 — data lives in a Hugging Face dataset, not git.** The original
+> draft kept the reel CSVs + built tiers in the repo and committed them. To support a
+> 30-min refresh without git churn (foundation §5.3's #1 risk) and to decouple the data
+> from the site build, **all data now lives in the HF dataset `hadim/olatu`** and the
+> webapp fetches the tiers at runtime. The scraper/merge/validation mechanics (§1–§5)
+> are unchanged; the artifact location and operations (§3, §6, §7) are revised below.
+
 ---
 
 ## 1. The discovery (so a future session need not re-derive it)
@@ -55,17 +62,31 @@ realtime CSV dialect `build.py` already reads (`REEL_MAP` in `ingest/schema.py`)
 `Heure (TU)` is UTC (TU = *Temps Universel*; see LEARNINGS). The page splits date and
 time into two cells; the CSV recombines them into one `Date` field `YYYY-MM-DD HH:MM:00`.
 
-## 3. Artifact: one accumulating per-year reel CSV
+## 3. Artifact: one accumulating per-year reel CSV (stored in the HF dataset)
 
-- The scraper writes `Candhis_06403_<YEAR>_reel.csv` under `--src` — **one growing file
-  per year**, mirroring the archive's per-year files and keeping each bounded.
-- *Not* a dated-per-run file: that produces ~365 overlapping files/year, date-boundary
-  filename churn, and pushes dedup onto `build.py`. One file per year is idempotent and
-  diff-friendly.
-- A cross-year scrape (Dec 31 ↔ Jan 1) is split into both year files.
-- **Migration:** the first run folds any legacy dated snapshot
-  (`Candhis_06403_<YEAR>-*_reel.csv`, e.g. the original manual `…_2026-06-27_reel.csv`)
-  into the year file and removes it.
+- The scraper writes `Candhis_06403_<YEAR>_reel.csv` — **one growing file per year**,
+  mirroring the archive's per-year files and keeping each bounded. *Not* a dated-per-run
+  file (that produces ~365 overlapping files/year and pushes dedup onto `build.py`); one
+  file per year is idempotent and diff-friendly. A cross-year scrape (Dec 31 ↔ Jan 1) is
+  split into both year files.
+- **It lives in the HF dataset, not git** (see Revision above). The canonical store is
+  the dataset `hadim/olatu`, laid out per campaign so it is multi-buoy ready:
+
+  ```
+  <campaign>/raw/Candhis_<campaign>_<YEAR>_arch.csv   immutable archive (seeded once)
+  <campaign>/raw/Candhis_<campaign>_<YEAR>_reel.csv   the growing realtime accumulator
+  <campaign>/data/manifest.json | latest.json | recent.json | year/*.parquet | hourly|daily.parquet
+  ```
+
+- **Why a dataset, not a bucket** (the owner's first instinct): the webapp is a static
+  browser app and needs a public HTTPS URL with **CORS** (and range) to read the tiers.
+  Dataset `resolve/main/<campaign>/data/...` URLs provide exactly that (verified against
+  the GH Pages origin); HF **buckets** do not expose a public browser URL yet ("S3 API
+  not supported"; docs say *promote final artifacts to a dataset for consumers*). Switch
+  to a bucket if/when its S3/HTTP access lands — the `update` flow is the only thing to
+  repoint. Trusted-publisher OIDC supports both, so CI auth is unaffected by the choice.
+- **Migration:** done. The original local per-day/per-year reel files were folded into
+  the dataset's `06403/raw/` during the one-time seed (`update --seed-src …`).
 
 ## 4. Merge safety (the part that matters)
 
@@ -109,22 +130,39 @@ runs can't race. A non-advancing newest timestamp logs a staleness warning.
 
 ## 6. Operations
 
-- **Tasks:** `pixi run scrape` (fetch + grow the reel CSVs) and
-  `pixi run update` (= `scrape` then `ingest`). `build.py` stays pure / network-free so
-  CI's row-group asserts and determinism hold.
-- **Cadence:** run **≤ ~36 h apart**. The feed is a rolling 48 h window; consecutive
-  scrapes must overlap or a gap opens that the live feed can never backfill.
-- **Where data lives / git:** the reel CSVs live in the external raw dir
-  (`/Users/hadim/Data/olatu`, default `--src`), exactly like the archive CSVs — they are
-  source, not committed to the repo. `ingest` regenerates the committed tiers under
-  `webapp/public/data/`; the scraper does **not** auto-commit or auto-push. The built
-  year parquets are the persistent, committed snapshot of accumulated temperature.
+- **One command, local and CI:** `pixi run update [--campaign 06403]` orchestrates
+  **pull → scrape → build → upload** (`ingest/update.py`): pull the accumulator from the
+  dataset (HF is canonical, so a local run can't regress what the cron advanced), scrape
+  the live feed, rebuild the tiers, upload tiers + reel back. `scrape`/`ingest` remain as
+  lower-level steps over the local mirror `./hfdata/<campaign>/{raw,data}` (gitignored).
+- **Auth — keyless OIDC.** No `HF_TOKEN` secret. `update.py` resolves a token in order:
+  `HF_TOKEN` env → GitHub Actions OIDC exchange (Trusted Publishers, resource
+  `datasets/hadim/olatu`) → local `hf` login. The dataset's trusted publisher is pinned
+  to claims `repository=hadim/olatu`, `branch=main`, `workflow=refresh-data.yml`.
+- **CI:** `.github/workflows/refresh-data.yml` runs `*/30` via `setup-pixi` + `pixi run
+  update`. It is Python-only (~1 min): no `npm`/`vite`, **no Pages redeploy** — the webapp
+  reads the tiers at runtime, so fresh data appears without rebuilding the site. The
+  immutable archive is cached so it isn't re-downloaded each run. `deploy.yml` is
+  unchanged and only fires on webapp **code** changes.
+- **Webapp:** reads `https://huggingface.co/datasets/hadim/olatu/resolve/main/06403/data/…`
+  via `DATA_BASE` in `webapp/src/lib/data.ts`; override with `VITE_DATA_BASE_URL`.
+- **Cadence:** `*/30` is purely a freshness choice — the rolling 48 h window means any
+  cadence **≤ ~36 h apart** loses no data. On a public repo Actions minutes are free;
+  even private it is cheap (Python-only, no build).
+- **Git:** the repo is **code only**. The data tiers + raw CSVs are not committed
+  (`webapp/public/data/` and `hfdata/` are gitignored); the old committed tiers were
+  removed (`git rm --cached`). The built year parquets in the dataset are the persistent
+  snapshot of accumulated temperature.
 
 ## 7. Open questions / future
 
-- **CI automation & persistence.** For an unattended cron (vs. the owner's local runs),
-  the raw reel accumulator must persist between runs (the live feed only holds 48 h). The
-  documented path is 0001 §5.3 (immutable backfill on `main` + force-pushed orphan data
-  branch); the accumulator would ride along there. Until then this runs locally.
-- **Multi-buoy.** `--campaign` is already parameterised (base64 `camp=<id>`); the schema
-  is `campaign_id`-keyed, so extending beyond 06403 is a loop, not a redesign.
+- **Archive refresh.** The dataset's `*_arch.csv` are seeded once and treated as
+  immutable (CI caches them). CANDHIS extends the archive ~6-weekly with QC'd values;
+  re-seed periodically (`update --seed-src <local arch dir>`, bump the CI cache key) so
+  the archive's authoritative values supersede the realtime quick-look for that span
+  (the archive-preferred coalesce in §4 then does the right thing).
+- **Buckets when ready.** Move `raw/` (mutable working data) to a HF **bucket** once its
+  S3/HTTP access supports browser reads; the tiers stay in the dataset (browser-served).
+- **Multi-buoy.** The dataset and `update.py` are campaign-prefixed; the local raw dir is
+  already per-buoy (`06402` Anglet is staged). Remaining work is parametrising `build.py`
+  (today single-buoy via `schema.CAMPAIGN_ID`) and a campaign switch in the webapp.

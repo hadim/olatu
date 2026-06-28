@@ -1,0 +1,44 @@
+name: Refresh data (CANDHIS → HF dataset)
+
+# Every 30 min: pull the realtime accumulator from the HF dataset, scrape the live
+# CANDHIS feed, rebuild the tiers, and upload them back to datasets/hadim/olatu.
+# The webapp reads those tiers at runtime, so this NEVER rebuilds or redeploys the
+# site — it is a tiny Python-only job. See specs/0004 §6.
+#
+# Auth is keyless via OIDC Trusted Publishers (no HF_TOKEN secret): configure a
+# trusted publisher on the dataset hadim/olatu → Settings → Trusted Publishers with
+# claims  repository=hadim/olatu  branch=main  workflow=refresh-data.yml.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  id-token: write # mint the OIDC token exchanged for a short-lived, dataset-scoped HF token
+  contents: read
+
+# Never let two refreshes race the dataset.
+concurrency:
+  group: refresh-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Reproduces the local env exactly from pixi.lock (cached between runs).
+      - uses: prefix-dev/setup-pixi@v0.9.6
+        with:
+          cache: true
+
+      - name: Cache the immutable archive (so we don't re-download it each run)
+        uses: actions/cache@v4
+        with:
+          path: hfdata/06403/raw
+          key: candhis-raw-06403-v1
+
+      - name: Refresh (pull → scrape → build → upload to HF)
+        run: pixi run update --campaign 06403

@@ -184,3 +184,9 @@ dist/
 node_modules/
 .playwright-mcp/
 olatu-*.png
+
+# Data is served from the HF dataset hadim/olatu, not committed to git (see specs/0004).
+# Local working mirror of the dataset (pull → scrape → build → upload):
+hfdata/
+# Tiers built locally for offline preview (the webapp reads HF by default):
+webapp/public/data/

@@ -9,17 +9,17 @@ channels = ["conda-forge"]
 platforms = ["osx-arm64", "linux-64"]
 
 [tasks]
-# --- Data pipeline ---
-# Scrape the CANDHIS realtime feed (incl. sea temperature) into per-year reel CSVs
-# under --src; run regularly (<= ~36 h apart) so the series grows continuously:
-#   pixi run scrape [--src /path/to/csv]
-scrape = "python -m ingest.scrape"
-# Build the tiered data files. Override paths, e.g.:
-#   pixi run ingest --src /path/to/csv --out data
-ingest = "python -m ingest.build"
-# Scrape the latest realtime data, then rebuild the tiers (the usual refresh):
-#   pixi run update
-update = { cmd = "python -m ingest.build", depends-on = ["scrape"] }
+# --- Data pipeline (data lives in the HF dataset hadim/olatu, not in git) ---
+# The usual refresh — pull from HF, scrape the live CANDHIS feed, rebuild the tiers,
+# upload back to the dataset. Same command locally and in CI:
+#   pixi run update                 # campaign 06403 by default
+#   pixi run update --campaign 06402
+update = "python -m ingest.update"
+# Lower-level steps (the working mirror is ./hfdata/<campaign>/{raw,data}):
+#   scrape the live feed into the local reel accumulator
+scrape = "python -m ingest.scrape --src hfdata/06403/raw"
+#   build the tiers from the local raw CSVs
+ingest = "python -m ingest.build --src hfdata/06403/raw --out hfdata/06403/data"
 
 # --- Webapp (frontend) ---
 webapp-install = { cmd = "npm install", cwd = "webapp" }
@@ -38,9 +38,12 @@ check = { depends-on = ["format", "lint"] }
 python = ">=3.13,<4"
 polars = ">=1.18"
 pyarrow = ">=24.0.0"
-# For the (future) realtime scraper that pulls the CANDHIS web table:
+# For the realtime scraper that pulls the CANDHIS web table:
 httpx = ">=0.28"
 lxml = ">=6.1.1"
+# Publishes the built tiers + raw CSVs to the HF dataset (hadim/olatu) and provides
+# the `hf` CLI (OIDC trusted-publisher uploads in CI). See specs/0004 §6.
+huggingface_hub = ">=1.21.0"
 # Frontend toolchain (so `pixi run webapp` works without a system Node):
 nodejs = ">=22"
 # Dev

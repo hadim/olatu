@@ -9,6 +9,33 @@ Format per entry: **date — title** · what we found · why it matters · resol
 
 ---
 
+## 2026-06-28 — HF **datasets** serve the browser (CORS + range); **buckets** don't (yet)
+
+**Finding.** To get the churning data off git (a 30-min refresh would otherwise bloat
+history with binary parquets), we moved all data to Hugging Face. The owner's instinct
+was a **bucket** (`hadim/olatu`). But buckets are *working storage*: access is only via
+`hf://`/mount/CLI/Python — "S3 API not supported", **no public browser URL**. A static
+webapp needs a public HTTPS URL with **CORS** (hyparquet also wants range). Verified
+empirically that a **dataset** `resolve/main/...` URL returns `200/206` with
+`access-control-allow-origin` echoing the GH Pages origin and `accept-ranges: bytes` —
+so datasets are browser-fetchable, buckets are not. HF's own docs say exactly this:
+"promote final artifacts to a dataset for consumers." Trusted-publisher **OIDC supports
+both** (`resource: datasets/…` or `buckets/…`), so CI auth doesn't force the choice.
+
+**Why it matters.** It flips the data-ops design: the webapp reads tiers **at runtime**
+from the dataset, so the every-30-min job is Python-only (pull → scrape → build →
+upload) and **never rebuilds/redeploys the site**. The repo becomes code-only; foundation
+§5.3's git-churn risk is dissolved. Keyless via OIDC — no `HF_TOKEN` secret.
+
+**Resolution.** Data → dataset `hadim/olatu`, campaign-prefixed (`06403/raw`, `06403/data`).
+`ingest/update.py` orchestrates it (OIDC token exchange for CI); webapp `DATA_BASE`
+points at the dataset; `.github/workflows/refresh-data.yml` runs `*/30`. Switch `raw/`
+to a bucket if/when bucket browser access lands. See [0004](2026-06-27-0004-realtime-scraper.md) §3/§6.
+
+**Refs.** `ingest/update.py`; `webapp/src/lib/data.ts` (`DATA_BASE`); `.github/workflows/refresh-data.yml`.
+
+---
+
 ## 2026-06-27 — The CANDHIS realtime "browser table" *is* the API (one GET, no Valider/POST)
 
 **Finding.** `campagne.php` looks hostile to automate — PHP, a campaign must be

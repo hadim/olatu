@@ -26,26 +26,36 @@ a spec?"* — if yes, create/update one (see "When does work need a spec?" in
 ## Layout
 
 ```
-ingest/        Python (polars) CSV -> tiered Parquet/JSON. NOT an installable package.
+ingest/        Python (polars). NOT an installable package.
   schema.py    canonical column mapping, units, sentinel, headline/direction vars
-  build.py     the build script (run via pixi); default --out webapp/public/data
+  scrape.py    fetch the CANDHIS realtime HTML table -> per-year reel CSV (coalesce-merge)
+  build.py     CSV -> tiered Parquet/JSON (archive-preferred coalesce)
+  update.py    pull → scrape → build → upload to the HF dataset (OIDC in CI)
 pixi.toml      Python env + frontend tasks (no pyproject; no Python library)
-webapp/        the frontend
-  public/data/ generated tiers (committed): manifest/latest/recent.json, year/*.parquet, hourly/daily.parquet
+webapp/        the frontend (reads data tiers from the HF dataset at runtime)
 specs/         decisions
+.github/workflows/  deploy.yml (Pages, on code changes) + refresh-data.yml (data, */30)
 ```
+
+> **Data lives in the HF dataset `hadim/olatu`, NOT in git** (see specs/0004).
+> Layout: `<campaign>/raw/*.csv` (archive + reel accumulator) + `<campaign>/data/…`
+> (manifest/latest/recent.json, year/*.parquet, hourly/daily.parquet). The webapp
+> fetches `…/resolve/main/06403/data/…` (CORS-served). `hfdata/` (local working mirror)
+> and `webapp/public/data/` (optional local build) are gitignored.
 
 ## Commands
 
 ```bash
-pixi run scrape                      # grow realtime reel CSVs from the live CANDHIS feed (incl. sea temp)
-pixi run update                      # scrape, then rebuild the tiers (usual refresh)
-pixi run ingest                      # build data/ from CANDHIS CSVs (default src /Users/hadim/Data/olatu)
-pixi run ingest --src DIR --out DIR  # override paths
+pixi run update                      # pull → scrape → build → upload to HF (the usual refresh; OIDC in CI)
+pixi run update --campaign 06403     # same, explicit campaign
+pixi run scrape                      # lower-level: grow the local reel from the live feed (hfdata/06403/raw)
+pixi run ingest                      # lower-level: build tiers from local raw (hfdata/06403/{raw,data})
 pixi run check                       # ruff format + lint
-pixi run webapp                      # start the frontend dev server (bundled Node)
+pixi run webapp                      # frontend dev server (reads data from HF; VITE_DATA_BASE_URL to override)
 pixi run webapp-build                # static build for GitHub Pages
 ```
+
+One-time seed of the dataset: `pixi run update --campaign 06403 --seed-src /Users/hadim/Data/olatu/06403`.
 
 ## Conventions & gotchas
 
@@ -60,16 +70,21 @@ pixi run webapp-build                # static build for GitHub Pages
 - **Sea temperature exists only in the realtime feed** → history has none; it
   accumulates forward. Handle missing-temp as a first-class UI state, not an empty chart.
 - **Series has real gaps** (largest 50 days) → break the line, never interpolate across.
-- **GitHub Pages base path:** fetch every runtime asset via `import.meta.env.BASE_URL`,
-  never a leading `/`.
+- **GitHub Pages base path:** fetch webapp assets via `import.meta.env.BASE_URL`,
+  never a leading `/`. **Data tiers are different** — fetch them via `DATA_BASE`
+  (`webapp/src/lib/data.ts`), the HF dataset resolve URL, not BASE_URL.
 - **Parquet:** Snappy + `row_group_size≈1440` (multi-row-group, CI-asserted) so
   hyparquet range requests + column projection work.
 
-## Current state (2026-06-27)
+## Current state (2026-06-28)
 
 - Specs written; repo cleaned; `pixi.toml` + polars ingest done and **validated on
-  real data** (214,908 rows, 2013→2026). Data committed to `main` (acknowledged
-  debt; migration path in foundation spec §5.3).
+  real data** (≈214,900 rows, 2013→2026).
+- **Data lives in the HF dataset `hadim/olatu`, not git** (foundation §5.3 migration
+  done; see specs/0004). `ingest/update.py` does pull → scrape → build → upload;
+  `.github/workflows/refresh-data.yml` runs it every 30 min keyless via OIDC trusted
+  publisher; the webapp reads tiers from HF at runtime (no Pages redeploy on data
+  change). Sea-temperature history accumulates forward from the scraper's first run.
 - **Webapp rebuilt to TypeScript** (Plotly removed). Working: data loader for the
   JSON tiers + a current-conditions banner (compass dial, gauges, sea temp,
   staleness); **theme** toggle (dark default + light, CSS-var tokens) and **i18n**
@@ -82,11 +97,12 @@ pixi run webapp-build                # static build for GitHub Pages
 - **Live**: https://hadim.github.io/olatu/ — deployed by `.github/workflows/deploy.yml`
   (official GitHub Pages Actions flow; Pages source = GitHub Actions). Pushes that
   touch `webapp/**` redeploy automatically.
-- **Realtime scraper** (`ingest/scrape.py`, `pixi run scrape`/`update`): grows the live
-  tail + sea-temperature history by parsing the CANDHIS realtime HTML table (one GET,
-  no Valider/POST) into per-year `*_reel.csv`. `build.py assemble()` now does an
-  archive-preferred column coalesce so the tail never clobbers the archive. See spec 0004.
+- **Realtime scraper** (`ingest/scrape.py`): grows the live tail + sea-temperature
+  history by parsing the CANDHIS realtime HTML table (one GET, no Valider/POST) into a
+  per-year `*_reel.csv` accumulator. `build.py assemble()` does an archive-preferred
+  column coalesce so the tail never clobbers the archive. See spec 0004.
+- Chart range presets are 1D/2D/5D/10D/1M/6M/1Y/5Y/All; **default is 1D**.
 
-Next per roadmap: 30-min detail via year parquet + the direction glyph/cyclical
-layer, history navigation (date picker + heat-ribbon), the map, the full glossary,
-and migrating theme/i18n/styling to Tailwind + shadcn + Paraglide.
+Next per roadmap: the direction glyph/cyclical layer, history navigation (date picker
++ heat-ribbon) polish, the full glossary, multi-buoy (06402 Anglet staged), and
+migrating theme/i18n/styling to Tailwind + shadcn + Paraglide.
