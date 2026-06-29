@@ -154,28 +154,22 @@ def pull(work: Path, campaign: str, repo: str, token: str | None) -> None:
 
 
 def upload(work: Path, campaign: str, repo: str, token: str | None) -> None:
-    """Push the rebuilt tiers + the updated accumulator back to the dataset.
+    """Push the rebuilt tiers + the updated accumulator back in ONE commit per campaign.
 
-    upload_folder diffs against the remote, so unchanged immutable year parquets are
-    not re-committed; only the churning tiers and the reel are uploaded.
+    upload_folder diffs against the remote, so the immutable year parquets and an
+    unchanged reel are skipped (only modified files are sent). Uploading data/ and
+    raw/*_reel.csv together — instead of two separate upload_folder calls — halves the
+    HF commits/round-trips per buoy. The immutable *_arch.csv is never matched.
     """
     from huggingface_hub import HfApi
 
-    api = HfApi(token=token)
-    api.upload_folder(
+    HfApi(token=token).upload_folder(
         repo_id=repo,
         repo_type="dataset",
-        folder_path=str(_data_dir(work, campaign)),
-        path_in_repo=f"{campaign}/data",
-        commit_message=f"data: refresh {campaign} tiers",
-    )
-    api.upload_folder(
-        repo_id=repo,
-        repo_type="dataset",
-        folder_path=str(_raw_dir(work, campaign)),
-        path_in_repo=f"{campaign}/raw",
-        allow_patterns=["*_reel.csv"],  # archive is immutable; only the reel grows
-        commit_message=f"data: grow {campaign} realtime tail",
+        folder_path=str(work / campaign),
+        path_in_repo=campaign,
+        allow_patterns=["data/**", "raw/*_reel.csv"],  # never the immutable archive
+        commit_message=f"data: refresh {campaign} (tiers + realtime tail)",
     )
     print(f"  uploaded {campaign}/data + {campaign}/raw/*_reel.csv to datasets/{repo}")
 
