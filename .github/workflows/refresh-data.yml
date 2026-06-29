@@ -29,10 +29,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Reproduces the local env exactly from pixi.lock (cached between runs).
+      # Reproduces the local env exactly from pixi.lock (cached between runs). Install
+      # only the lean `data` environment (no Node/ruff) — that's all the refresh needs.
       - uses: prefix-dev/setup-pixi@v0.9.6
         with:
           cache: true
+          environments: data
 
       - name: Cache the immutable archives (so we don't re-download them each run)
         uses: actions/cache@v6
@@ -47,4 +49,4 @@ jobs:
       # exchange shared across campaigns (avoids the per-buoy 429s). update.py refreshes
       # each buoy independently and exits non-zero if any failed (fail-fast off).
       - name: Refresh every buoy (pull → scrape → build → upload to HF)
-        run: pixi run update --campaign 06403 06402 03302
+        run: pixi run -e data update --campaign 06403 06402 03302

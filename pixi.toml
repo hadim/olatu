@@ -44,7 +44,18 @@ lxml = ">=6.1.1"
 # Publishes the built tiers + raw CSVs to the HF dataset (hadim/olatu) and provides
 # the `hf` CLI (OIDC trusted-publisher uploads in CI). See specs/0004 §6.
 huggingface_hub = ">=1.21.0"
-# Frontend toolchain (so `pixi run webapp` works without a system Node):
+
+# Frontend toolchain — only for local `pixi run webapp`; CI deploy uses actions/setup-node.
+[feature.web.dependencies]
 nodejs = ">=22"
-# Dev
+
+# Lint/format — not needed by the data refresh.
+[feature.dev.dependencies]
 ruff = ">=0.15.20"
+
+[environments]
+# `default` is the full local env (data core + web + dev). The refresh CI installs the
+# lean `data` env (core only, no Node) so setup-pixi caches/restores far less — run it
+# with `pixi run -e data update`. See .github/workflows/refresh-data.yml.
+default = ["web", "dev"]
+data = []
