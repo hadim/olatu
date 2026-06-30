@@ -1,13 +1,13 @@
-name: Refresh data (CANDHIS → HF dataset)
+name: Refresh data (CANDHIS → HF bucket)
 
-# Every 30 min, for EACH buoy: pull the realtime accumulator from the HF dataset, scrape
-# the live CANDHIS feed, rebuild the tiers, and upload them back to datasets/hadim/olatu.
+# Every 30 min, for EACH buoy: pull the realtime accumulator from the HF bucket, scrape
+# the live CANDHIS feed, rebuild the tiers, and upload them back to buckets/hadim/olatu.
 # The webapp reads those tiers at runtime, so this NEVER rebuilds or redeploys the site —
 # it is a tiny Python-only job. See specs/0004 §6 and 0005 §4.
 #
-# Auth is keyless via OIDC Trusted Publishers (no HF_TOKEN secret): configure a trusted
-# publisher on the dataset hadim/olatu → Settings → Trusted Publishers with claims
-# repository=hadim/olatu  branch=main  workflow=refresh-data.yml.
+# Auth is keyless via OIDC Trusted Publishers (no HF_TOKEN secret): the trusted publisher
+# is configured on the bucket hadim/olatu → Settings → Trusted Publishers with claims
+# repository = hadim/olatu  and  workflow_ref starts-with hadim/olatu/.github/workflows/refresh-data.yml@.
 
 on:
   schedule:
@@ -15,10 +15,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write # mint the OIDC token exchanged for a short-lived, dataset-scoped HF token
+  id-token: write # mint the OIDC token exchanged for a short-lived, bucket-scoped HF token
   contents: read
 
-# Never let two refreshes race the dataset.
+# Never let two refreshes race the bucket.
 concurrency:
   group: refresh-data
   cancel-in-progress: false

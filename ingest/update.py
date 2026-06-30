@@ -1,26 +1,31 @@
-"""End-to-end data refresh: pull → scrape → build → upload, with the HF dataset as
+"""End-to-end data refresh: pull → scrape → build → upload, with the HF bucket as
 the single source of truth.
 
-The data no longer lives in git. It lives in the Hugging Face **dataset**
+The data no longer lives in git. It lives in the Hugging Face **bucket**
 `hadim/olatu`, laid out per campaign so it is multi-buoy ready:
 
     <campaign>/raw/Candhis_<campaign>_<YEAR>_arch.csv   immutable archive (seeded once)
     <campaign>/raw/Candhis_<campaign>_<YEAR>_reel.csv   the growing realtime accumulator
     <campaign>/data/manifest.json | latest.json | recent.json | year/*.parquet | hourly/daily.parquet
                                                        the tiers the webapp fetches at runtime
+    <campaign>/backup/<UTC-date>/*_reel.csv            daily reel snapshots (see snapshot_reel)
 
-Why a dataset (not a bucket): the webapp is a static browser app and needs public
-HTTPS + CORS (+ range) to read the tiers; dataset `resolve/main/...` URLs provide
-that, buckets do not (yet). See specs/2026-06-27-0004-realtime-scraper.md §6.
+Why a bucket: the webapp is a static browser app and needs public HTTPS + CORS (+
+range) to read the tiers. A *public* bucket's `…/buckets/<ns>/<name>/resolve/<key>`
+URLs deliver exactly that — anonymous, CORS-enabled, range-capable, off the same CDN
+as dataset repos — while the mutable overwrite-in-place model avoids the git-history
+bloat the every-30-min refresh used to accrue. The trade-off: buckets are
+non-versioned, so the forward-only reel has no rollback — hence snapshot_reel keeps
+dated recovery points. See specs/2026-06-27-0004-realtime-scraper.md §6.
 
 This orchestrator runs the same locally (`pixi run update`, your stored HF login) and
 in CI (GitHub Actions OIDC trusted publisher — no stored token). Each run:
 
-  1. pull the realtime accumulator (always) + archive (only if missing) from the dataset
+  1. pull the realtime accumulator (always) + archive (only if missing) from the bucket
      into a local working mirror (`./hfdata/<campaign>/raw`),
   2. scrape the live CANDHIS feed and coalesce-merge it into the accumulator,
   3. build the tiers into `./hfdata/<campaign>/data`,
-  4. upload the tiers + the updated accumulator back to the dataset.
+  4. upload the tiers + the updated accumulator back to the bucket (+ a daily reel snapshot).
 
 HF is canonical, so pulling before scraping means a local run can never regress the
 forward-growing series the cron has already advanced.
@@ -40,7 +45,7 @@ from . import build as build_mod
 from . import scrape as scrape_mod
 from .schema import CAMPAIGN_ID
 
-DEFAULT_REPO = "hadim/olatu"  # HF dataset id
+DEFAULT_REPO = "hadim/olatu"  # HF bucket id
 HF_AUD = "https://huggingface.co"
 
 # HF rate-limits bursts of OIDC token exchanges (the every-30-min cron occasionally
@@ -77,7 +82,7 @@ def resolve_token(repo: str) -> str | None:
     """Return an HF token: explicit env, else a CI OIDC exchange, else None (local login).
 
     On GitHub Actions with `permissions: id-token: write`, exchange the job's OIDC
-    identity for a short-lived, dataset-scoped Hub token (Trusted Publishers) — no
+    identity for a short-lived, bucket-scoped Hub token (Trusted Publishers) — no
     stored secret. Locally, return None so huggingface_hub uses the cached `hf` login.
     """
     if os.environ.get("HF_TOKEN"):
@@ -86,7 +91,7 @@ def resolve_token(repo: str) -> str | None:
     req_tok = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
     if not (req_url and req_tok):
         return None  # not in GitHub Actions → fall back to the local login
-    resource = f"datasets/{repo}"
+    resource = f"buckets/{repo}"
     id_token = (
         httpx.get(
             f"{req_url}&audience={HF_AUD}",
@@ -126,52 +131,102 @@ def _data_dir(work: Path, campaign: str) -> Path:
 
 
 def pull(work: Path, campaign: str, repo: str, token: str | None) -> None:
-    """Mirror the dataset's raw inputs locally: reel always (small), archive if absent."""
-    from huggingface_hub import snapshot_download
+    """Mirror the bucket's raw inputs locally: reel always (small), archive if absent."""
+    from huggingface_hub import sync_bucket
 
     raw = _raw_dir(work, campaign)
     raw.mkdir(parents=True, exist_ok=True)
+    src = f"hf://buckets/{repo}/{campaign}/raw"
     # The accumulator changes every run → always pull the freshest copy (HF canonical).
-    snapshot_download(
-        repo_id=repo,
-        repo_type="dataset",
-        allow_patterns=[f"{campaign}/raw/*_reel.csv"],
-        local_dir=str(work),
-        token=token,
-    )
+    sync_bucket(src, str(raw), include=["*_reel.csv"], token=token, quiet=True)
     # The archive is immutable → pull only if we don't already have it (CI caches it).
     if not list(raw.glob("*_arch.csv")):
-        snapshot_download(
-            repo_id=repo,
-            repo_type="dataset",
-            allow_patterns=[f"{campaign}/raw/*_arch.csv"],
-            local_dir=str(work),
-            token=token,
-        )
+        sync_bucket(src, str(raw), include=["*_arch.csv"], token=token, quiet=True)
     n_arch = len(list(raw.glob("*_arch.csv")))
     n_reel = len(list(raw.glob("*_reel.csv")))
     print(f"  pulled raw: {n_arch} archive + {n_reel} reel file(s) -> {raw}")
 
 
 def upload(work: Path, campaign: str, repo: str, token: str | None) -> None:
-    """Push the rebuilt tiers + the updated accumulator back in ONE commit per campaign.
+    """Push the rebuilt tiers + the updated accumulator (sync diffs, only changed files).
 
-    upload_folder diffs against the remote, so the immutable year parquets and an
-    unchanged reel are skipped (only modified files are sent). Uploading data/ and
-    raw/*_reel.csv together — instead of two separate upload_folder calls — halves the
-    HF commits/round-trips per buoy. The immutable *_arch.csv is never matched.
+    sync_bucket compares size+mtime, so the immutable year parquets and an unchanged
+    reel are skipped — only modified files are sent. `include` restricts the sync to the
+    tiers + the reel; the immutable *_arch.csv is never matched, and `delete` stays off
+    so nothing else in the campaign prefix (archive, backups) is touched.
     """
-    from huggingface_hub import HfApi
+    from huggingface_hub import sync_bucket
 
-    HfApi(token=token).upload_folder(
-        repo_id=repo,
-        repo_type="dataset",
-        folder_path=str(work / campaign),
-        path_in_repo=campaign,
-        allow_patterns=["data/**", "raw/*_reel.csv"],  # never the immutable archive
-        commit_message=f"data: refresh {campaign} (tiers + realtime tail)",
+    sync_bucket(
+        str(work / campaign),
+        f"hf://buckets/{repo}/{campaign}",
+        include=["data/**", "raw/*_reel.csv"],  # never the immutable archive
+        token=token,
+        quiet=True,
     )
-    print(f"  uploaded {campaign}/data + {campaign}/raw/*_reel.csv to datasets/{repo}")
+    print(f"  uploaded {campaign}/data + {campaign}/raw/*_reel.csv to buckets/{repo}")
+
+
+# Buckets are non-versioned (overwrite-in-place), so a buggy run that corrupts the
+# forward-only reel has no rollback. Keep a bounded set of dated recovery points.
+REEL_BACKUP_RETENTION_DAYS = 14
+
+
+def snapshot_reel(work: Path, campaign: str, repo: str, token: str | None) -> None:
+    """Once per UTC day, copy the current reel to a dated backup key; prune old ones.
+
+    Gives point-in-time recovery for the forward-only accumulator that an overwrite-in-
+    place bucket can't otherwise provide. Backups live under `<campaign>/backup/<date>/`
+    and are pruned beyond REEL_BACKUP_RETENTION_DAYS (lexicographic date compare).
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from huggingface_hub import HfFileSystem, batch_bucket_files
+
+    reels = sorted(_raw_dir(work, campaign).glob("*_reel.csv"))
+    if not reels:
+        return
+    prefix = f"{campaign}/backup"
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    fs = HfFileSystem(token=token)
+
+    def dates() -> list[str]:
+        try:
+            return [
+                p.rsplit("/", 1)[-1]
+                for p in fs.ls(f"buckets/{repo}/{prefix}", detail=False, refresh=True)
+            ]
+        except FileNotFoundError:
+            return []
+
+    if today not in dates():
+        batch_bucket_files(
+            repo,
+            add=[(str(r), f"{prefix}/{today}/{r.name}") for r in reels],
+            token=token,
+        )
+        print(f"  snapshot {campaign} reel -> {prefix}/{today}/")
+
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(days=REEL_BACKUP_RETENTION_DAYS)
+    ).strftime("%Y-%m-%d")
+    stale = [d for d in dates() if d < cutoff]
+    victims: list[str] = []
+    for d in stale:
+        try:
+            victims += [
+                f"{prefix}/{d}/{p.rsplit('/', 1)[-1]}"
+                for p in fs.ls(
+                    f"buckets/{repo}/{prefix}/{d}", detail=False, refresh=True
+                )
+            ]
+        except FileNotFoundError:
+            pass
+    if victims:
+        batch_bucket_files(repo, delete=victims, token=token)
+        print(
+            f"  pruned {len(stale)} reel snapshot(s) older than {REEL_BACKUP_RETENTION_DAYS}d"
+        )
 
 
 # --------------------------------------------------------------------------- run
@@ -212,22 +267,22 @@ def update(
     if do_upload:
         # When seeding, push the archive too (first time only); otherwise reel-only.
         if seed_src is not None:
-            from huggingface_hub import HfApi
+            from huggingface_hub import sync_bucket
 
-            HfApi(token=token).upload_folder(
-                repo_id=repo,
-                repo_type="dataset",
-                folder_path=str(raw),
-                path_in_repo=f"{campaign}/raw",
-                commit_message=f"data: seed {campaign} raw (archive + reel)",
+            sync_bucket(
+                str(raw),
+                f"hf://buckets/{repo}/{campaign}/raw",
+                token=token,
+                quiet=True,
             )
-            print(f"  seeded {campaign}/raw (archive + reel) to datasets/{repo}")
+            print(f"  seeded {campaign}/raw (archive + reel) to buckets/{repo}")
         upload(work, campaign, repo, token)
+        snapshot_reel(work, campaign, repo, token)
 
 
 def main() -> None:
     p = argparse.ArgumentParser(
-        description="Refresh Olatu data: pull → scrape → build → upload to the HF dataset."
+        description="Refresh Olatu data: pull → scrape → build → upload to the HF bucket."
     )
     p.add_argument(
         "--campaign",
@@ -237,7 +292,7 @@ def main() -> None:
         "(one shared OIDC exchange). Default: 06403",
     )
     p.add_argument(
-        "--repo", default=DEFAULT_REPO, help="HF dataset id (default: hadim/olatu)"
+        "--repo", default=DEFAULT_REPO, help="HF bucket id (default: hadim/olatu)"
     )
     p.add_argument(
         "--work",
@@ -248,7 +303,7 @@ def main() -> None:
     p.add_argument(
         "--no-pull",
         action="store_true",
-        help="Skip pulling raw inputs from the dataset",
+        help="Skip pulling raw inputs from the bucket",
     )
     p.add_argument(
         "--no-scrape",
@@ -268,7 +323,7 @@ def main() -> None:
     do_pull, do_upload = not args.no_pull, not args.no_upload
 
     # Resolve the HF token ONCE and share it across campaigns: every buoy is a path in
-    # the same dataset, so one OIDC exchange authorizes them all (the every-30-min cron
+    # the same bucket, so one OIDC exchange authorizes them all (the every-30-min cron
     # otherwise made 3 exchanges/run and occasionally tripped HF's 429 rate limit).
     try:
         token = resolve_token(args.repo) if (do_pull or do_upload) else None
