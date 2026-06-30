@@ -1,17 +1,20 @@
 // Loads the static data tiers produced by the polars ingest (see specs §5).
 //
-// The tiers are served at runtime from the Hugging Face dataset `hadim/olatu`, laid
-// out per campaign (`resolve/main/<campaign>/data/...`), so the deployed site and its
-// data are decoupled: the every-30-min refresh re-uploads the data to HF without ever
-// rebuilding or redeploying the webapp (specs/0004 §6, 0005). HF dataset URLs are
-// public with CORS, which a bucket is not — hence a dataset.
+// The tiers are served at runtime from the Hugging Face **bucket** `hadim/olatu`, laid
+// out per campaign (`resolve/<campaign>/data/...`), so the deployed site and its data
+// are decoupled: the every-30-min refresh re-uploads the data to HF without ever
+// rebuilding or redeploying the webapp (specs/0004 §6, 0005). A *public* bucket's
+// `resolve/<key>` URLs are anonymous, CORS-enabled and range-capable (same CDN as
+// dataset repos), and being mutable they avoid the git-history bloat a versioned
+// dataset accrued from the every-30-min refresh.
 //
-// Multi-buoy: the base is the dataset ROOT and `<campaign>/data/` is appended per call.
-// Override the root with VITE_DATA_BASE_URL (must end in `/`), e.g. a fork's dataset.
+// Multi-buoy: the base is the bucket ROOT and `<campaign>/data/` is appended per call.
+// Buckets are non-versioned, so there is NO `main` revision segment in the path.
+// Override the root with VITE_DATA_BASE_URL (must end in `/`), e.g. a fork's bucket.
 
 export const DATA_ROOT: string =
   import.meta.env.VITE_DATA_BASE_URL ??
-  'https://huggingface.co/datasets/hadim/olatu/resolve/main/';
+  'https://huggingface.co/buckets/hadim/olatu/resolve/';
 
 /** Base URL for one campaign's data tiers (ends in `/`). */
 export function dataBase(campaign: string): string {

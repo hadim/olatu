@@ -1,7 +1,7 @@
 // The top "station bar" (spec 0005 §5.3): separates the Olatu app frame from the data.
 // It introduces the app, lets you pick a buoy (segmented control + the map locator), and
 // states plainly where the data comes from (CANDHIS live + the open Hugging Face
-// dataset). Registry-driven, so it renders before any manifest loads.
+// data store). Registry-driven, so it renders before any manifest loads.
 
 import { lazy, Suspense } from 'react';
 import { useLocale } from '@/lib/i18n';
@@ -11,7 +11,7 @@ import { BUOYS } from '../lib/buoys';
 
 const BuoyLocator = lazy(() => import('./BuoyLocator'));
 
-const HF_DATASET = 'https://huggingface.co/datasets/hadim/olatu';
+const HF_DATA = 'https://huggingface.co/buckets/hadim/olatu';
 const CANDHIS = 'https://candhis.cerema.fr';
 const SOURCE_LINK = 'text-muted no-underline border-b border-line transition-colors hover:text-accent hover:border-accent';
 
@@ -58,7 +58,7 @@ export default function StationBar({ campaign, onSelect }: { campaign: string; o
             {m.data_live()}
           </a>{' '}
           ·{' '}
-          <a href={HF_DATASET} target="_blank" rel="noopener noreferrer" className={SOURCE_LINK}>
+          <a href={HF_DATA} target="_blank" rel="noopener noreferrer" className={SOURCE_LINK}>
             {m.data_dataset()}
           </a>
         </p>

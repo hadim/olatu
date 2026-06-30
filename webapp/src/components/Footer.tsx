@@ -32,7 +32,7 @@ export default function Footer() {
         </a>
       </span>
       <span className="text-divider" aria-hidden="true">·</span>
-      <a className={LINK} href="https://huggingface.co/datasets/hadim/olatu" target="_blank" rel="noopener noreferrer">
+      <a className={LINK} href="https://huggingface.co/buckets/hadim/olatu" target="_blank" rel="noopener noreferrer">
         {m.footer_dataset()} ↗
       </a>
     </footer>
