@@ -8,7 +8,7 @@ Project memory for AI coding sessions. Keep it short and current.
 + historical data from CANDHIS wave buoys on the French Atlantic coast: **06403
 Saint-Jean-de-Luz** (default) and **06402 Anglet** (Basque, full history), plus **03302
 Cap Ferret** (Gironde, realtime-only — no archive yet). Switchable in the UI (and via a
-`?buoy=<id>` URL); data tiers are read in the browser from the HF dataset `hadim/olatu`.
+`?buoy=<id>` URL); data tiers are read in the browser from the HF bucket `hadim/olatu`.
 
 > The GitHub repo is **`hadim/olatu`**. The local working directory may still be
 > named `wave-buoys-viewer` (cosmetic; rename optional).
@@ -32,18 +32,21 @@ ingest/        Python (polars). NOT an installable package. All steps take --cam
   schema.py    per-buoy identity registry (BUOYS) + column mapping, units, sentinel, headline/direction vars
   scrape.py    fetch the CANDHIS realtime HTML table -> per-year reel CSV (coalesce-merge)
   build.py     CSV -> tiered Parquet/JSON (archive-preferred coalesce)
-  update.py    pull → scrape → build → upload to the HF dataset (OIDC in CI)
+  update.py    pull → scrape → build → upload to the HF bucket (OIDC in CI) + daily reel snapshot
 pixi.toml      Python env + frontend tasks (no pyproject; no Python library)
-webapp/        the frontend (reads data tiers from the HF dataset at runtime)
+webapp/        the frontend (reads data tiers from the HF bucket at runtime)
 specs/         decisions
 .github/workflows/  deploy.yml (Pages, on code changes) + refresh-data.yml (data, */30)
 ```
 
-> **Data lives in the HF dataset `hadim/olatu`, NOT in git** (see specs/0004).
-> Layout: `<campaign>/raw/*.csv` (archive + reel accumulator) + `<campaign>/data/…`
-> (manifest/latest/recent.json, year/*.parquet, hourly/daily.parquet). The webapp
-> fetches `…/resolve/main/<campaign>/data/…` (CORS-served) for the selected buoy.
-> `hfdata/` (local working mirror) and `webapp/public/data/` are gitignored.
+> **Data lives in the HF *bucket* `hadim/olatu`, NOT in git** (see specs/0004; migrated
+> from a dataset repo 2026-06-30). Layout: `<campaign>/raw/*.csv` (archive + reel
+> accumulator) + `<campaign>/data/…` (manifest/latest/recent.json, year/*.parquet,
+> hourly/daily.parquet) + `<campaign>/backup/<UTC-date>/*_reel.csv` (daily reel snapshots,
+> 14-day retention — buckets are non-versioned so this is the only rollback). The webapp
+> fetches `…/buckets/hadim/olatu/resolve/<campaign>/data/…` (public, CORS, range — **no
+> `main` revision**, buckets are unversioned). `hfdata/` (local working mirror) and
+> `webapp/public/data/` are gitignored.
 
 ## Commands
 
@@ -57,7 +60,7 @@ pixi run webapp                      # frontend dev server (reads data from HF; 
 pixi run webapp-build                # static build for GitHub Pages
 ```
 
-One-time seed of the dataset: `pixi run update --campaign 06403 --seed-src /Users/hadim/Data/olatu/06403`.
+One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users/hadim/Data/olatu/06403`.
 
 ## Conventions & gotchas
 
@@ -75,7 +78,8 @@ One-time seed of the dataset: `pixi run update --campaign 06403 --seed-src /User
 - **GitHub Pages base path:** fetch webapp assets via `import.meta.env.BASE_URL`,
   never a leading `/`. **Data tiers are different** — fetch them via
   `dataBase(campaign)` (`webapp/src/lib/data.ts`) = `DATA_ROOT` + `<campaign>/data/`
-  (the HF dataset resolve URL), not BASE_URL. `VITE_DATA_BASE_URL` overrides the root.
+  (the HF bucket resolve URL, `…/buckets/hadim/olatu/resolve/` — no `main` revision),
+  not BASE_URL. `VITE_DATA_BASE_URL` overrides the root.
 - **Multi-buoy:** the buoy registry is `ingest/schema.py` `BUOYS` (Python) +
   `webapp/src/lib/buoys.ts` (frontend) — keep lat/lon in sync. Selected campaign is
   persisted (`olatu.campaign`) **and** deep-linked (`?buoy=<id>`, URL wins on load,
@@ -91,11 +95,18 @@ One-time seed of the dataset: `pixi run update --campaign 06403 --seed-src /User
 
 - Specs written; repo cleaned; `pixi.toml` + polars ingest done and **validated on
   real data** (≈214,900 rows, 2013→2026).
-- **Data lives in the HF dataset `hadim/olatu`, not git** (foundation §5.3 migration
-  done; see specs/0004). `ingest/update.py` does pull → scrape → build → upload;
+- **Data lives in the HF *bucket* `hadim/olatu`, not git** (foundation §5.3 migration
+  done; **moved dataset repo → bucket 2026-06-30**, see specs/0004 §6). Buckets are
+  mutable/overwrite-in-place (no git-history bloat from the */30 refresh) and a *public*
+  bucket's `resolve/<key>` URLs are anonymous + CORS + range — same CDN as datasets, so
+  the webapp reads them with a plain `fetch` (no S3 client). Trade-off: non-versioned, so
+  `update.snapshot_reel` keeps daily dated reel backups (14-day retention) as the only
+  rollback for the forward-only accumulator. `ingest/update.py` does pull → scrape →
+  build → upload (all via `huggingface_hub` bucket API: `sync_bucket` / `batch_bucket_files`);
   `.github/workflows/refresh-data.yml` runs it every 30 min keyless via OIDC trusted
-  publisher; the webapp reads tiers from HF at runtime (no Pages redeploy on data
-  change). Sea-temperature history accumulates forward from the scraper's first run.
+  publisher (`resource=buckets/hadim/olatu`, configured on the bucket's Settings); the
+  webapp reads tiers from HF at runtime (no Pages redeploy on data change).
+  Sea-temperature history accumulates forward from the scraper's first run.
 - **Webapp rebuilt to TypeScript** (Plotly removed). Working: data loader for the
   JSON tiers + a current-conditions banner (compass dial, gauges, sea temp,
   staleness); **theme** toggle (dark default + light, CSS-var tokens).

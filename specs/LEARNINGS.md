@@ -9,6 +9,32 @@ Format per entry: **date — title** · what we found · why it matters · resol
 
 ---
 
+## 2026-06-30 — public HF **buckets** now serve the browser too (CORS + range); store moved bucket-ward
+
+**Finding.** The 2026-06-28 entry below concluded buckets had "no public browser URL".
+That is now obsolete: HF shipped **S3-compatible Storage Buckets**, and a *public* bucket
+exposes `https://huggingface.co/buckets/<ns>/<name>/resolve/<key>` — verified empirically
+against the GH Pages origin: anonymous GET `200`, `Range` → `206` with `content-range`,
+`access-control-allow-origin: *`, a working CORS preflight, and a 302 to the same
+`*.cdn.hf.co` edge as dataset repos. The S3 *API* (`s3.hf.co`) still needs SigV4
+(anonymous GET → `403 "Signature is required"`), so it is write-only for us; reads are a
+plain `fetch` of the resolve URL — no S3 client.
+
+**Why it matters.** It removes the only reason the data was a dataset repo. Buckets are
+mutable (overwrite-in-place), so the `*/30` refresh no longer bloats git history with
+every parquet version. The trade-off is buckets are **non-versioned** — no rollback for
+the forward-only reel — so `update.snapshot_reel` keeps dated daily reel backups (14-day
+retention). OIDC Trusted Publishers support buckets, so CI auth only changes its exchange
+`resource` (`datasets/…` → `buckets/…`).
+
+**Resolution.** Store → bucket `hadim/olatu` (same per-campaign layout); existing data
+carried over server-side (`HfApi.copy_files`, reels verified byte-for-byte); ingest
+pull/upload now use the `huggingface_hub` bucket API (`sync_bucket`/`batch_bucket_files`);
+webapp `DATA_ROOT` drops the `datasets/…/main` prefix for `buckets/…/resolve/`. Supersedes
+the 2026-06-28 finding below. See [0004](2026-06-27-0004-realtime-scraper.md) Revision 2026-06-30.
+
+---
+
 ## 2026-06-28 — Paraglide lowercases message keys; use snake_case from the start
 
 **Finding.** Migrating i18n to **Paraglide JS v2** (spec 0006), the first pass kept the
@@ -48,6 +74,9 @@ large numbers / dots / borders (AA-large/UI thresholds) and is left as-is. Refs:
 [0006](2026-06-28-0006-stack-migration-a11y.md) §3/§6.
 
 ## 2026-06-28 — HF **datasets** serve the browser (CORS + range); **buckets** don't (yet)
+
+> **Superseded 2026-06-30** — public buckets now serve the browser too (CORS + range);
+> the store moved to a bucket. See the 2026-06-30 entry above. Kept for the history.
 
 **Finding.** To get the churning data off git (a 30-min refresh would otherwise bloat
 history with binary parquets), we moved all data to Hugging Face. The owner's instinct

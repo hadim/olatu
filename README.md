@@ -22,8 +22,8 @@ Deployed on GitHub Pages.
   - **03302 — Cap Ferret** (44.653° N, 1.447° W), off the Gironde / Arcachon coast.
   - *The Basque buoys carry full history back to 2013/2009; Cap Ferret was added
     realtime-only — its history accumulates forward from when scraping began.*
-- **Open data:** the cleaned, refreshed tiers live in the public Hugging Face dataset
-  [**`hadim/olatu`**](https://huggingface.co/datasets/hadim/olatu) — re-scraped from
+- **Open data:** the cleaned, refreshed tiers live in the public Hugging Face bucket
+  [**`hadim/olatu`**](https://huggingface.co/buckets/hadim/olatu) — re-scraped from
   CANDHIS every 30 minutes and reusable by anyone (CORS-served Parquet/JSON).
 
 > 🚧 **Status: active development.** Rebuilt from scratch for a much nicer UX and
@@ -53,11 +53,11 @@ Deployed on GitHub Pages.
 | Frontend | React + Vite + TypeScript, **uPlot** (canvas charts), MapLibre (lazy map), CSS-var theming |
 | Data in the browser | [hyparquet](https://github.com/hyparam/hyparquet) — reads Parquet directly, no WASM |
 | Data pipeline | **Python + [polars](https://pola.rs)** (CANDHIS CSV → cleaned, tiered Parquet/JSON), managed by [pixi](https://pixi.sh) |
-| Data hosting | Hugging Face **dataset** [`hadim/olatu`](https://huggingface.co/datasets/hadim/olatu) (public, CORS), refreshed every 30 min by GitHub Actions |
+| Data hosting | Hugging Face **bucket** [`hadim/olatu`](https://huggingface.co/buckets/hadim/olatu) (public, CORS), refreshed every 30 min by GitHub Actions |
 | Site hosting | GitHub Pages (static) |
 
 The site and its data are **decoupled**: the every-30-minute refresh re-uploads data to
-the Hugging Face dataset without ever rebuilding or redeploying the webapp.
+the Hugging Face bucket without ever rebuilding or redeploying the webapp.
 
 ## Repository layout
 
@@ -65,12 +65,12 @@ the Hugging Face dataset without ever rebuilding or redeploying the webapp.
 ingest/              Python (polars) pipeline: CANDHIS CSV → tiered Parquet/JSON, per campaign
   schema.py          per-buoy identity registry (BUOYS) + canonical column mapping
   scrape.py / build.py / update.py   scrape live feed · build tiers · pull→scrape→build→upload to HF
-webapp/              the frontend (reads the data tiers from the HF dataset at runtime)
+webapp/              the frontend (reads the data tiers from the HF bucket at runtime)
   src/lib/buoys.ts   the buoy registry powering the switcher + locator map
 specs/               design & decision records (this project is spec-driven)
 ```
 
-Data is **not** in git — it lives in the Hugging Face dataset, laid out per campaign as
+Data is **not** in git — it lives in the Hugging Face bucket, laid out per campaign as
 `<campaign>/raw/*.csv` (sources) and `<campaign>/data/…` (the tiers the webapp fetches).
 
 ## Getting started
@@ -85,7 +85,7 @@ pixi run update                      # pull → scrape → build → upload to H
 pixi run update --campaign 06402     # same, for Anglet
 ```
 
-`update` pulls the realtime accumulator from the dataset, scrapes the live CANDHIS feed,
+`update` pulls the realtime accumulator from the bucket, scrapes the live CANDHIS feed,
 rebuilds the tiers, and uploads them back — the same command runs locally (your stored
 `hf` login) and in CI (keyless OIDC). Lower-level `pixi run scrape` / `pixi run ingest`
 work on a local `./hfdata/<campaign>/{raw,data}` mirror.
@@ -95,7 +95,7 @@ work on a local `./hfdata/<campaign>/{raw,data}` mirror.
 `pixi` bundles Node, so no separate install is needed:
 
 ```bash
-pixi run webapp          # start the local dev server (reads data from the HF dataset)
+pixi run webapp          # start the local dev server (reads data from the HF bucket)
 pixi run webapp-build    # static build for GitHub Pages
 ```
 
