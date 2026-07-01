@@ -1,7 +1,7 @@
 // Theme: dark default ("night watch") + light ("deck in daylight").
 // Respects a saved choice, then the OS preference, then falls back to dark.
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 
 export type Theme = 'dark' | 'light';
 
@@ -25,7 +25,12 @@ const ThemeContext = createContext<ThemeValue | null>(null);
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(detectTheme);
 
-  useEffect(() => {
+  // Layout effect (not passive): the [data-theme] attribute must be on <html> BEFORE any
+  // child's passive effect reads a theme token off it. The charts recompute their canvas
+  // colours (grid/axis/series) via getComputedStyle in a passive effect — child passive
+  // effects run before the parent's, so a passive write here would leave the canvas one
+  // theme behind on every switch (grid contrast "stuck" on the old theme).
+  useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 

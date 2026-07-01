@@ -43,14 +43,23 @@ export function fmtDateTime(ms: number, locale: Locale, timeZone: string): strin
   }).format(new Date(ms));
 }
 
-/** Locale-aware axis tick label whose detail scales with the tick spacing (seconds). */
+/** Locale-aware axis tick label whose detail scales with the tick spacing (seconds).
+ *  On sub-day windows the ticks are hours, but a bare "08:00 16:00 00:00…" loses the
+ *  day/month — so ticks that land on local midnight show the date instead, anchoring
+ *  each day (spec 0003: year-aware ticks, extended down to intra-day context). */
 export function fmtAxisTick(ms: number, locale: Locale, timeZone: string, incrSec: number): string {
   const DAY = 86_400;
   let opts: Intl.DateTimeFormatOptions;
   if (incrSec >= DAY * 300) opts = { year: 'numeric', timeZone };
   else if (incrSec >= DAY * 27) opts = { month: 'short', year: '2-digit', timeZone };
   else if (incrSec >= DAY) opts = { day: 'numeric', month: 'short', timeZone };
-  else opts = { hour: '2-digit', minute: '2-digit', timeZone };
+  else {
+    // Intra-day tick: show the date at the day boundary, the clock otherwise.
+    const p = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone }).formatToParts(new Date(ms));
+    const hh = p.find((x) => x.type === 'hour')?.value;
+    const mm = p.find((x) => x.type === 'minute')?.value;
+    opts = hh === '00' && mm === '00' ? { day: 'numeric', month: 'short', timeZone } : { hour: '2-digit', minute: '2-digit', timeZone };
+  }
   return new Intl.DateTimeFormat(locale, opts).format(new Date(ms));
 }
 

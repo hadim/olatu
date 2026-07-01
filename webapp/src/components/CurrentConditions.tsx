@@ -161,7 +161,9 @@ export default function CurrentConditions({ latest, manifest }: { latest: Series
             </span>
           </div>
 
-          <div className="flex flex-wrap gap-[1.3rem] [&>*+*]:border-l [&>*+*]:border-line [&>*+*]:pl-[1.3rem] max-[720px]:w-full max-[720px]:justify-center max-[720px]:text-center max-[720px]:[&>*+*]:border-l-0 max-[720px]:[&>*+*]:pl-0">
+          {/* Fixed 3-column grid: equal tracks so the layout never reshuffles as the
+              values change width (a flex-wrap row jittered between one and two lines). */}
+          <div className="grid w-full grid-cols-3 gap-[1.3rem] [&>*+*]:border-l [&>*+*]:border-line [&>*+*]:pl-[1.3rem] max-[720px]:text-center max-[420px]:grid-cols-1 max-[420px]:[&>*+*]:border-l-0 max-[420px]:[&>*+*]:pl-0">
             <Gauge label={m.cc_max_wave()} value={hmax ? fmtNumber(hmax.value, locale, 1) : '—'} unit="m" defKey="def_max_wave" icon={<MaxWaveIcon className={LABEL_ICON} style={{ color: 'var(--c-max)' }} />} />
             <Gauge label={m.cc_period()} value={period ? fmtNumber(period.value, locale, 1) : '—'} unit="s" defKey="def_period" icon={<PeriodIcon className={LABEL_ICON} style={{ color: 'var(--c-period)' }} />} />
             <Gauge label={m.cc_sea_temp()} value={temp ? fmtNumber(temp.value, locale, 1) : '—'} unit="°C" defKey="def_sea_temp" tone="warm" icon={<TempIcon className={LABEL_ICON} style={{ color: 'var(--c-temp)' }} />} />

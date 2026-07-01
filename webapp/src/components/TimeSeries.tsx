@@ -41,12 +41,13 @@ const yStart = (y: number) => Date.UTC(y, 0, 1) / 1000;
 const yEnd = (y: number) => Date.UTC(y + 1, 0, 1) / 1000 - 1;
 const mStart = (y: number, mo: number) => Date.UTC(y, mo, 1) / 1000;
 const mEnd = (y: number, mo: number) => Date.UTC(y, mo + 1, 1) / 1000 - 1;
-/** Custom direction track drawn straight onto uPlot's canvas: a wrap-aware translucent
- *  spread band (tiled per sample so the 0/360° seam is honest), with density-thinned
- *  arrow glyphs on top — each rotated to the swell's travel direction and coloured by
- *  its cyclical from-direction hue (spec 0001 §7.1, 0002 §4.6). Total pixel control is
- *  the whole point: a degree-line can't render the cyclical wrap or the arrow cue. */
-function drawDirectionLayer(u: uPlot, xs: number[], dir: (number | null)[], spread: (number | null)[], dpr: number) {
+/** Direction arrow glyphs drawn straight onto uPlot's canvas: density-thinned so they
+ *  never overlap, each rotated to the swell's travel direction and coloured by its
+ *  cyclical from-direction hue (spec 0001 §7.1, 0002 §4.6). Direction is CYCLICAL
+ *  (0°≡360°), so it isn't projected onto a linear y-axis (which would print N twice and
+ *  make a swell near north leap top↔bottom). Instead every arrow sits on ONE centred
+ *  row — rotation + colour carry the direction, both inherently wrap-correct. */
+function drawArrowGlyphs(u: uPlot, xs: number[], dir: (number | null)[], dpr: number) {
   const ctx = u.ctx;
   const { left, top, width, height } = u.bbox;
   ctx.save();
@@ -55,41 +56,13 @@ function drawDirectionLayer(u: uPlot, xs: number[], dir: (number | null)[], spre
   ctx.clip();
 
   const xAt = (i: number) => u.valToPos(xs[i], 'x', true);
-  const yAt = (deg: number) => u.valToPos(deg, 'y', true);
+  const yc = top + height / 2; // single centred row — no linear direction axis
   const inX = (px: number) => px >= left - 2 && px <= left + width + 2;
 
-  // Spread band: one tile per sample (midpoint→midpoint), split at the wrap boundary so
-  // dir ± spread crossing 0°/360° draws on both edges instead of clamping flat.
-  for (let i = 0; i < xs.length; i++) {
-    const d = dir[i];
-    const sp = spread[i];
-    if (d == null || sp == null) continue;
-    const px = xAt(i);
-    if (!inX(px)) continue;
-    const xl = i > 0 && dir[i - 1] != null ? (xAt(i - 1) + px) / 2 : px - dpr;
-    const xr = i < xs.length - 1 && dir[i + 1] != null ? (px + xAt(i + 1)) / 2 : px + dpr;
-    const half = Math.min(Math.max(sp, 1), 80);
-    ctx.fillStyle = dirColor(d) + '24';
-    const seg = (lo: number, hi: number) => {
-      const yT = yAt(hi);
-      ctx.fillRect(xl, yT, Math.max(1, xr - xl), yAt(lo) - yT);
-    };
-    const lo = d - half;
-    const hi = d + half;
-    if (lo < 0) {
-      seg(0, hi);
-      seg(lo + 360, 360);
-    } else if (hi > 360) {
-      seg(lo, 360);
-      seg(0, hi - 360);
-    } else {
-      seg(lo, hi);
-    }
-  }
-
-  // Arrow glyphs, thinned to a minimum pixel spacing so they never overlap.
-  const minGap = 17 * dpr;
-  const s = 4.6 * dpr;
+  // Arrow glyphs, thinned to a minimum pixel spacing so they never overlap. These are
+  // the hero of the panel, so they're drawn large; minGap scales with size to match.
+  const minGap = 26 * dpr;
+  const s = 7.5 * dpr;
   let lastX = -Infinity;
   for (let i = 0; i < xs.length; i++) {
     const d = dir[i];
@@ -98,7 +71,7 @@ function drawDirectionLayer(u: uPlot, xs: number[], dir: (number | null)[], spre
     if (!inX(px) || px - lastX < minGap) continue;
     lastX = px;
     ctx.save();
-    ctx.translate(px, yAt(d));
+    ctx.translate(px, yc);
     ctx.rotate(((d + 180) * Math.PI) / 180); // local "up" → the way the swell travels
     ctx.beginPath();
     ctx.moveTo(0, -s);
@@ -116,13 +89,55 @@ function drawDirectionLayer(u: uPlot, xs: number[], dir: (number | null)[], spre
   ctx.restore();
 }
 
+/** UTC epochs (seconds) of every buoy-local midnight in [xmin, xmax]. Recomputed from
+ *  calendar parts per day so DST transitions (a 23/25 h civil day) don't drift the
+ *  boundary by an hour. Only meaningful on narrow windows; callers guard the span. */
+function dayBoundaries(xmin: number, xmax: number, tz: string): number[] {
+  const parts = (ts: number) => {
+    const o: Record<string, number> = {};
+    for (const x of new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hour12: false,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+    }).formatToParts(new Date(ts * 1000))) {
+      if (x.type !== 'literal') o[x.type] = +x.value;
+    }
+    return o;
+  };
+  // Local midnight of a Y/M/D, as a UTC epoch: guess UTC-midnight, then subtract the
+  // tz offset measured at that instant.
+  const midnightUTC = (y: number, mo: number, da: number) => {
+    const guess = Date.UTC(y, mo - 1, da) / 1000;
+    const q = parts(guess);
+    const asUTC = Date.UTC(q.year, q.month - 1, q.day, q.hour % 24, q.minute, q.second) / 1000;
+    return guess - (asUTC - guess);
+  };
+  const out: number[] = [];
+  const p0 = parts(xmin);
+  const cal = new Date(Date.UTC(p0.year, p0.month - 1, p0.day));
+  for (let i = 0; i < 400; i++) {
+    const m = midnightUTC(cal.getUTCFullYear(), cal.getUTCMonth() + 1, cal.getUTCDate());
+    if (m > xmax) break;
+    if (m >= xmin) out.push(m);
+    cal.setUTCDate(cal.getUTCDate() + 1);
+  }
+  return out;
+}
+
+// Beyond this span, per-day separators are visual noise, so they're skipped.
+const DAY_SEP_MAX = 45 * DAY;
+
 interface PanelDef {
   titleKey: MessageKey;
   series: { key: string; colorVar: string; width?: number; fill?: boolean }[];
-  glyph?: boolean;
-  range?: [number, number];
-  ySplits?: number[];
-  spreadKey?: string;
+  glyph?: boolean; // direction: single centred arrow row, no linear y-axis
+  zeroBased?: boolean; // y-axis anchored at 0 (spread magnitude)
+  glued?: boolean; // no top gap — sits flush under the panel above
   emptyKey?: MessageKey;
 }
 
@@ -136,12 +151,17 @@ const PANELS: PanelDef[] = [
   },
   { titleKey: 'cc_period', series: [{ key: 'significant_period_s', colorVar: '--c-period', width: 2 }] },
   {
+    // Direction: a single row of colour+rotation arrows (see drawArrowGlyphs) — no y-axis.
     titleKey: 'cc_direction',
     series: [{ key: 'peak_direction_deg', colorVar: '--c-dir' }],
     glyph: true,
-    range: [0, 360],
-    ySplits: [0, 90, 180, 270, 360],
-    spreadKey: 'peak_directional_spread_deg',
+  },
+  {
+    // Étalement (spread): its own honest 0-based line, glued flush under the arrow row.
+    titleKey: 'cc_spread',
+    series: [{ key: 'peak_directional_spread_deg', colorVar: '--c-dir', width: 1.5 }],
+    zeroBased: true,
+    glued: true,
   },
   {
     titleKey: 'cc_sea_temp',
@@ -161,6 +181,24 @@ const PRESETS: { key: string; days: number | null }[] = [
   { key: '5Y', days: 365 * 5 },
   { key: 'All', days: null },
 ];
+
+// The chosen range preset is remembered across sessions (spec 0006 UX polish). Default
+// is 5D — a week-ish of context reads better than a single day on first open.
+const RANGE_STORE = 'olatu.range';
+const DEFAULT_PRESET = '5D';
+function storedPreset(): string {
+  try {
+    const v = localStorage.getItem(RANGE_STORE);
+    if (v && PRESETS.some((p) => p.key === v)) return v;
+  } catch {
+    /* storage unavailable (private mode) — fall back to the default */
+  }
+  return DEFAULT_PRESET;
+}
+function presetRange(key: string, t0: number, tn: number): { min: number; max: number } {
+  const days = PRESETS.find((p) => p.key === key)?.days ?? 5;
+  return { min: days == null ? t0 : Math.max(t0, tn - days * DAY), max: tn };
+}
 
 type Smooth = 'raw' | 'light' | 'strong';
 const SMOOTH_RADIUS: Record<Smooth, number> = { raw: 0, light: 2, strong: 7 };
@@ -207,6 +245,7 @@ const PANEL_ICON: Partial<Record<MessageKey, IconName>> = {
   cc_wave_height: 'waveHeight',
   cc_period: 'period',
   cc_direction: 'direction',
+  cc_spread: 'spread',
   cc_sea_temp: 'temp',
 };
 
@@ -261,14 +300,15 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
   // (manifest span end, same value the banner uses) so short windows reach "now".
   const TN = Math.max(xs.length ? xs[xs.length - 1] : 0, lastT ?? 0);
 
-  const [range, setRange] = useState<{ min: number; max: number }>(() => ({
-    min: Math.max(T0, TN - 1 * DAY),
-    max: TN,
-  }));
-  const [mode, setMode] = useState<string>('p:1D');
+  const [mode, setMode] = useState<string>(() => `p:${storedPreset()}`);
+  const [range, setRange] = useState<{ min: number; max: number }>(() => presetRange(mode.slice(2), T0, TN));
   const [navYear, setNavYear] = useState<number | null>(null);
   const [showJump, setShowJump] = useState(false);
   const [detail, setDetail] = useState<Columnar | null>(null);
+  // True while a finer tier (30-min year files / hourly means) is being fetched for the
+  // current window — drives a spinner so narrow windows don't read as empty plots while
+  // the daily fallback (too coarse to show much at a few days' zoom) is all that's loaded.
+  const [detailLoading, setDetailLoading] = useState(false);
   // Accessible per-window summary rows (latest + min/max/range per metric).
   const [summary, setSummary] = useState<{ label: string; latest: string; lo: string; hi: string }[]>([]);
   const detailCache = useRef<Map<number, Columnar>>(new Map());
@@ -331,9 +371,14 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
             if (yearFiles[y]) needed.push(y);
           }
           if (needed.length === 0) {
-            if (!cancelled) setDetail(null);
+            if (!cancelled) {
+              setDetail(null);
+              setDetailLoading(false);
+            }
             return;
           }
+          // Spin only if something actually has to be fetched (cached tiers are instant).
+          if (!cancelled && !needed.every((y) => detailCache.current.has(y))) setDetailLoading(true);
           const parts: Columnar[] = [];
           for (const y of needed) {
             let c = detailCache.current.get(y);
@@ -345,7 +390,10 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
           }
           if (!cancelled) setDetail(mergeColumnar(parts));
         } else if (span <= DETAIL_HOURLY) {
-          if (!hourlyCache.current) hourlyCache.current = await loadParquetTier(campaign, 'hourly.parquet', DETAIL_COLUMNS);
+          if (!hourlyCache.current) {
+            if (!cancelled) setDetailLoading(true);
+            hourlyCache.current = await loadParquetTier(campaign, 'hourly.parquet', DETAIL_COLUMNS);
+          }
           if (!cancelled) setDetail(hourlyCache.current);
         } else {
           if (!cancelled) setDetail(null);
@@ -353,6 +401,8 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
       } catch (e) {
         console.error('Failed to load detail tier:', e);
         if (!cancelled) setDetail(null);
+      } finally {
+        if (!cancelled) setDetailLoading(false);
       }
     })();
     return () => {
@@ -366,6 +416,29 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
     const sxs = src.t;
     if (!host || sxs.length === 0) return;
     host.innerHTML = '';
+
+    // Day separators live on ONE overlay spanning the whole stack (behind the panels, via
+    // z-order) so a day break reads as a single continuous line through every plot and the
+    // gaps between them — a per-canvas line would break at each heading/margin. Inset to
+    // match the host padding so overlay-x lines up with each canvas's valToPos.
+    const dayOverlay = document.createElement('div');
+    dayOverlay.className = 'pointer-events-none absolute left-4 right-4 top-3 bottom-4 z-0';
+    dayOverlay.setAttribute('aria-hidden', 'true');
+    host.appendChild(dayOverlay);
+    const dpr = window.devicePixelRatio || 1;
+    const renderDayOverlay = (u0: uPlot) => {
+      dayOverlay.replaceChildren();
+      const mn = u0.scales.x.min;
+      const mx = u0.scales.x.max;
+      if (mn == null || mx == null || mx - mn > DAY_SEP_MAX) return;
+      for (const b of dayBoundaries(mn, mx, tz)) {
+        // canvasPixels=true → position from the canvas left (incl. the y-axis gutter),
+        // matching the overlay's left edge; /dpr converts device px back to CSS px.
+        const line = document.createElement('div');
+        line.style.cssText = `position:absolute;top:0;bottom:0;left:${u0.valToPos(b, 'x', true) / dpr}px;border-left:1px dashed var(--divider);`;
+        dayOverlay.appendChild(line);
+      }
+    };
 
     const xmin = range.min;
     const xmax = range.max;
@@ -477,12 +550,27 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
     PANELS.forEach((panel, idx) => {
       const isLast = idx === PANELS.length - 1;
       const wrap = document.createElement('div');
-      wrap.className = 'relative w-full overflow-hidden';
+      // z-10 keeps the panels (and headings) above the day-separator overlay (z-0).
+      wrap.className = 'relative z-10 w-full overflow-hidden';
       const heading = document.createElement('div');
-      heading.className = 'mt-[0.6rem] mb-[0.1rem] ml-[0.2rem] inline-flex items-center text-[0.74rem] uppercase tracking-[0.07em] text-faint';
+      // Glued panels (spread under direction) get no top gap so the pair reads as one block.
+      heading.className = `${panel.glued ? 'mt-0' : 'mt-[0.6rem]'} mb-[0.1rem] ml-[0.2rem] relative z-10 flex w-full items-center text-[0.74rem] uppercase tracking-[0.07em] text-faint`;
       const panelIcon = PANEL_ICON[panel.titleKey];
       const titleIcon = panelIcon ? iconSvg(panelIcon, { className: 'mr-1.5 shrink-0', color: `var(${panel.series[0].colorVar})` }) : '';
-      heading.innerHTML = `${titleIcon}<span>${m[panel.titleKey]()}</span>`;
+      // Direction panel carries an inline colour legend (N/E/S/O) so the cyclical
+      // from-direction hue is self-explanatory without opening the glossary.
+      const legendHTML =
+        panel.titleKey === 'cc_direction'
+          ? '<span class="ml-auto flex items-center gap-[0.55rem] text-[0.66rem]">' +
+            [0, 90, 180, 270]
+              .map(
+                (d) =>
+                  `<span class="inline-flex items-center gap-[0.25rem]"><span class="inline-block h-[0.5rem] w-[0.5rem] rounded-full" style="background:${dirColor(d)}"></span>${dirLocale(d)}</span>`,
+              )
+              .join('') +
+            '</span>'
+          : '';
+      heading.innerHTML = `${titleIcon}<span>${m[panel.titleKey]()}</span>${legendHTML}`;
       host.appendChild(heading);
       host.appendChild(wrap);
 
@@ -503,12 +591,15 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
       let series: uPlot.Series[];
 
       if (panel.glyph) {
-        // Direction: an invisible data series feeds uPlot's scale + cursor index; the
-        // visible band + arrow glyphs are painted in the draw hook (drawDirectionLayer).
-        chartData = [gxs, gcols[panel.series[0].key]];
+        // Direction: no linear y-axis (it's cyclical). A constant series (0.5 on a [0,1]
+        // scale) feeds uPlot's cursor index and pins the crosshair dot to the centred
+        // row; the arrows themselves are painted in the draw hook. Rotation + colour carry
+        // the direction, so the row needs no y-scale of its own.
+        const dirArr = gcols[panel.series[0].key];
+        chartData = [gxs, dirArr.map((v) => (v == null ? null : 0.5))];
         series = [
           {},
-          { label: panel.series[0].key, stroke: 'transparent', width: 0, points: { show: false }, paths: () => null, value: (_u, v) => (v == null ? '—' : `${Math.round(v)}°`) },
+          { label: panel.series[0].key, stroke: 'transparent', width: 0, points: { show: false }, paths: () => null, value: (_u, _v, _si, di) => (di == null || dirArr[di] == null ? '—' : `${Math.round(dirArr[di]!)}°`) },
         ];
       } else {
         chartData = [gxs, ...panel.series.map((srs) => plotted(srs.key))];
@@ -531,8 +622,14 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
         size: 48,
         font: '12px IBM Plex Mono, monospace',
       };
-      if (panel.ySplits) yAxis.splits = () => panel.ySplits!;
-      if (panel.titleKey === 'cc_direction') yAxis.values = (_u, splits) => splits.map((sp) => dirLocale(sp));
+      if (panel.glyph) {
+        // Arrow row: reserve the same left gutter (keeps x aligned with the other panels)
+        // but print no axis — direction is cyclical, there's nothing linear to label.
+        yAxis.splits = () => [];
+        yAxis.values = () => [];
+        yAxis.grid = { show: false };
+        yAxis.ticks = { show: false };
+      }
 
       const xAxis: uPlot.Axis = {
         scale: 'x',
@@ -554,18 +651,19 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
             const { min, max } = u.scales.x;
             for (const o of plots) if (o !== u && min != null && max != null) o.setScale('x', { min, max });
             syncing = false;
+            renderDayOverlay(u); // reposition the day lines on zoom/pan
           },
         ],
       };
       if (panel.glyph) {
         const dirArr = gcols[panel.series[0].key];
-        const spreadArr = gcols[panel.spreadKey!];
-        hooks.draw = [(u) => drawDirectionLayer(u, gxs, dirArr, spreadArr, DPR)];
+        hooks.draw = [(u) => drawArrowGlyphs(u, gxs, dirArr, DPR)];
       }
 
       const opts: uPlot.Options = {
         width: host.clientWidth || 800,
-        height: panel.glyph ? 140 : 124,
+        // Arrow row is a single thin band; the glued spread line is short too.
+        height: panel.glyph ? 56 : panel.glued ? 70 : 124,
         // Fixed right padding on EVERY panel. Only the last panel shows x-axis labels,
         // and uPlot would otherwise auto-reserve right-edge space for its last tick
         // label on that panel alone — making it narrower than the others, so the same
@@ -573,9 +671,11 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
         padding: [8, 12, 0, 0],
         scales: {
           x: { time: true, min: xmin - xpad, max: xmax + xpad },
-          y: panel.range
-            ? { range: () => padY(panel.range![0], panel.range![1], 0.08) }
-            : { range: (_u, dMin, dMax) => padY(dMin, dMax, 0.12) },
+          y: panel.glyph
+            ? { range: (): [number, number] => [0, 1] } // arrows sit at 0.5 (centre); axis unused
+            : panel.zeroBased
+              ? { range: (_u: uPlot, _dMin: number, dMax: number): [number, number] => [0, Math.max(dMax || 0, 1) * 1.12] }
+              : { range: (_u, dMin, dMax) => padY(dMin, dMax, 0.12) },
         },
         // Place ticks on the buoy's timezone boundaries for every visitor (not the
         // browser's), so axis labels stay round regardless of where you open the app.
@@ -583,7 +683,18 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
         axes: [xAxis, yAxis],
         series,
         legend: { show: false },
-        cursor: { sync: { key: SYNC_KEY }, points: { size: 6 } },
+        cursor: {
+          sync: { key: SYNC_KEY },
+          points: { size: 6 },
+          // Double-click resets to the active preset window (baseScaleRef), not uPlot's
+          // default full-data autoscale — same behaviour as the ⟲ Reset control.
+          bind: {
+            dblclick: () => () => {
+              resetZoom();
+              return null;
+            },
+          },
+        },
         plugins: [touchZoomPlugin()],
         hooks,
       };
@@ -605,10 +716,12 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
 
     plotsRef.current = plots;
     baseScaleRef.current = { min: xmin - xpad, max: xmax + xpad };
+    if (plots[0]) renderDayOverlay(plots[0]);
 
     const ro = new ResizeObserver(() => {
       const w = host.clientWidth;
       for (const p of plots) p.setSize({ width: w, height: p.height });
+      if (plots[0]) renderDayOverlay(plots[0]); // widths changed → recompute line x
     });
     ro.observe(host);
 
@@ -633,6 +746,11 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
                 className={chipCls(mode === key)}
                 onClick={() => {
                   setNavYear(null);
+                  try {
+                    localStorage.setItem(RANGE_STORE, p.key);
+                  } catch {
+                    /* storage unavailable — the preset still applies for this session */
+                  }
                   apply(p.days == null ? T0 : TN - p.days * DAY, TN, key);
                 }}
               >
@@ -709,14 +827,31 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
         }}
       />
 
-      <div className="hover-card mb-[0.7rem] flex min-h-[2.4rem] flex-wrap items-center gap-x-[1.1rem] gap-y-[0.4rem] rounded-[0.7rem] border border-line bg-surface px-[0.85rem] py-[0.45rem]" ref={cardRef} aria-hidden="true">
-        <span className="hover-time min-w-[12rem] font-mono text-[0.82rem] text-fg max-[720px]:min-w-0" />
-        <div className="hover-stats flex flex-wrap gap-x-4 gap-y-[0.3rem]" />
-        <span className="ml-auto cursor-help whitespace-nowrap font-mono text-[0.7rem] text-faint" title={m.time_buoy_local()}>
-          ◷ {tz}
-        </span>
+      {/* Fixed-column readout grid: 1fr tracks keep every chip in a stable slot so a
+          value changing width (1,3 → 10,3 m) can't reflow the row and make it flicker. */}
+      <div className="hover-card mb-[0.7rem] flex flex-col gap-[0.4rem] rounded-[0.7rem] border border-line bg-surface px-[0.85rem] py-[0.5rem]" ref={cardRef} aria-hidden="true">
+        <div className="flex items-baseline justify-between gap-x-4">
+          <span className="hover-time font-mono text-[0.82rem] text-fg" />
+          <span className="shrink-0 cursor-help whitespace-nowrap font-mono text-[0.7rem] text-faint" title={m.time_buoy_local()}>
+            ◷ {tz}
+          </span>
+        </div>
+        <div className="hover-stats grid grid-cols-3 gap-x-4 gap-y-[0.35rem] max-[560px]:grid-cols-2 max-[380px]:grid-cols-1" />
       </div>
-      <div ref={hostRef} className="charts rounded-2xl border border-line bg-surface-2 px-4 pb-4 pt-3" />
+      <div className="relative">
+        <div ref={hostRef} className="charts relative rounded-2xl border border-line bg-surface-2 px-4 pb-4 pt-3" />
+        {detailLoading && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden="true">
+            <span className="inline-flex items-center gap-2 rounded-full border border-line bg-surface/90 px-3.5 py-1.5 font-mono text-[0.76rem] text-muted shadow-[0_2px_12px_-4px_rgba(0,0,0,0.5)] backdrop-blur-sm">
+              <svg className="h-4 w-4 text-accent motion-safe:animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+                <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+              </svg>
+              {m.state_loading()}
+            </span>
+          </div>
+        )}
+      </div>
 
       {/* Accessible per-window summary — the non-visual truth for the canvas panels. */}
       <table className="sr-only" aria-live="polite">

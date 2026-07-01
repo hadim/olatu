@@ -45,7 +45,7 @@ export function BannerSkeleton() {
 }
 
 export function ChartsSkeleton() {
-  const panels = ['h-[124px]', 'h-[124px]', 'h-[140px]', 'h-[162px]'];
+  const panels = ['h-[124px]', 'h-[124px]', 'h-[56px]', 'h-[70px]', 'h-[162px]'];
   return (
     <section aria-hidden="true" className="mt-6">
       {/* toolbar */}
