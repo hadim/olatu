@@ -82,9 +82,10 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   not BASE_URL. `VITE_DATA_BASE_URL` overrides the root.
 - **Multi-buoy:** the buoy registry is `ingest/schema.py` `BUOYS` (Python) +
   `webapp/src/lib/buoys.ts` (frontend) — keep lat/lon in sync. Selected campaign is
-  persisted (`olatu.campaign`) **and** deep-linked (`?buoy=<id>`, URL wins on load,
-  replaceState on switch); loaded tiers are tagged with their campaign so a switch never
-  pairs the new buoy with the old manifest (see specs/0005).
+  persisted (`olatu.campaign`) **and** deep-linked (`?buoy=<id>`, **persisted choice wins
+  on load**, `?buoy=` only for a first-time visitor with no stored choice — see specs/0005
+  revision 2026-07-04; replaceState on switch); loaded tiers are tagged with their campaign
+  so a switch never pairs the new buoy with the old manifest (see specs/0005).
 - **Realtime-only buoys:** a campaign with no `*_arch.csv` (e.g. Cap Ferret) builds from
   the scraped reel alone — `build.read_archive` returns None and history accumulates
   forward. Drop archive CSVs into the campaign's `raw/` later to backfill (they coalesce).

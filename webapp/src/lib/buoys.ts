@@ -48,9 +48,16 @@ function storedCampaign(): string | null {
   }
 }
 
-/** Initial buoy: a shared `?buoy=` link wins, then the persisted choice, then the default. */
+/**
+ * Initial buoy. The **persisted choice wins** (your last-viewed buoy), so reopening Olatu
+ * always restores it — including from a home-screen icon or bookmark whose URL still
+ * carries a stale `?buoy=` figé from an earlier visit (which used to override the memory
+ * and snap you back to the default). A `?buoy=` deep-link is honoured only for a first-time
+ * visitor who has no stored choice yet. On mount the app rewrites the address bar to the
+ * chosen buoy, so a shared link's URL self-heals to what's actually shown.
+ */
 export function initialCampaign(): string {
-  return campaignFromUrl() ?? storedCampaign() ?? DEFAULT_CAMPAIGN;
+  return storedCampaign() ?? campaignFromUrl() ?? DEFAULT_CAMPAIGN;
 }
 
 export function persistCampaign(campaign: string): void {
