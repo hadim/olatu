@@ -11,7 +11,9 @@
 //
 // Spec 0006 (Phase 7): an accessible per-window data summary (visually-hidden <table>)
 // makes the canvases readable to assistive tech, and a touch pinch/drag plugin zooms &
-// pans on phones with a Reset affordance.
+// pans on phones with a Reset affordance. A completed drag/pinch zoom commits its window
+// (so a finer tier loads); an explicit navigator group (pan ‹ ›, zoom − +, ⟲ Reset) gives
+// the same actions as discoverable, labelled buttons.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import uPlot from 'uplot';
@@ -362,6 +364,26 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
 
   // Seed the Reset target from the initial preset (once — the guard makes it render-safe).
   if (presetBaseRef.current === null) presetBaseRef.current = { min: range.min, max: range.max, mode };
+
+  // Time-navigation controls: pan by half a window, zoom by ~1.6×, both clamped to the
+  // series bounds. They navigate (load the matching tier) but pass isZoom so ⟲ Reset
+  // still returns to the chosen preset, not an intermediate pan/zoom.
+  const panBy = (frac: number) => {
+    const shift = (range.max - range.min) * frac;
+    let min = range.min + shift;
+    let max = range.max + shift;
+    if (min < T0) [min, max] = [T0, max + (T0 - min)];
+    if (max > TN) [min, max] = [min - (max - TN), TN];
+    apply(min, max, 'custom', true);
+  };
+  const zoomBy = (factor: number) => {
+    const c = (range.min + range.max) / 2;
+    const half = ((range.max - range.min) * factor) / 2;
+    apply(c - half, c + half, 'custom', true);
+  };
+  const atStart = range.min <= T0 + 1;
+  const atEnd = range.max >= TN - 1;
+  const navBtn = 'grid h-7 w-7 place-items-center leading-none disabled:opacity-40 disabled:pointer-events-none';
 
   const dirLocale = (deg: number) => {
     const tok = ['N', 'E', 'S', 'W'][Math.round(deg / 90) % 4];
@@ -808,7 +830,21 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
               {m[`chart_smooth_${s}` as MessageKey]()}
             </button>
           ))}
-          <button type="button" className={cn(chipCls(false), 'px-[0.5rem]')} onClick={resetZoom} aria-label={m.chart_reset()} title={m.chart_reset()}>
+        </div>
+        <div className="flex items-center gap-[0.4rem]" role="group" aria-label={m.chart_navigate()}>
+          <button type="button" disabled={atStart} className={cn(chipCls(false), navBtn)} onClick={() => panBy(-0.5)} aria-label={m.chart_pan_back()} title={m.chart_pan_back()}>
+            ‹
+          </button>
+          <button type="button" className={cn(chipCls(false), navBtn)} onClick={() => zoomBy(2)} aria-label={m.chart_zoom_out()} title={m.chart_zoom_out()}>
+            −
+          </button>
+          <button type="button" className={cn(chipCls(false), navBtn)} onClick={() => zoomBy(0.5)} aria-label={m.chart_zoom_in()} title={m.chart_zoom_in()}>
+            +
+          </button>
+          <button type="button" disabled={atEnd} className={cn(chipCls(false), navBtn)} onClick={() => panBy(0.5)} aria-label={m.chart_pan_forward()} title={m.chart_pan_forward()}>
+            ›
+          </button>
+          <button type="button" className={cn(chipCls(false), navBtn)} onClick={resetZoom} aria-label={m.chart_reset()} title={m.chart_reset()}>
             ⟲
           </button>
         </div>

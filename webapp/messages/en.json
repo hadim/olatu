@@ -90,5 +90,10 @@
   "footer_open_source": "Open source on GitHub",
   "footer_report_bug": "Report a bug or contribute",
   "footer_data_by": "Data ©",
-  "chart_reset": "Reset zoom"
+  "chart_reset": "Reset zoom",
+  "chart_navigate": "Navigate",
+  "chart_pan_back": "Pan back in time",
+  "chart_pan_forward": "Pan forward in time",
+  "chart_zoom_in": "Zoom in",
+  "chart_zoom_out": "Zoom out"
 }
