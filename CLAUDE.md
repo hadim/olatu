@@ -36,7 +36,9 @@ ingest/        Python (polars). NOT an installable package. All steps take --cam
   scrape.py    fetch the CANDHIS realtime HTML table -> per-year reel CSV (coalesce-merge)
   tides.py     fetch api-maree.fr water levels -> high/low extrema -> tides/<port>/data/tides.parquet (spec 0008 §8.2; needs API_MAREE_KEY)
   build.py     CSV -> tiered Parquet/JSON (archive-preferred coalesce)
-  update.py    pull → scrape → tides → build → upload to the HF bucket (OIDC in CI) + daily reel snapshot
+  update.py    pull → scrape → tides → build → upload to the HF bucket (OIDC in CI) + daily reel snapshot; Typer CLI (-c repeatable)
+  ui.py        shared Rich console + helpers (banner/section/step/detail/summary_table); buoys=cyan, tides=blue; CI-safe plain (spec 0009)
+  migrate_layout.py  one-shot bucket layout migration <campaign>/ -> buoys/<campaign>/ (copy | delete --yes; spec 0009)
 pixi.toml      Python env + frontend tasks (no pyproject; no Python library)
 webapp/        the frontend (reads data tiers from the HF bucket at runtime)
 specs/         decisions
@@ -44,21 +46,26 @@ specs/         decisions
 ```
 
 > **Data lives in the HF *bucket* `hadim/olatu`, NOT in git** (see specs/0004; migrated
-> from a dataset repo 2026-06-30). Layout: `<campaign>/raw/*.csv` (archive + reel
-> accumulator) + `<campaign>/data/…` (manifest/latest/recent.json, year/*.parquet,
-> hourly/*.parquet per year, daily.parquet) + `<campaign>/backup/<UTC-date>/*_reel.csv` (daily reel snapshots,
-> 14-day retention — buckets are non-versioned so this is the only rollback). **Tides are a
-> separate, port-keyed root** (specs/0008 §8.2): `tides/<port>/raw/extrema.csv` accumulator +
-> `tides/<port>/data/tides.parquet` tier, shared across buoys (each buoy's manifest `tide`
-> block names its nearest port). The webapp fetches `…/buckets/hadim/olatu/resolve/<campaign>/data/…`
-> (and `…/resolve/tides/<port>/data/…`) — public, CORS, range, **no `main` revision**.
-> `hfdata/` (local working mirror) and `webapp/public/data/` are gitignored.
+> from a dataset repo 2026-06-30). Buoy data nests under a **`buoys/` root** (spec 0009,
+> symmetric with the tide root): `buoys/<campaign>/raw/*.csv` (archive + reel accumulator) +
+> `buoys/<campaign>/data/…` (manifest/latest/recent.json, year/*.parquet, hourly/*.parquet
+> per year, daily.parquet) + `buoys/<campaign>/backup/<UTC-date>/*_reel.csv` (daily reel
+> snapshots, 14-day retention — buckets are non-versioned so this is the only rollback).
+> **Tides are a separate, port-keyed root** (specs/0008 §8.2): `tides/<port>/raw/extrema.csv`
+> accumulator + `tides/<port>/data/tides.parquet` tier, shared across buoys (each buoy's
+> manifest `tide` block names its nearest port). The webapp fetches
+> `…/buckets/hadim/olatu/resolve/buoys/<campaign>/data/…` (and `…/resolve/tides/<port>/data/…`)
+> — public, CORS, range, **no `main` revision**. The **local** working mirror stays flat at
+> `hfdata/<campaign>/{raw,data}`; only the bucket nests under `buoys/`. `hfdata/` (local
+> mirror) and `webapp/public/data/` are gitignored.
 
 ## Commands
 
 ```bash
 pixi run update                      # pull → scrape → build → upload to HF (the usual refresh; OIDC in CI)
-pixi run update --campaign 06403     # same, explicit campaign
+pixi run update -c 06403 -c 06402    # refresh several buoys (repeat -c; typer, not argparse nargs)
+pixi run migrate copy                # one-shot: copy bucket <campaign>/ -> buoys/<campaign>/ (spec 0009)
+pixi run migrate delete --yes        # after the deployed site reads buoys/, drop the old root prefixes
 pixi run scrape                      # lower-level: grow the local reel from the live feed (hfdata/06403/raw)
 pixi run ingest                      # lower-level: build tiers from local raw (hfdata/06403/{raw,data})
 pixi run check                       # ruff format + lint
@@ -95,9 +102,9 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
 - **Series has real gaps** (largest 50 days) → break the line, never interpolate across.
 - **GitHub Pages base path:** fetch webapp assets via `import.meta.env.BASE_URL`,
   never a leading `/`. **Data tiers are different** — fetch them via
-  `dataBase(campaign)` (`webapp/src/lib/data.ts`) = `DATA_ROOT` + `<campaign>/data/`
-  (the HF bucket resolve URL, `…/buckets/hadim/olatu/resolve/` — no `main` revision),
-  not BASE_URL. `VITE_DATA_BASE_URL` overrides the root.
+  `dataBase(campaign)` (`webapp/src/lib/data.ts`) = `DATA_ROOT` + `buoys/<campaign>/data/`
+  (the HF bucket resolve URL, `…/buckets/hadim/olatu/resolve/` — no `main` revision; buoy
+  data nests under `buoys/`, spec 0009), not BASE_URL. `VITE_DATA_BASE_URL` overrides the root.
 - **Multi-buoy:** the buoy registry is `ingest/schema.py` `BUOYS` (Python) +
   `webapp/src/lib/buoys.ts` (frontend) — keep lat/lon in sync. Selected campaign is
   persisted (`olatu.campaign`) **and** deep-linked (`?buoy=<id>`, **persisted choice wins
@@ -224,6 +231,19 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   where no extrema). Attribution in footer + glossary. Verified on all 3 buoys with the key;
   key absent from `dist`. **Owner TODO:** create the api-maree.fr account + add the
   `API_MAREE_KEY` GitHub secret (site ids already validated via `/sites`).
+
+- **Buoy-layout + pipeline CLI shipped** (2026-07-05, specs/0009): (1) buoy data on the bucket
+  nests under a **`buoys/<campaign>/`** root (symmetric with `tides/<port>/`) — flipped in
+  `update._buoy_prefix` + webapp `dataBase`; migrated live via `ingest/migrate_layout.py`
+  (`pixi run migrate copy`, non-destructive; then `delete --yes` once the deployed site reads
+  `buoys/`). Local mirror stays flat `hfdata/<campaign>/`. (2) The data pipeline got a **Typer +
+  Rich CLI** (`ingest/ui.py` shared console): sectioned per-buoy steps (**cyan**) vs a distinct
+  **tide** step (**blue**) + two end-of-run summary tables; CI-safe plain rendering with no TTY.
+  `--campaign/-c` is now **repeatable** (not argparse `nargs=+`); `refresh-data.yml` updated.
+- **Tide banner strip reworked** (2026-07-05, specs/0008 §9): the square arc became an
+  integrated **tide-curve timeline** (prev extremum left/hollow → **now** dot on the curve →
+  next right/filled, with per-end kind+time captions + countdown), and **sunrise/sunset moved
+  into their own separated SUN zone** (no longer between tide facts). `TideStrip.tsx`.
 
 Next per roadmap: side-by-side buoy comparison (0005 left it out), and the per-locale
 **glossary JSON** + CI **key-parity** check (0001 §8) — the glossary still lives inline in

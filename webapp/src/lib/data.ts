@@ -1,15 +1,16 @@
 // Loads the static data tiers produced by the polars ingest (see specs §5).
 //
 // The tiers are served at runtime from the Hugging Face **bucket** `hadim/olatu`, laid
-// out per campaign (`resolve/<campaign>/data/...`), so the deployed site and its data
+// out per campaign under a `buoys/` root (`resolve/buoys/<campaign>/data/...`), so the deployed site and its data
 // are decoupled: the every-30-min refresh re-uploads the data to HF without ever
 // rebuilding or redeploying the webapp (specs/0004 §6, 0005). A *public* bucket's
 // `resolve/<key>` URLs are anonymous, CORS-enabled and range-capable (same CDN as
 // dataset repos), and being mutable they avoid the git-history bloat a versioned
 // dataset accrued from the every-30-min refresh.
 //
-// Multi-buoy: the base is the bucket ROOT and `<campaign>/data/` is appended per call.
-// Buckets are non-versioned, so there is NO `main` revision segment in the path.
+// Multi-buoy: the base is the bucket ROOT and `buoys/<campaign>/data/` is appended per call
+// (spec 0009 — buoy data nests under a `buoys/` root, symmetric with the `tides/<port>/`
+// root). Buckets are non-versioned, so there is NO `main` revision segment in the path.
 // Override the root with VITE_DATA_BASE_URL (must end in `/`), e.g. a fork's bucket.
 
 import { parquetReadObjects } from 'hyparquet';
@@ -19,9 +20,10 @@ export const DATA_ROOT: string =
   import.meta.env.VITE_DATA_BASE_URL ??
   'https://huggingface.co/buckets/hadim/olatu/resolve/';
 
-/** Base URL for one campaign's data tiers (ends in `/`). */
+/** Base URL for one campaign's data tiers (ends in `/`). Buoy data nests under `buoys/`
+ *  (spec 0009), mirroring the `tides/<port>/` root below. */
 export function dataBase(campaign: string): string {
-  return `${DATA_ROOT}${campaign}/data/`;
+  return `${DATA_ROOT}buoys/${campaign}/data/`;
 }
 
 /** Base URL for a shared tide port's tier (ends in `/`). Tides are keyed by PORT, not

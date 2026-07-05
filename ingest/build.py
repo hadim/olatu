@@ -26,6 +26,7 @@ from pathlib import Path
 import polars as pl
 import pyarrow.parquet as pq
 
+from . import ui
 from .schema import (
     ARCH_MAP,
     CAMPAIGN_ID,
@@ -213,21 +214,21 @@ def coverage(df: pl.DataFrame, col: str) -> dict | None:
 
 
 def build(src: Path, out: Path, campaign: str = CAMPAIGN_ID) -> None:
-    print(f"reading {campaign} CSVs from {src}")
+    ui.detail(f"reading {campaign} CSVs from {src}")
     archive = read_archive(src, campaign)
     realtime = read_realtime(src, campaign)
     if archive is None and realtime is None:
         raise FileNotFoundError(
             f"No archive or realtime CSVs for {campaign} in {src} (nothing to build)"
         )
-    print(
-        f"  archive rows={0 if archive is None else archive.height}  "
+    ui.detail(
+        f"archive rows={0 if archive is None else archive.height}  "
         f"realtime rows={0 if realtime is None else realtime.height}"
     )
 
     merged = assemble(archive, realtime, campaign)
-    print(
-        f"  merged rows={merged.height}  span={merged[DT].min()} -> {merged[DT].max()}"
+    ui.detail(
+        f"merged rows={merged.height}  span={merged[DT].min()} → {merged[DT].max()}"
     )
 
     out.mkdir(parents=True, exist_ok=True)
@@ -242,7 +243,7 @@ def build(src: Path, out: Path, campaign: str = CAMPAIGN_ID) -> None:
         year_files.append(
             {"year": y, "file": rel, "rows": g.height, "byteLength": size}
         )
-        print(f"  wrote {rel}  rows={g.height}  bytes={size}")
+        ui.detail(f"wrote {rel}  rows={g.height}  bytes={size}")
 
     # downsampled pyramids (headline vars only). Daily stays one small file (the wide-view
     # tier). Hourly is split per year like the year files so the */30 refresh only
@@ -258,8 +259,8 @@ def build(src: Path, out: Path, campaign: str = CAMPAIGN_ID) -> None:
             {"year": y, "file": rel, "rows": g.height, "byteLength": size}
         )
     write_parquet(out / "daily.parquet", daily)
-    print(
-        f"  wrote {len(hourly_files)} hourly/*.parquet ({hourly.height} rows)  "
+    ui.detail(
+        f"wrote {len(hourly_files)} hourly/*.parquet ({hourly.height} rows)  "
         f"daily.parquet rows={daily.height}"
     )
 
@@ -269,8 +270,8 @@ def build(src: Path, out: Path, campaign: str = CAMPAIGN_ID) -> None:
     recent = merged.filter(pl.col(DT) >= last_dt - timedelta(days=30))
     latest_bytes = write_json(out / "latest.json", _to_columnar(latest, NUMERIC_COLS))
     recent_bytes = write_json(out / "recent.json", _to_columnar(recent, HEADLINE))
-    print(
-        f"  wrote latest.json ({latest_bytes}B, {latest.height} rows)  recent.json ({recent_bytes}B, {recent.height} rows)"
+    ui.detail(
+        f"wrote latest.json ({latest_bytes}B, {latest.height} rows)  recent.json ({recent_bytes}B, {recent.height} rows)"
     )
 
     # manifest
@@ -320,8 +321,8 @@ def build(src: Path, out: Path, campaign: str = CAMPAIGN_ID) -> None:
         },
     }
     mbytes = write_json(out / "manifest.json", manifest)
-    print(f"  wrote manifest.json ({mbytes}B)")
-    print(f"done -> {out}")
+    ui.detail(f"wrote manifest.json ({mbytes}B)")
+    ui.detail(f"built tiers → {out}")
 
 
 def main() -> None:
@@ -344,7 +345,9 @@ def main() -> None:
         help="Output directory for the tiered files (default: webapp/public/data, served by Vite)",
     )
     args = p.parse_args()
+    ui.section(ui.ICON_BUILD, "build", f"campaign {args.campaign}")
     build(args.src, args.out, args.campaign)
+    ui.ok("done")
 
 
 if __name__ == "__main__":

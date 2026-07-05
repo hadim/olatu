@@ -57,4 +57,4 @@ jobs:
       - name: Refresh every buoy (pull → scrape → tides → build → upload to HF)
         env:
           API_MAREE_KEY: ${{ secrets.API_MAREE_KEY }}
-        run: pixi run -e data update --campaign 06403 06402 03302
+        run: pixi run -e data update -c 06403 -c 06402 -c 03302

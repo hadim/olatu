@@ -1,15 +1,24 @@
-// Banner tide strip (spec 0008, + §8.4 revision): a compact, single band at the bottom of
-// the current-conditions card. It answers, at a glance: where we are in the tide cycle (a
-// half-sine arc with a marker riding it + a rising/falling word), the previous and next
-// high/low with a live countdown, the marnage (m) with a neap↔spring fill, and the day's
-// sunrise/sunset. Renders nothing when there's no tide data for the buoy.
+// Banner tide strip (spec 0008, + §8.4 / §8.6 revisions). A compact band at the bottom of
+// the current-conditions card, reorganised into two clearly separated groups so nothing
+// reads as ambiguous (spec §8.6):
+//
+//   ── TIDE ──────────────────────────────────  │  ── SUN ──
+//   an integrated tide-CURVE timeline: the raised-cosine between the previous and next
+//   extremum, with a "now" dot riding it. Past is literally to the LEFT (where we came
+//   from), the future to the RIGHT (where we're heading) — the endpoints are labelled with
+//   their kind (▼ low / ▲ high) + time, and the next one also carries the live countdown.
+//   Beside it: the marnage (m) + neap↔spring fill.  The SUN group (sunrise/sunset) sits in
+//   its own titled zone behind a divider — no longer wedged between tide facts.
+//
+// Renders nothing when there's no tide data for the buoy.
 
+import type { ReactNode } from 'react';
 import { useLocale, type MessageKey } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
 import { fmtNumber, fmtTimeOfDay } from '../lib/format';
 import { useNow } from '../lib/useNow';
 import { sunTimes } from '../lib/sun';
-import { tideMagnitude, tidePhase, type TidePhaseLabel, type Tides } from '../lib/tides';
+import { tideMagnitude, tidePhase, raisedCosine, type TideEvent, type TidePhaseLabel, type Tides } from '../lib/tides';
 import { TideIcon } from './icons';
 import InfoPopover from './InfoPopover';
 
@@ -20,21 +29,34 @@ const PHASE_KEY: Record<TidePhaseLabel, MessageKey> = {
   'near-low': 'tide_near_low',
 };
 
-// Half-sine arc geometry. The marker rides the reconstructed tide shape between the
-// previous and next extremum, so the dot literally climbs on a flood and descends on an ebb.
-const ARC_W = 92;
-const ARC_H = 34;
-const PADX = 5;
-const PADY = 6;
-const SAMPLES = 32;
+// Tide-curve timeline geometry. The curve is the reconstructed raised-cosine between the
+// previous extremum (left, at its height) and the next (right, at its height); within one
+// half-cycle it eases monotonically, so an up-to-the-right slope = flooding, down = ebbing.
+const CURVE_W = 176;
+const CURVE_H = 46;
+const CPADX = 9; // keep the endpoint/now dots off the edges
+const CPADY = 8;
+const SAMPLES = 40;
 
-function TideArc({ prevH, nextH, progress, hue }: { prevH: number; nextH: number; progress: number; hue: string }) {
-  const lo = Math.min(prevH, nextH);
-  const dh = Math.abs(nextH - prevH) || 1;
+function TideCurve({
+  prev,
+  next,
+  progress,
+  hue,
+  ariaLabel,
+}: {
+  prev: TideEvent;
+  next: TideEvent;
+  progress: number;
+  hue: string;
+  ariaLabel: string;
+}) {
+  const lo = Math.min(prev.h, next.h);
+  const dh = Math.abs(next.h - prev.h) || 1;
   const at = (p: number): [number, number] => {
-    const h = prevH + (nextH - prevH) * (1 - Math.cos(Math.PI * p)) / 2;
-    const x = PADX + p * (ARC_W - 2 * PADX);
-    const y = PADY + (1 - (h - lo) / dh) * (ARC_H - 2 * PADY);
+    const h = raisedCosine(prev.h, next.h, p);
+    const x = CPADX + p * (CURVE_W - 2 * CPADX);
+    const y = CPADY + (1 - (h - lo) / dh) * (CURVE_H - 2 * CPADY);
     return [x, y];
   };
   let d = '';
@@ -42,16 +64,25 @@ function TideArc({ prevH, nextH, progress, hue }: { prevH: number; nextH: number
     const [x, y] = at(i / SAMPLES);
     d += `${i === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`;
   }
-  const [mx, my] = at(progress);
-  const fill = `${d}L${(ARC_W - PADX).toFixed(1)} ${ARC_H}L${PADX} ${ARC_H}Z`;
+  const [lx, ly] = at(0);
+  const [rx, ry] = at(1);
+  const [nx, ny] = at(progress);
+  const fill = `${d}L${rx.toFixed(1)} ${CURVE_H}L${lx.toFixed(1)} ${CURVE_H}Z`;
   return (
-    <svg viewBox={`0 0 ${ARC_W} ${ARC_H}`} width={ARC_W} height={ARC_H} className="shrink-0" aria-hidden="true">
+    <svg viewBox={`0 0 ${CURVE_W} ${CURVE_H}`} width={CURVE_W} height={CURVE_H} className="shrink-0" role="img" aria-label={ariaLabel}>
       {/* fillOpacity, NOT a `${hue}22` string — hue is a `var(--…)` and CSS can't take an
-          appended alpha hex, which silently fell back to a solid black fill. */}
-      <path d={fill} style={{ fill: hue }} fillOpacity={0.13} />
-      <path d={d} fill="none" style={{ stroke: hue }} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={mx} cy={my} r={3.2} style={{ fill: hue }} />
-      <circle cx={mx} cy={my} r={5.5} fill="none" style={{ stroke: hue }} strokeOpacity={0.35} strokeWidth={1.5} />
+          appended alpha hex (it silently fell back to a solid black fill). */}
+      <path d={fill} style={{ fill: hue }} fillOpacity={0.12} />
+      <path d={d} fill="none" style={{ stroke: hue }} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" />
+      {/* now → baseline guide, so the moment reads against the timeline */}
+      <line x1={nx} y1={ny} x2={nx} y2={CURVE_H} style={{ stroke: hue }} strokeOpacity={0.28} strokeWidth={1} strokeDasharray="2 2" />
+      {/* previous extremum: hollow + muted ("where we came from") */}
+      <circle cx={lx} cy={ly} r={3} className="fill-surface" style={{ stroke: 'var(--text-3)' }} strokeWidth={1.5} />
+      {/* next extremum: filled hue ("where we're heading") */}
+      <circle cx={rx} cy={ry} r={3.2} style={{ fill: hue }} />
+      {/* now: the live marker riding the curve */}
+      <circle cx={nx} cy={ny} r={5.5} fill="none" style={{ stroke: hue }} strokeOpacity={0.35} strokeWidth={1.5} className="motion-safe:animate-[pulse_2.4s_ease-out_infinite]" />
+      <circle cx={nx} cy={ny} r={3.4} style={{ fill: hue }} className="stroke-surface [stroke-width:1.5]" />
     </svg>
   );
 }
@@ -69,12 +100,22 @@ function SunGlyph({ up }: { up: boolean }) {
 }
 
 /** Compact "2 h 08" / "14 min" countdown; the exact clock time carries the precise info. */
-function countdown(ms: number, connector: string): string {
+function countdown(ms: number): string {
   const totalMin = Math.max(0, Math.round(ms / 60_000));
   const h = Math.floor(totalMin / 60);
   const min = totalMin % 60;
-  const dur = h > 0 ? `${h} h ${String(min).padStart(2, '0')}` : `${min} min`;
-  return `${connector} ${dur}`;
+  return h > 0 ? `${h} h ${String(min).padStart(2, '0')}` : `${min} min`;
+}
+
+/** Small heading used by both groups: an icon + an uppercase label (+ optional info). */
+function GroupLabel({ icon, label, body }: { icon: ReactNode; label: string; body?: string }) {
+  return (
+    <span className="inline-flex items-center text-[0.72rem] uppercase tracking-[0.07em] text-faint">
+      {icon}
+      {label}
+      {body && <InfoPopover title={label} body={body} />}
+    </span>
+  );
 }
 
 export default function TideStrip({ tides, tz, lat, lon }: { tides: Tides | null; tz: string; lat: number; lon: number }) {
@@ -87,76 +128,87 @@ export default function TideStrip({ tides, tz, lat, lon }: { tides: Tides | null
   const mag = tideMagnitude(phase.amplitude, tides.rangeRef);
   const nextHigh = phase.next.kind === 'high';
   const prevHigh = phase.previous.kind === 'high';
-  // The dot/arc share the accent so the strip reads as part of the instrument; a spring
+  // The curve/dots share the accent so the strip reads as part of the instrument; a spring
   // tide nudges warm to flag "big tide" without adding a second concept.
   const hue = mag.label === 'spring' || mag.label === 'large' ? 'var(--warm)' : 'var(--accent)';
   const sun = sunTimes(now, lat, lon, tz);
 
+  const prevWord = prevHigh ? m.tide_high() : m.tide_low();
+  const nextWord = nextHigh ? m.tide_high() : m.tide_low();
   const arrow = (high: boolean) => (
-    <span aria-hidden="true" style={{ color: high ? 'var(--accent)' : 'var(--text-3)' }}>
+    <span aria-hidden="true" className="text-[0.72em]" style={{ color: high ? 'var(--accent)' : 'var(--text-3)' }}>
       {high ? '▲' : '▼'}
     </span>
   );
+  const curveAria = `${m[PHASE_KEY[phase.label]]()} — ${m.tide_previous()} ${prevWord} ${fmtTimeOfDay(phase.previous.t, locale, tz)}, ${m.tide_next()} ${nextWord} ${fmtTimeOfDay(phase.next.t, locale, tz)} ${m.tide_in()} ${countdown(phase.msToNext)}`;
 
   return (
-    <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-line pt-4">
-      <span className="inline-flex items-center text-[0.78rem] uppercase tracking-[0.06em] text-faint">
-        <TideIcon className="mr-1.5 shrink-0" style={{ color: 'var(--accent)' }} />
-        {m.tide_title()}
-        <InfoPopover title={m.tide_title()} body={m.def_tide()} />
-      </span>
-
-      <div className="flex items-center gap-3">
-        <TideArc prevH={phase.previous.h} nextH={phase.next.h} progress={phase.progress} hue={hue} />
-        <div className="flex flex-col gap-[0.1rem] leading-tight">
-          <span className="font-display text-[1.05rem] font-medium text-fg">{m[PHASE_KEY[phase.label]]()}</span>
-          <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0 font-mono text-[0.82rem] text-muted">
-            {/* previous extremum (muted) → next extremum + live countdown */}
-            <span className="inline-flex items-center gap-1 text-faint" title={prevHigh ? m.tide_high() : m.tide_low()}>
-              {arrow(prevHigh)}
-              {fmtTimeOfDay(phase.previous.t, locale, tz)}
-            </span>
-            <span aria-hidden="true" className="text-faint">→</span>
-            <span className="inline-flex items-center gap-1" title={nextHigh ? m.tide_high() : m.tide_low()}>
-              {arrow(nextHigh)}
-              {nextHigh ? m.tide_high() : m.tide_low()} · {fmtTimeOfDay(phase.next.t, locale, tz)}
-            </span>
-            <span className="text-faint">· {countdown(phase.msToNext, m.tide_in())}</span>
+    <div className="mt-5 flex flex-wrap items-stretch gap-x-8 gap-y-5 border-t border-line pt-4">
+      {/* ── TIDE group: phase + curve timeline + range ────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-x-7 gap-y-4">
+        {/* phase word + the integrated prev→now→next curve */}
+        <div className="flex flex-col gap-1.5">
+          <span className="flex items-center gap-2">
+            <GroupLabel icon={<TideIcon className="mr-1.5 shrink-0" style={{ color: 'var(--accent)' }} />} label={m.tide_title()} body={m.def_tide()} />
+            <span className="font-display text-[1.05rem] font-medium leading-none text-fg">{m[PHASE_KEY[phase.label]]()}</span>
           </span>
-        </div>
-      </div>
-
-      {/* Sunrise / sunset for the buoy's day (astronomical, no tide dependency). */}
-      <div className="flex items-center gap-3 text-[0.82rem] text-muted">
-        {sun.sunrise != null && (
-          <span className="inline-flex items-center gap-1" title={m.sun_sunrise()}>
-            <span style={{ color: 'var(--warm)' }}><SunGlyph up /></span>
-            <span className="font-mono">{fmtTimeOfDay(sun.sunrise, locale, tz)}</span>
-          </span>
-        )}
-        {sun.sunset != null && (
-          <span className="inline-flex items-center gap-1" title={m.sun_sunset()}>
-            <span className="text-faint"><SunGlyph up={false} /></span>
-            <span className="font-mono">{fmtTimeOfDay(sun.sunset, locale, tz)}</span>
-          </span>
-        )}
-      </div>
-
-      <div className="ml-auto flex flex-col gap-[0.25rem] max-[720px]:ml-0">
-        <span className="inline-flex items-baseline gap-1.5">
-          <span className="text-[0.72rem] uppercase tracking-[0.06em] text-faint">{m.tide_marnage()}</span>
-          <span className="font-display text-[1.05rem] font-medium text-fg [font-feature-settings:'tnum']">
-            {fmtNumber(phase.amplitude, locale, 1)}
-            <span className="text-[0.82rem] text-muted"> m</span>
-          </span>
-        </span>
-        <div className="flex items-center gap-2">
-          <div className="relative h-[6px] w-[68px] overflow-hidden rounded-full bg-surface-2" role="img" aria-label={m[`tide_mag_${mag.label}` as MessageKey]()}>
-            <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${Math.round(mag.t * 100)}%`, backgroundColor: hue }} />
+          <div className="flex flex-col gap-1">
+            <TideCurve prev={phase.previous} next={phase.next} progress={phase.progress} hue={hue} ariaLabel={curveAria} />
+            {/* endpoint captions, justified so each hugs its end of the curve */}
+            <div className="flex items-start justify-between font-mono text-[0.76rem]" style={{ width: CURVE_W }}>
+              <span className="inline-flex items-center gap-1 text-faint" title={`${m.tide_previous()} · ${prevWord}`}>
+                {arrow(prevHigh)}
+                {fmtTimeOfDay(phase.previous.t, locale, tz)}
+              </span>
+              <span className="flex flex-col items-end leading-tight" title={`${m.tide_next()} · ${nextWord}`}>
+                <span className="inline-flex items-center gap-1 text-fg">
+                  {arrow(nextHigh)}
+                  {fmtTimeOfDay(phase.next.t, locale, tz)}
+                </span>
+                <span className="text-[0.7rem] text-accent">{m.tide_in()} {countdown(phase.msToNext)}</span>
+              </span>
+            </div>
           </div>
-          <span className="font-mono text-[0.72rem] text-muted">{m[`tide_mag_${mag.label}` as MessageKey]()}</span>
+        </div>
+
+        {/* marnage + neap↔spring fill — the "how big" readout */}
+        <div className="flex flex-col gap-[0.3rem] self-center">
+          <span className="inline-flex items-baseline gap-1.5">
+            <span className="text-[0.72rem] uppercase tracking-[0.06em] text-faint">{m.tide_marnage()}</span>
+            <span className="font-display text-[1.05rem] font-medium text-fg [font-feature-settings:'tnum']">
+              {fmtNumber(phase.amplitude, locale, 1)}
+              <span className="text-[0.82rem] text-muted"> m</span>
+            </span>
+          </span>
+          <div className="flex items-center gap-2">
+            <div className="relative h-[6px] w-[68px] overflow-hidden rounded-full bg-surface-2" role="img" aria-label={m[`tide_mag_${mag.label}` as MessageKey]()}>
+              <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${Math.round(mag.t * 100)}%`, backgroundColor: hue }} />
+            </div>
+            <span className="font-mono text-[0.72rem] text-muted">{m[`tide_mag_${mag.label}` as MessageKey]()}</span>
+          </div>
         </div>
       </div>
+
+      {/* ── SUN group: its own titled zone, separated by a divider ─────────────── */}
+      {(sun.sunrise != null || sun.sunset != null) && (
+        <div className="ml-auto flex flex-col justify-center gap-1.5 border-l border-line pl-8 max-[720px]:ml-0 max-[720px]:border-l-0 max-[720px]:pl-0 max-[720px]:border-t max-[720px]:pt-4 max-[720px]:w-full">
+          <GroupLabel icon={<span className="mr-1.5 text-warm"><SunGlyph up /></span>} label={m.sun_title()} />
+          <div className="flex items-center gap-5 text-[0.84rem] text-muted">
+            {sun.sunrise != null && (
+              <span className="inline-flex items-center gap-1.5" title={m.sun_sunrise()}>
+                <span className="text-warm"><SunGlyph up /></span>
+                <span className="font-mono">{fmtTimeOfDay(sun.sunrise, locale, tz)}</span>
+              </span>
+            )}
+            {sun.sunset != null && (
+              <span className="inline-flex items-center gap-1.5" title={m.sun_sunset()}>
+                <span className="text-faint"><SunGlyph up={false} /></span>
+                <span className="font-mono">{fmtTimeOfDay(sun.sunset, locale, tz)}</span>
+              </span>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

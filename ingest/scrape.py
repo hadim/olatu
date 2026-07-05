@@ -44,6 +44,7 @@ import httpx
 import polars as pl
 from lxml import html as lhtml
 
+from . import ui
 from .schema import CAMPAIGN_ID, REEL_MAP, SENTINEL_MIN
 
 BASE_URL = "https://candhis.cerema.fr/_public_/campagne.php"
@@ -101,8 +102,8 @@ def fetch_html(url: str, *, retries: int = 3, timeout: float = 30.0) -> str:
                 last_err = e
                 if attempt < retries:
                     backoff = 2.0 * attempt
-                    print(
-                        f"  fetch attempt {attempt} failed ({e}); retry in {backoff}s"
+                    ui.warn(
+                        f"fetch attempt {attempt} failed ({e}); retry in {backoff}s"
                     )
                     time.sleep(backoff)
     raise ScrapeError(f"failed to fetch {url} after {retries} attempts: {last_err}")
@@ -371,10 +372,10 @@ def scrape(src: Path, campaign_id: str = CAMPAIGN_ID) -> dict[int, int]:
     leaving every existing file untouched.
     """
     url = realtime_url(campaign_id)
-    print(f"fetching {url}")
+    ui.detail(f"fetching {url}")
     scraped = validate_rows(parse_realtime_table(fetch_html(url)))
-    print(
-        f"  scraped {scraped.height} valid rows  span {scraped[DT].min()} -> {scraped[DT].max()}"
+    ui.detail(
+        f"scraped {scraped.height} valid rows  span {scraped[DT].min()} → {scraped[DT].max()}"
     )
 
     with _lock(src, campaign_id):
@@ -411,8 +412,8 @@ def scrape(src: Path, campaign_id: str = CAMPAIGN_ID) -> dict[int, int]:
                 _assert_never_shrinks(merged, existing_u, target.name)
                 prev_newest = existing_u[DT].max()
                 if merged[DT].max() <= prev_newest:
-                    print(
-                        f"  WARNING {target.name}: newest timestamp did not advance ({prev_newest}); feed may be stale"
+                    ui.warn(
+                        f"{target.name}: newest timestamp did not advance ({prev_newest}); feed may be stale"
                     )
             plans.append((target, merged, legacy))
 
@@ -422,10 +423,10 @@ def scrape(src: Path, campaign_id: str = CAMPAIGN_ID) -> dict[int, int]:
             for old in legacy:  # retire migrated dated snapshots
                 with contextlib.suppress(FileNotFoundError):
                     old.unlink()
-                print(f"  migrated + removed legacy {old.name}")
+                ui.detail(f"migrated + removed legacy {old.name}")
             year = int(target.stem.split("_")[2])
             written[year] = merged.height
-            print(f"  wrote {target.name}  rows={merged.height}")
+            ui.detail(f"wrote {target.name}  rows={merged.height}")
     return written
 
 
@@ -443,12 +444,13 @@ def main() -> None:
         "--campaign", default=CAMPAIGN_ID, help="CANDHIS campaign id (default: 06403)"
     )
     args = p.parse_args()
+    ui.section(ui.ICON_SCRAPE, "scrape", f"campaign {args.campaign}")
     try:
         scrape(args.src, args.campaign)
     except ScrapeError as e:
-        print(f"scrape aborted: {e}", file=sys.stderr)
+        ui.err(f"scrape aborted: {e}")
         sys.exit(1)
-    print("done")
+    ui.ok("done")
 
 
 if __name__ == "__main__":

@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -34,6 +33,7 @@ from pathlib import Path
 import httpx
 import polars as pl
 
+from . import ui
 from .schema import CAMPAIGN_ID, TIDE_PORTS, resolve_tide_port
 
 API_BASE = "https://api-maree.fr/water-levels"
@@ -218,14 +218,18 @@ def _write_tier(path: Path, acc: pl.DataFrame) -> int:
 
 def refresh_port(
     tides_root: Path, port_id: str, key: str | None, *, force: bool = False
-) -> None:
-    """Fetch (gated), coalesce the accumulator, and (re)emit the Parquet tier for a port."""
+) -> str:
+    """Fetch (gated), coalesce the accumulator, and (re)emit the Parquet tier for a port.
+
+    Returns a short status word for the run summary: `refreshed` / `republished` /
+    `up to date` / `no key` / `unknown port` / `fetch failed`.
+    """
     if port_id not in TIDE_PORTS:
-        print(f"  tides: unknown port {port_id!r} -> skip")
-        return
+        ui.detail(f"unknown port {port_id!r} → skip")
+        return "unknown port"
     if not key:
-        print(f"  tides: no {ENV_KEY} -> skip (webapp shows the tide empty-state)")
-        return
+        ui.detail(f"no {ENV_KEY} → skip (webapp shows the tide empty-state)")
+        return "no key"
 
     acc = _load_acc(_acc_path(tides_root, port_id))
     tier = _tier_path(tides_root, port_id)
@@ -240,12 +244,10 @@ def refresh_port(
         and horizon - now >= HORIZON_GATE_DAYS * 86_400
     ):
         if tier.exists():
-            print(
-                f"  tides: {port_id} +{(horizon - now) / 86_400:.0f} d ahead -> skip fetch"
-            )
-            return
-        print(f"  tides: {port_id} republishing {_write_tier(tier, acc)} events")
-        return
+            ui.detail(f"{port_id} +{(horizon - now) / 86_400:.0f} d ahead → skip fetch")
+            return "up to date"
+        ui.detail(f"{port_id} republishing {_write_tier(tier, acc)} events")
+        return "republished"
 
     start = _day_midnight_utc(now) - timedelta(days=WINDOW_PAST_DAYS)
     end = _day_midnight_utc(now) + timedelta(days=WINDOW_FWD_DAYS)
@@ -255,12 +257,10 @@ def refresh_port(
         if not new_events:
             raise TideError(f"no extrema from {len(pts)} points")
     except (httpx.HTTPError, TideError, KeyError, ValueError) as e:
-        print(
-            f"  tides: {port_id} fetch failed ({e}) -> keep existing", file=sys.stderr
-        )
+        ui.warn(f"{port_id} fetch failed ({e}) → keep existing")
         if acc.height and not tier.exists():
             _write_tier(tier, acc)
-        return
+        return "fetch failed"
 
     # Replace-window merge: keep old events outside [start, end], replace inside with fresh.
     win_start, win_end = int(start.timestamp()), int(end.timestamp())
@@ -278,10 +278,11 @@ def refresh_port(
     _acc_path(tides_root, port_id).parent.mkdir(parents=True, exist_ok=True)
     merged.write_csv(_acc_path(tides_root, port_id))
     n = _write_tier(tier, merged)
-    print(
-        f"  tides: {port_id} {len(new_events)} fresh extrema, {merged.height} total "
-        f"-> tides.parquet ({n} events)"
+    ui.detail(
+        f"{port_id} {len(new_events)} fresh extrema, {merged.height} total "
+        f"→ tides.parquet ({n} events)"
     )
+    return "refreshed"
 
 
 def refresh_for_campaign(
@@ -290,7 +291,7 @@ def refresh_for_campaign(
     """Resolve a buoy's nearest port and refresh it. Returns the port id (None if too far)."""
     port = resolve_tide_port(campaign)
     if port is None:
-        print(f"  tides: {campaign} has no port within range -> skip")
+        ui.detail(f"{campaign} has no port within range → skip")
         return None
     refresh_port(tides_root, port["id"], key, force=force)
     return port["id"]
@@ -322,6 +323,12 @@ def main() -> None:
     )
     args = p.parse_args()
     key = os.environ.get(ENV_KEY)
+    ui.section(
+        ui.ICON_TIDE,
+        "tide",
+        args.port or f"campaign {args.campaign or CAMPAIGN_ID}",
+        style=ui.TIDE,
+    )
     if args.port:
         refresh_port(args.tides_root, args.port, key, force=args.force)
     else:

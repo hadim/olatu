@@ -15,6 +15,10 @@ platforms = ["osx-arm64", "linux-64"]
 #   pixi run update                 # campaign 06403 by default
 #   pixi run update --campaign 06402
 update = "python -m ingest.update"
+# One-shot bucket layout migration (spec 0009): <campaign>/ -> buoys/<campaign>/.
+#   pixi run migrate copy            # non-destructive: copy old prefixes under buoys/
+#   pixi run migrate delete --yes    # after the deployed site reads buoys/, drop the old ones
+migrate = "python -m ingest.migrate_layout"
 # Lower-level steps (the working mirror is ./hfdata/<campaign>/{raw,data}):
 #   scrape the live feed into the local reel accumulator
 scrape = "python -m ingest.scrape --src hfdata/06403/raw"
@@ -36,7 +40,7 @@ check = { depends-on = ["format", "lint"] }
 
 [dependencies]
 python = ">=3.13,<4"
-polars = ">=1.18"
+polars = ">=1.42.0"
 pyarrow = ">=24.0.0"
 # For the realtime scraper that pulls the CANDHIS web table:
 httpx = ">=0.28"
@@ -44,6 +48,10 @@ lxml = ">=6.1.1"
 # Publishes the built tiers + raw CSVs to the HF dataset (hadim/olatu) and provides
 # the `hf` CLI (OIDC trusted-publisher uploads in CI). See specs/0004 §6.
 huggingface_hub = ">=1.21.0"
+# Pretty, legible CLI for the data pipeline (typer commands + rich output). In
+# [dependencies] (the default feature) so the lean `data` CI env gets them too.
+typer = ">=0.26.8"
+rich = ">=15.0.0"
 
 # Frontend toolchain — only for local `pixi run webapp`; CI deploy uses actions/setup-node.
 [feature.web.dependencies]

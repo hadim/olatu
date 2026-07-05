@@ -59,7 +59,7 @@ export interface Tides {
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
 /** Raised-cosine (half-sine) interpolation between two extrema at fraction `p` ∈ [0,1]. */
-const raisedCosine = (a: number, b: number, p: number) => a + ((b - a) * (1 - Math.cos(Math.PI * p))) / 2;
+export const raisedCosine = (a: number, b: number, p: number) => a + ((b - a) * (1 - Math.cos(Math.PI * p))) / 2;
 
 /** Combine the manifest port meta with the Parquet rows into the runtime model. Rows carry
  *  epoch **seconds**; we keep ms internally (matches `now` in `tidePhase`). */
