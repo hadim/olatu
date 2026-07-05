@@ -3,8 +3,10 @@
 //   • two-finger pinch  → zoom the x-scale about the pinch midpoint
 //   • one-finger drag    → pan the x-scale
 // It manipulates only the x-scale via setScale, so the existing setScale sync hook
-// propagates the gesture to every synced panel. Zoom is transient (within the loaded
-// window), matching the desktop drag-zoom behaviour; the preset chips / Reset restore it.
+// propagates the gesture to every synced panel. The gesture itself only moves the scale;
+// when it ends, TimeSeries commits the visible window to `range` (on mouseup/touchend) so
+// the matching finer tier loads — same as the desktop drag-zoom. Preset chips / Reset
+// return to the active preset window.
 
 import type uPlot from 'uplot';
 

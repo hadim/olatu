@@ -281,16 +281,25 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
   const { locale } = useLocale();
   const hostRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
-  // Live uPlot instances + their base x-scale, so the Reset control can undo a transient
-  // touch/drag zoom without re-loading the window (spec 0006 §6).
+  // Live uPlot instances + their base x-scale (used for immediate visual reset).
   const plotsRef = useRef<uPlot[]>([]);
   const baseScaleRef = useRef<{ min: number; max: number } | null>(null);
+  // The window set by the last preset/chip/picker navigation (not a drag/pinch zoom).
+  // A drag-zoom commits its window to `range` so a finer tier loads (see the gesture-end
+  // handler below); Reset / double-click return here — back to the active preset — which
+  // reloads the coarser tier. Seeded lazily from the initial preset on first render.
+  const presetBaseRef = useRef<{ min: number; max: number; mode: string } | null>(null);
   const [smooth, setSmooth] = useState<Smooth>('raw');
 
   const resetZoom = () => {
-    const base = baseScaleRef.current;
-    if (!base) return;
-    for (const p of plotsRef.current) p.setScale('x', base);
+    const b = presetBaseRef.current;
+    if (b) {
+      // Snap the visuals immediately, then commit so the coarser tier reloads.
+      for (const p of plotsRef.current) p.setScale('x', { min: b.min, max: b.max });
+      apply(b.min, b.max, b.mode);
+    } else if (baseScaleRef.current) {
+      for (const p of plotsRef.current) p.setScale('x', baseScaleRef.current);
+    }
   };
 
   const xs = data.t;
@@ -342,10 +351,17 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
     return map;
   }, [xs, data]);
 
-  const apply = (min: number, max: number, mo: string) => {
-    setRange({ min: Math.max(T0, Math.min(min, TN - DAY)), max: Math.min(TN, Math.max(max, T0 + DAY)) });
+  // `isZoom` marks a window committed by a drag/pinch gesture: it navigates (loads the
+  // matching tier) but must NOT become the Reset target — that stays the last preset.
+  const apply = (min: number, max: number, mo: string, isZoom = false) => {
+    const clamped = { min: Math.max(T0, Math.min(min, TN - DAY)), max: Math.min(TN, Math.max(max, T0 + DAY)) };
+    setRange(clamped);
     setMode(mo);
+    if (!isZoom) presetBaseRef.current = { ...clamped, mode: mo };
   };
+
+  // Seed the Reset target from the initial preset (once — the guard makes it render-safe).
+  if (presetBaseRef.current === null) presetBaseRef.current = { min: range.min, max: range.max, mode };
 
   const dirLocale = (deg: number) => {
     const tok = ['N', 'E', 'S', 'W'][Math.round(deg / 90) % 4];
@@ -719,6 +735,25 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
     baseScaleRef.current = { min: xmin - xpad, max: xmax + xpad };
     if (plots[0]) renderDayOverlay(plots[0]);
 
+    // A finished drag/pinch zoom lives only in uPlot's x-scale (transient — see the
+    // touch plugin + uPlot's own drag). Commit the narrowed window to `range` so the
+    // matching finer tier (30-min / hourly) loads and the chart redraws at full detail.
+    // Deferred a frame so uPlot's own zoom has applied the scale before we read it; only
+    // a real zoom-IN commits — a plain click leaves the scale at the padded base (wider
+    // than the window), so the width test skips it. Reset/preset chips undo it.
+    let raf = 0;
+    const commitGesture = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const u = plots[0];
+        if (!u || u.scales.x.min == null || u.scales.x.max == null) return;
+        if (u.scales.x.max - u.scales.x.min >= xmax - xmin - 1) return; // not a zoom-in
+        apply(Math.round(u.scales.x.min), Math.round(u.scales.x.max), 'custom', true);
+      });
+    };
+    host.addEventListener('mouseup', commitGesture);
+    host.addEventListener('touchend', commitGesture);
+
     const ro = new ResizeObserver(() => {
       const w = host.clientWidth;
       for (const p of plots) p.setSize({ width: w, height: p.height });
@@ -727,6 +762,9 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
     ro.observe(host);
 
     return () => {
+      cancelAnimationFrame(raf);
+      host.removeEventListener('mouseup', commitGesture);
+      host.removeEventListener('touchend', commitGesture);
       ro.disconnect();
       for (const p of plots) p.destroy();
       plotsRef.current = [];

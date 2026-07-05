@@ -164,6 +164,14 @@ heat-ribbon and date-picker get real ARIA (see §6).
 - **uPlot touch / pinch-zoom:** a small touch plugin (two-finger pinch → `setScale` on
   x, synced across panels; one-finger drag pans) + a "Reset" affordance. Respects the
   existing drag-to-zoom on desktop.
+  > **Update 2026-07-05 — a completed zoom commits (loads a finer tier).** A finished
+  > drag/pinch zoom was originally transient (scale-only), so zooming into an old window
+  > never revealed sub-daily detail — you stayed on whatever tier the preset had loaded.
+  > Now `TimeSeries` commits the visible window to `range` on gesture end (mouseup/
+  > touchend, deferred a frame, zoom-in only), so the matching finer tier (30-min year
+  > file / per-year hourly) loads and the chart redraws at full detail. Reset / double-
+  > click return to the active *preset* window (tracked in `presetBaseRef`) rather than an
+  > intermediate zoom. Ties into the per-year hourly tier from specs/0004 §6 (2026-07-05).
 - **Mobile reflow hardening:** audit every breakpoint at 360 px; banner dial
   full-width, gauges 3-up, charts taller with tap-to-inspect (value card pinned, not
   under the finger), presets snap-scroll, picker as a bottom sheet, all touch targets
