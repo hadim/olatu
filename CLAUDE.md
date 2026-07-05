@@ -7,7 +7,7 @@ Project memory for AI coding sessions. Keep it short and current.
 **Olatu** — a fully static web app (GitHub Pages, no backend) that visualizes live
 + historical data from CANDHIS wave buoys on the French Atlantic coast: **06403
 Saint-Jean-de-Luz** (default) and **06402 Anglet** (Basque, full history), plus **03302
-Cap Ferret** (Gironde, realtime-only — no archive yet). Switchable in the UI (and via a
+Cap Ferret** (Gironde, archive backfilled → full history from 2010). Switchable in the UI (and via a
 `?buoy=<id>` URL); data tiers are read in the browser from the HF bucket `hadim/olatu`.
 
 > The GitHub repo is **`hadim/olatu`**. The local working directory may still be
@@ -111,9 +111,10 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   on load**, `?buoy=` only for a first-time visitor with no stored choice — see specs/0005
   revision 2026-07-04; replaceState on switch); loaded tiers are tagged with their campaign
   so a switch never pairs the new buoy with the old manifest (see specs/0005).
-- **Realtime-only buoys:** a campaign with no `*_arch.csv` (e.g. Cap Ferret) builds from
-  the scraped reel alone — `build.read_archive` returns None and history accumulates
-  forward. Drop archive CSVs into the campaign's `raw/` later to backfill (they coalesce).
+- **Realtime-only buoys:** a campaign with no `*_arch.csv` builds from the scraped reel
+  alone — `build.read_archive` returns None and history accumulates forward. Drop archive
+  CSVs into the campaign's `raw/` later to backfill (they coalesce) — this is exactly how
+  Cap Ferret went from realtime-only to full history from 2010.
 - **Parquet:** Snappy + `row_group_size≈1440` (multi-row-group, CI-asserted) so
   hyparquet range requests + column projection work.
 
@@ -170,7 +171,8 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   column coalesce so the tail never clobbers the archive. See spec 0004.
 - Chart range presets are 1D/2D/5D/10D/1M/6M/1Y/5Y/All; **default is 1D**.
 - **Multi-buoy shipped** (specs/0005): **3 buoys** — 06403 Saint-Jean-de-Luz + 06402
-  Anglet (archive 2009/2013→2026, seeded) + 03302 Cap Ferret (realtime-only). Top
+  Anglet (archive 2009/2013→2026, seeded) + 03302 Cap Ferret (archive backfilled →
+  full history from 2010; added realtime-only, later backfilled). Top
   **station bar** (app intro + data-source links) with a **segmented switcher** + a
   **lazy MapLibre locator map** (click a buoy to switch; inactive markers are dots,
   active shows its name). The ingest is campaign-parameterized end-to-end and tolerates

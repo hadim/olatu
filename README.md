@@ -15,7 +15,7 @@ with pixel-perfect canvas charts. Deployed on GitHub Pages.
 |------|----|----------|---------|
 | Saint-Jean-de-Luz *(default)* | 06403 | 43.408° N, 1.682° W | full, from 2013 |
 | Anglet | 06402 | 43.532° N, 1.615° W | full, from 2009 |
-| Cap Ferret | 03302 | 44.653° N, 1.447° W | realtime-only, accumulating forward |
+| Cap Ferret | 03302 | 44.653° N, 1.447° W | full, from 2010 |
 
 Data © **[Cerema / CANDHIS](https://candhis.cerema.fr)** (Datawell directional Waverider
 buoys, one measurement / 30 min). The cleaned tiers are re-scraped every 30 min into the
@@ -69,9 +69,10 @@ specs/      design & decision records — read these first (this project is spec
 .github/workflows/   deploy.yml (Pages, on webapp change) · refresh-data.yml (data, */30)
 ```
 
-Data is **not** in git — it lives in the HF bucket as `<campaign>/raw/*.csv` (sources) +
-`<campaign>/data/…` (the tiers the webapp fetches). See [`specs/`](specs/) for the full
-design, and [`CLAUDE.md`](CLAUDE.md) for conventions.
+Data is **not** in git — it lives in the HF bucket as `buoys/<campaign>/raw/*.csv` (sources)
++ `buoys/<campaign>/data/…` (the tiers the webapp fetches; tides are a shared
+`tides/<port>/…` root). See [`specs/`](specs/) for the full design, and
+[`CLAUDE.md`](CLAUDE.md) for conventions.
 
 ## Contributing & license
 

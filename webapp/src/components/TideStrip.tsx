@@ -87,6 +87,21 @@ function TideCurve({
   );
 }
 
+/** A full sun disc with rays — the SUN group heading glyph, distinct from the rise/set
+ *  glyphs that flank the times (so the label icon isn't a repeat of a value icon). */
+function SunDisc() {
+  return (
+    <svg viewBox="0 0 16 16" width={13} height={13} className="shrink-0" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth={1.25} strokeLinecap="round">
+      <circle cx="8" cy="8" r="3" />
+      {Array.from({ length: 8 }).map((_, i) => {
+        const a = (i * 45 * Math.PI) / 180;
+        const [ri, ro] = [4.8, 7];
+        return <line key={i} x1={8 + ri * Math.cos(a)} y1={8 + ri * Math.sin(a)} x2={8 + ro * Math.cos(a)} y2={8 + ro * Math.sin(a)} />;
+      })}
+    </svg>
+  );
+}
+
 /** A sunrise/sunset glyph: a sun disc over a horizon with an up (rise) or down (set) arrow. */
 function SunGlyph({ up }: { up: boolean }) {
   return (
@@ -192,7 +207,7 @@ export default function TideStrip({ tides, tz, lat, lon }: { tides: Tides | null
       {/* ── SUN group: its own titled zone, separated by a divider ─────────────── */}
       {(sun.sunrise != null || sun.sunset != null) && (
         <div className="ml-auto flex flex-col justify-center gap-1.5 border-l border-line pl-8 max-[720px]:ml-0 max-[720px]:border-l-0 max-[720px]:pl-0 max-[720px]:border-t max-[720px]:pt-4 max-[720px]:w-full">
-          <GroupLabel icon={<span className="mr-1.5 text-warm"><SunGlyph up /></span>} label={m.sun_title()} />
+          <GroupLabel icon={<span className="mr-1.5 text-warm"><SunDisc /></span>} label={m.sun_title()} />
           <div className="flex items-center gap-5 text-[0.84rem] text-muted">
             {sun.sunrise != null && (
               <span className="inline-flex items-center gap-1.5" title={m.sun_sunrise()}>

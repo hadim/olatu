@@ -51,8 +51,8 @@ BUOYS = {
         "water_depth_m": None,  # not published in open docs
         "timezone": "Europe/Paris",
     },
-    # 03302 Cap Ferret (Gironde / Arcachon). Added realtime-only (no downloaded archive
-    # yet) -- its history accumulates forward from the scraper's first run (spec 0005).
+    # 03302 Cap Ferret (Gironde / Arcachon). Added realtime-only, then its archive was
+    # backfilled (CSVs dropped into raw/, coalesced) -- now full history from 2010 (spec 0005).
     "03302": {
         "campaign_id": "03302",
         "name": "Cap Ferret",
