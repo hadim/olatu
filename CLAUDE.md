@@ -42,7 +42,7 @@ specs/         decisions
 > **Data lives in the HF *bucket* `hadim/olatu`, NOT in git** (see specs/0004; migrated
 > from a dataset repo 2026-06-30). Layout: `<campaign>/raw/*.csv` (archive + reel
 > accumulator) + `<campaign>/data/…` (manifest/latest/recent.json, year/*.parquet,
-> hourly/daily.parquet) + `<campaign>/backup/<UTC-date>/*_reel.csv` (daily reel snapshots,
+> hourly/*.parquet per year, daily.parquet) + `<campaign>/backup/<UTC-date>/*_reel.csv` (daily reel snapshots,
 > 14-day retention — buckets are non-versioned so this is the only rollback). The webapp
 > fetches `…/buckets/hadim/olatu/resolve/<campaign>/data/…` (public, CORS, range — **no
 > `main` revision**, buckets are unversioned). `hfdata/` (local working mirror) and

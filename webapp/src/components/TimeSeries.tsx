@@ -257,9 +257,9 @@ const DETAIL_COLUMNS = [
   'peak_directional_spread_deg',
   'sea_temperature_c',
 ];
-// Tiered resolution by window span: ≤120 d → per-year 30-min files; ≤~2 yr → hourly
-// means (one cached file); wider → daily means. Finer detail where it reads, lighter
-// loads where it doesn't.
+// Tiered resolution by window span: ≤120 d → per-year 30-min files; ≤~2 yr → per-year
+// hourly means; wider → daily means. Finer detail where it reads, lighter loads where it
+// doesn't — both fine tiers fetch only the years in view.
 const DETAIL_30MIN = 120 * DAY;
 const DETAIL_HOURLY = 800 * DAY;
 
@@ -276,7 +276,7 @@ function mergeColumnar(parts: Columnar[]): Columnar {
   return out;
 }
 
-export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { campaign: string; data: Columnar; tz: string; yearFiles: Record<number, string>; lastT?: number }) {
+export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles, lastT }: { campaign: string; data: Columnar; tz: string; yearFiles: Record<number, string>; hourlyFiles: Record<number, string>; lastT?: number }) {
   const { theme } = useTheme();
   const { locale } = useLocale();
   const hostRef = useRef<HTMLDivElement>(null);
@@ -312,7 +312,7 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
   // Accessible per-window summary rows (latest + min/max/range per metric).
   const [summary, setSummary] = useState<{ label: string; latest: string; lo: string; hi: string }[]>([]);
   const detailCache = useRef<Map<number, Columnar>>(new Map());
-  const hourlyCache = useRef<Columnar | null>(null);
+  const hourlyCache = useRef<Map<number, Columnar>>(new Map());
 
   const years = useMemo(() => {
     const a: number[] = [];
@@ -357,44 +357,45 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
     [locale],
   );
 
-  // Tiered detail: narrow windows plot the per-year 30-min files; mid windows plot
-  // hourly means (one cached file); wide windows fall back to the daily means passed
-  // in. Loaded tiers are cached in memory.
+  // Tiered detail: narrow windows plot the per-year 30-min files; mid windows plot the
+  // per-year hourly means; wide windows fall back to the daily means passed in. Loaded
+  // tiers are cached in memory, one entry per year.
   useEffect(() => {
     const span = range.max - range.min;
     let cancelled = false;
+
+    // Load the per-year tiles (30-min or hourly means) intersecting the window from
+    // `files`, caching each year, and set the merged detail. Both fine tiers are chunked
+    // per year so only the years actually in view are fetched.
+    const loadTiles = async (files: Record<number, string>, cache: Map<number, Columnar>) => {
+      const needed: number[] = [];
+      for (let y = new Date(range.min * 1000).getUTCFullYear(); y <= new Date(range.max * 1000).getUTCFullYear(); y++) {
+        if (files[y]) needed.push(y);
+      }
+      if (needed.length === 0) {
+        if (!cancelled) setDetail(null);
+        return;
+      }
+      // Spin only if something actually has to be fetched (cached tiles are instant).
+      if (!cancelled && !needed.every((y) => cache.has(y))) setDetailLoading(true);
+      const parts: Columnar[] = [];
+      for (const y of needed) {
+        let c = cache.get(y);
+        if (!c) {
+          c = await loadParquetTier(campaign, files[y], DETAIL_COLUMNS);
+          cache.set(y, c);
+        }
+        parts.push(c);
+      }
+      if (!cancelled) setDetail(mergeColumnar(parts));
+    };
+
     (async () => {
       try {
         if (span <= DETAIL_30MIN) {
-          const needed: number[] = [];
-          for (let y = new Date(range.min * 1000).getUTCFullYear(); y <= new Date(range.max * 1000).getUTCFullYear(); y++) {
-            if (yearFiles[y]) needed.push(y);
-          }
-          if (needed.length === 0) {
-            if (!cancelled) {
-              setDetail(null);
-              setDetailLoading(false);
-            }
-            return;
-          }
-          // Spin only if something actually has to be fetched (cached tiers are instant).
-          if (!cancelled && !needed.every((y) => detailCache.current.has(y))) setDetailLoading(true);
-          const parts: Columnar[] = [];
-          for (const y of needed) {
-            let c = detailCache.current.get(y);
-            if (!c) {
-              c = await loadParquetTier(campaign, yearFiles[y], DETAIL_COLUMNS);
-              detailCache.current.set(y, c);
-            }
-            parts.push(c);
-          }
-          if (!cancelled) setDetail(mergeColumnar(parts));
+          await loadTiles(yearFiles, detailCache.current);
         } else if (span <= DETAIL_HOURLY) {
-          if (!hourlyCache.current) {
-            if (!cancelled) setDetailLoading(true);
-            hourlyCache.current = await loadParquetTier(campaign, 'hourly.parquet', DETAIL_COLUMNS);
-          }
-          if (!cancelled) setDetail(hourlyCache.current);
+          await loadTiles(hourlyFiles, hourlyCache.current);
         } else {
           if (!cancelled) setDetail(null);
         }
@@ -408,7 +409,7 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, lastT }: { c
     return () => {
       cancelled = true;
     };
-  }, [campaign, range.min, range.max, yearFiles]);
+  }, [campaign, range.min, range.max, yearFiles, hourlyFiles]);
 
   useEffect(() => {
     const host = hostRef.current;

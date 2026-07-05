@@ -50,6 +50,7 @@ export interface Manifest {
   rows: number;
   variables: VariableDef[];
   years: { year: number; file: string; rows: number; byteLength: number }[];
+  hourly_files: { year: number; file: string; rows: number; byteLength: number }[];
   coverage: Record<string, { start: string; end: string } | null>;
   tiers: Record<string, string>;
 }

@@ -6,7 +6,7 @@ The data no longer lives in git. It lives in the Hugging Face **bucket**
 
     <campaign>/raw/Candhis_<campaign>_<YEAR>_arch.csv   immutable archive (seeded once)
     <campaign>/raw/Candhis_<campaign>_<YEAR>_reel.csv   the growing realtime accumulator
-    <campaign>/data/manifest.json | latest.json | recent.json | year/*.parquet | hourly/daily.parquet
+    <campaign>/data/manifest.json | latest.json | recent.json | year/*.parquet | hourly/*.parquet | daily.parquet
                                                        the tiers the webapp fetches at runtime
     <campaign>/backup/<UTC-date>/*_reel.csv            daily reel snapshots (see snapshot_reel)
 

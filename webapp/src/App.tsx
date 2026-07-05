@@ -177,6 +177,10 @@ export default function App() {
     () => Object.fromEntries((ready?.manifest.years ?? []).map((y) => [y.year, y.file])),
     [ready?.manifest],
   );
+  const hourlyFiles = useMemo(
+    () => Object.fromEntries((ready?.manifest.hourly_files ?? []).map((h) => [h.year, h.file])),
+    [ready?.manifest],
+  );
   const lastT = useMemo(
     () => (ready ? Math.floor(Date.parse(ready.manifest.span.end) / 1000) : 0),
     [ready?.manifest],
@@ -236,6 +240,7 @@ export default function App() {
                 tz={ready.manifest.timezone}
                 lastT={lastT}
                 yearFiles={yearFiles}
+                hourlyFiles={hourlyFiles}
               />
             ) : historyError ? (
               <div className="mt-8 text-base text-danger">{m.state_charts_error()}</div>

@@ -7,8 +7,8 @@ to one canonical half-hourly series, and emits:
     <out>/manifest.json          buoy meta + variable dict + span + year files + coverage
     <out>/latest.json            last 48h @ 30min (incl. sea temperature) -- eager
     <out>/recent.json            last 30 days @ 30min, merged -- prefetched
-    <out>/year/<campaign>_YYYY.parquet  full canonical schema per year (Snappy, multi-row-group)
-    <out>/hourly.parquet         hourly means of headline vars (full archive)
+    <out>/year/<campaign>_YYYY.parquet    full canonical schema per year (Snappy, multi-row-group)
+    <out>/hourly/<campaign>_YYYY.parquet  hourly means of headline vars, per year
     <out>/daily.parquet          daily means of headline vars (full archive)
 
 Campaign defaults to 06403 (Saint-Jean-de-Luz); pass --campaign 06402 for Anglet
@@ -242,13 +242,23 @@ def build(src: Path, out: Path, campaign: str = CAMPAIGN_ID) -> None:
         )
         print(f"  wrote {rel}  rows={g.height}  bytes={size}")
 
-    # downsampled pyramids (headline vars only)
+    # downsampled pyramids (headline vars only). Daily stays one small file (the wide-view
+    # tier). Hourly is split per year like the year files so the */30 refresh only
+    # re-uploads the current year — past years are immutable + CDN-cached (matches year/).
     hourly = downsample(merged, "1h")
     daily = downsample(merged, "1d")
-    write_parquet(out / "hourly.parquet", hourly, ROW_GROUP_SIZE)
+    hourly_files = []
+    for y in years:
+        g = hourly.filter(pl.col(DT).dt.year() == y)
+        rel = f"hourly/{campaign}_{y}.parquet"
+        size = write_parquet(out / rel, g, ROW_GROUP_SIZE)
+        hourly_files.append(
+            {"year": y, "file": rel, "rows": g.height, "byteLength": size}
+        )
     write_parquet(out / "daily.parquet", daily)
     print(
-        f"  wrote hourly.parquet rows={hourly.height}  daily.parquet rows={daily.height}"
+        f"  wrote {len(hourly_files)} hourly/*.parquet ({hourly.height} rows)  "
+        f"daily.parquet rows={daily.height}"
     )
 
     # eager JSON tiers (relative to the latest sample we actually have)
@@ -282,11 +292,11 @@ def build(src: Path, out: Path, campaign: str = CAMPAIGN_ID) -> None:
             for name in UNITS
         ],
         "years": year_files,
+        "hourly_files": hourly_files,
         "coverage": {name: coverage(merged, name) for name in HEADLINE},
         "tiers": {
             "latest": "latest.json",
             "recent": "recent.json",
-            "hourly": "hourly.parquet",
             "daily": "daily.parquet",
         },
     }

@@ -161,6 +161,18 @@ runs can't race. A non-advancing newest timestamp logs a staleness warning.
 > the `main` revision, and `update` adds a daily reel snapshot. Specifics below kept for
 > history; the live values are in CLAUDE.md and `ingest/update.py`.
 
+> **§6 update 2026-07-05 — hourly tier chunked by year.** The hourly-means tier moved
+> from a single `data/hourly.parquet` to per-year `data/hourly/<campaign>_YYYY.parquet`,
+> mirroring the full-res `year/*.parquet` files (daily stays one small file — it's the
+> wide-view tier). Motivation: the every-30-min refresh rebuilds all tiers from raw, and a
+> monolithic hourly (~3.4 MB) was re-uploaded each run even though only the tail changed;
+> past years are byte-identical so `sync_bucket` now skips them and only the current-year
+> file (~120 KB) churns. Manifest gains a `hourly_files` array (same shape as `years`);
+> `tiers.hourly` dropped. The webapp's mid-span tier (`TimeSeries.tsx`) fetches only the
+> per-year hourly chunks intersecting the window, like it already did for the 30-min year
+> files. One-time: the old `data/hourly.parquet` key lingers per campaign (`delete` is off
+> on the sync) — remove it manually.
+
 - **One command, local and CI:** `pixi run update [--campaign 06403]` orchestrates
   **pull → scrape → build → upload** (`ingest/update.py`): pull the accumulator from the
   store (HF is canonical, so a local run can't regress what the cron advanced), scrape
