@@ -44,6 +44,7 @@ Ask this for **every** request or task (and when in doubt, **ask the owner**):
 | [0009 — Buoy-layout & pipeline CLI](2026-07-05-0009-buoy-layout-and-cli.md) | Accepted | Nest buoy data on the bucket under a `buoys/<campaign>/` root (symmetric with `tides/<port>/`) via a non-destructive two-phase migration (`ingest/migrate_layout.py`); Typer + Rich CLI for the data pipeline (`ingest/ui.py`) with buoy/tide work colour-separated + CI-safe plain rendering |
 | [0010 — Installable PWA](2026-07-05-0010-pwa.md) | Implemented | Make Olatu installable (Add to Home Screen) on Android/iOS/desktop + an offline app shell via `vite-plugin-pwa` (Workbox): committed generated icons (incl. maskable), manifest (`standalone`, relative scope), NetworkFirst for the live HF data tiers so the refresh stays authoritative, silent `autoUpdate` |
 | [LEARNINGS](LEARNINGS.md) | Living | Running log of significant findings (gzip/parquet, etc.) — update on every big finding |
+| [HISTORY](../docs/HISTORY.md) | Living | What each spec became in the code — dated, newest-first changelog of shipped milestones |
 
 ## Conventions
 
