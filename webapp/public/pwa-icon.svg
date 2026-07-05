@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="512" height="512">
+  <!-- Olatu app-icon source for @vite-pwa/assets-generator (npm run pwa-assets).
+       Full-bleed (square, no rounding) so maskable/apple crops stay on-brand; the
+       OS applies its own corner mask. Same "O" wave-barrel monogram as favicon.svg
+       / src/components/brands.tsx <Logo> — keep the three in sync. -->
+  <defs>
+    <linearGradient id="g" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#9CEFE2"/>
+      <stop offset="0.55" stop-color="#38E1C6"/>
+      <stop offset="1" stop-color="#12A28E"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" fill="#0A1622"/>
+  <g fill="none" stroke="url(#g)" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.3">
+    <path d="M22.5 8.6 A10 10 0 1 0 24.2 20.5"/>
+    <path d="M24.2 20.5 A6 6 0 1 0 16 10.2"/>
+  </g>
+</svg>

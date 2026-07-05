@@ -32,6 +32,8 @@ webapp-install = { cmd = "npm install", cwd = "webapp" }
 webapp = { cmd = "npm run dev", cwd = "webapp", depends-on = ["webapp-install"] }
 webapp-build = { cmd = "npm run build", cwd = "webapp", depends-on = ["webapp-install"] }
 webapp-preview = { cmd = "npm run preview", cwd = "webapp", depends-on = ["webapp-build"] }
+# Regenerate the committed PWA icons from public/pwa-icon.svg (only when the logo changes):
+webapp-pwa-assets = { cmd = "npm run pwa-assets", cwd = "webapp", depends-on = ["webapp-install"] }
 
 # --- Lint / format (Python) ---
 format = "ruff format ."

@@ -246,6 +246,19 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   integrated **tide-curve timeline** (prev extremum left/hollow → **now** dot on the curve →
   next right/filled, with per-end kind+time captions + countdown), and **sunrise/sunset moved
   into their own separated SUN zone** (no longer between tide facts). `TideStrip.tsx`.
+- **Installable PWA shipped** (2026-07-05, specs/0010): Olatu is now installable (Add to Home
+  Screen) on Android/iOS/desktop + has an offline app shell, via **`vite-plugin-pwa`** (Workbox
+  `generateSW`) configured in `webapp/vite.config.js` (manifest + runtime caching). Icons are
+  **pre-generated & committed** in `public/` (`npm run pwa-assets` ← `pwa-assets.config.ts`,
+  source `public/pwa-icon.svg` = the full-bleed "O"; keep in sync with `favicon.svg` +
+  `brands.tsx`) so CI needs **no `sharp`**. Caching: shell precached + silent **`autoUpdate`**;
+  **HF data tiers are NetworkFirst** (`olatu-data` cache) so the every-30-min live refresh stays
+  authoritative online while the banner shows last-known offline (history parquet range=206 →
+  not cached, best-effort); Google Fonts SWR/CacheFirst; MapLibre tiles uncached. `og.png` +
+  `pwa-icon.svg` excluded from precache. iOS standalone metas + apple-touch PNG in `index.html`.
+  `injectRegister:'auto'` → **no `main.tsx` change**; `devOptions` off (test via `npm run build
+  && npm run preview`). Manifest scope/start_url are **relative** so one build installs at both
+  `olatu.io` and `hadim.github.io/olatu/`.
 
 Next per roadmap: side-by-side buoy comparison (0005 left it out), and the per-locale
 **glossary JSON** + CI **key-parity** check (0001 §8) — the glossary still lives inline in

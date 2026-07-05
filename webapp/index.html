@@ -17,8 +17,18 @@
 
     <!-- Icons -->
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
+    <link rel="icon" type="image/png" sizes="48x48" href="%BASE_URL%favicon-48.png" />
     <link rel="mask-icon" href="%BASE_URL%favicon.svg" color="#38e1c6" />
-    <link rel="apple-touch-icon" href="%BASE_URL%favicon.svg" />
+    <!-- iOS needs a raster apple-touch-icon; Android/desktop use the manifest icons. -->
+    <link rel="apple-touch-icon" href="%BASE_URL%apple-touch-icon-180x180.png" />
+
+    <!-- Installable app (PWA, see specs/0010). vite-plugin-pwa injects the manifest link
+         + service-worker registration at build. These iOS-only hints let "Add to Home
+         Screen" open Olatu full-screen with the dark canvas behind the status bar. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Olatu" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 
     <!-- Open Graph (link previews) -->
     <meta property="og:type" content="website" />
