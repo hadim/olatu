@@ -91,6 +91,8 @@ owner wanted to *see what's happening*, with the two kinds of work visually dist
   rendering. `pixi run update --help` shows the Typer usage.
 
 ## 4. Open items
-1. Run `pixi run migrate delete --yes` once the deployed site is confirmed reading `buoys/`
-   (removes the orphaned root `<campaign>/` prefixes — the only rollback until then).
+1. ~~Run `pixi run migrate delete --yes` once the deployed site is confirmed reading
+   `buoys/`~~ — **done 2026-07-05**: pushed → Pages deploy confirmed serving a `buoys/`-aware
+   bundle + a new-code refresh wrote `buoys/`, then the old root `06403/`/`06402/`/`03302/`
+   prefixes were deleted (old paths 404, `buoys/` + `tides/` 200).
 2. If a fork sets `VITE_DATA_BASE_URL`, its bucket must also use the `buoys/<campaign>/` layout.
