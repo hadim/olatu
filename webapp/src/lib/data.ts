@@ -12,7 +12,8 @@
 // Buckets are non-versioned, so there is NO `main` revision segment in the path.
 // Override the root with VITE_DATA_BASE_URL (must end in `/`), e.g. a fork's bucket.
 
-import { parseTides, type RawTides, type Tides } from './tides';
+import { parquetReadObjects } from 'hyparquet';
+import { buildTides, type TideKind, type TideMeta, type TideRow, type Tides } from './tides';
 
 export const DATA_ROOT: string =
   import.meta.env.VITE_DATA_BASE_URL ??
@@ -21,6 +22,12 @@ export const DATA_ROOT: string =
 /** Base URL for one campaign's data tiers (ends in `/`). */
 export function dataBase(campaign: string): string {
   return `${DATA_ROOT}${campaign}/data/`;
+}
+
+/** Base URL for a shared tide port's tier (ends in `/`). Tides are keyed by PORT, not
+ *  campaign (specs/0008 §8.2): `tides/<port>/data/…`, a bucket-root path, NOT campaign-relative. */
+export function tidesBase(port: string): string {
+  return `${DATA_ROOT}tides/${port}/data/`;
 }
 
 export interface Buoy {
@@ -46,6 +53,8 @@ export interface VariableDef {
 
 export interface Manifest {
   buoy: Buoy;
+  /** Nearest tide port for this buoy (ingest/build.py), or null if none within range. */
+  tide: TideMeta | null;
   generated_at: string;
   timezone: string;
   span: { start: string; end: string };
@@ -81,10 +90,18 @@ export function loadRecent(campaign: string) {
   return loadJSON<Series>(campaign, 'recent.json');
 }
 
-/** Tide extrema tier (marée), derived from api-maree.fr by ingest/tides.py (spec 0008).
- *  Best-effort: absent for a buoy with no key/site → the caller shows the empty-state. */
-export function loadTides(campaign: string): Promise<Tides> {
-  return loadJSON<RawTides>(campaign, 'tides.json').then(parseTides);
+/** Tide extrema for a buoy: reads its manifest's `tide` block for the port + attribution,
+ *  then fetches the shared `tides/<port>/data/tides.parquet` (spec 0008 §8.2). Returns null
+ *  when the buoy has no port in range, or when the tier is unavailable (→ empty-state). */
+export async function loadTidesForManifest(manifest: Manifest): Promise<Tides | null> {
+  const meta: TideMeta | null = manifest.tide;
+  if (!meta) return null;
+  const res = await fetch(`${tidesBase(meta.port)}tides.parquet`, { cache: 'no-cache' });
+  if (!res.ok) return null;
+  const file = await res.arrayBuffer();
+  const raw = (await parquetReadObjects({ file, columns: ['t', 'h', 'k'] })) as Record<string, unknown>[];
+  const rows: TideRow[] = raw.map((r) => ({ t: Number(r.t), h: Number(r.h), k: r.k as TideKind }));
+  return buildTides(meta, rows);
 }
 
 /** Latest non-null value of a variable in a columnar series, with its timestamp (ms). */

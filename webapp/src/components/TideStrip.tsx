@@ -1,13 +1,14 @@
-// Banner tide strip (spec 0008): a compact, single band at the bottom of the current-
-// conditions card. It answers, at a glance and without density: where we are in the tide
-// cycle (a half-sine arc with a marker riding it + a rising/falling word), the next high/
-// low with a live countdown, and the marnage (m) with a neap↔spring fill so you can tell a
-// big tide from a small one. Renders nothing when there's no tide data for the buoy.
+// Banner tide strip (spec 0008, + §8.4 revision): a compact, single band at the bottom of
+// the current-conditions card. It answers, at a glance: where we are in the tide cycle (a
+// half-sine arc with a marker riding it + a rising/falling word), the previous and next
+// high/low with a live countdown, the marnage (m) with a neap↔spring fill, and the day's
+// sunrise/sunset. Renders nothing when there's no tide data for the buoy.
 
 import { useLocale, type MessageKey } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
 import { fmtNumber, fmtTimeOfDay } from '../lib/format';
 import { useNow } from '../lib/useNow';
+import { sunTimes } from '../lib/sun';
 import { tideMagnitude, tidePhase, type TidePhaseLabel, type Tides } from '../lib/tides';
 import { TideIcon } from './icons';
 import InfoPopover from './InfoPopover';
@@ -45,10 +46,24 @@ function TideArc({ prevH, nextH, progress, hue }: { prevH: number; nextH: number
   const fill = `${d}L${(ARC_W - PADX).toFixed(1)} ${ARC_H}L${PADX} ${ARC_H}Z`;
   return (
     <svg viewBox={`0 0 ${ARC_W} ${ARC_H}`} width={ARC_W} height={ARC_H} className="shrink-0" aria-hidden="true">
-      <path d={fill} style={{ fill: `${hue}22` }} />
+      {/* fillOpacity, NOT a `${hue}22` string — hue is a `var(--…)` and CSS can't take an
+          appended alpha hex, which silently fell back to a solid black fill. */}
+      <path d={fill} style={{ fill: hue }} fillOpacity={0.13} />
       <path d={d} fill="none" style={{ stroke: hue }} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
       <circle cx={mx} cy={my} r={3.2} style={{ fill: hue }} />
       <circle cx={mx} cy={my} r={5.5} fill="none" style={{ stroke: hue }} strokeOpacity={0.35} strokeWidth={1.5} />
+    </svg>
+  );
+}
+
+/** A sunrise/sunset glyph: a sun disc over a horizon with an up (rise) or down (set) arrow. */
+function SunGlyph({ up }: { up: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" width={14} height={14} className="shrink-0" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round">
+      <line x1="1.5" y1="13" x2="14.5" y2="13" />
+      <path d="M4.5 10a3.5 3.5 0 0 1 7 0" />
+      <line x1="8" y1={up ? 1.5 : 5} x2="8" y2={up ? 5 : 1.5} />
+      {up ? <path d="M6 3.5 8 1.5 10 3.5" /> : <path d="M6 3 8 5 10 3" />}
     </svg>
   );
 }
@@ -62,7 +77,7 @@ function countdown(ms: number, connector: string): string {
   return `${connector} ${dur}`;
 }
 
-export default function TideStrip({ tides, tz }: { tides: Tides | null; tz: string }) {
+export default function TideStrip({ tides, tz, lat, lon }: { tides: Tides | null; tz: string; lat: number; lon: number }) {
   const { locale } = useLocale();
   const now = useNow(30_000);
   if (!tides) return null;
@@ -71,9 +86,17 @@ export default function TideStrip({ tides, tz }: { tides: Tides | null; tz: stri
 
   const mag = tideMagnitude(phase.amplitude, tides.rangeRef);
   const nextHigh = phase.next.kind === 'high';
+  const prevHigh = phase.previous.kind === 'high';
   // The dot/arc share the accent so the strip reads as part of the instrument; a spring
   // tide nudges warm to flag "big tide" without adding a second concept.
   const hue = mag.label === 'spring' || mag.label === 'large' ? 'var(--warm)' : 'var(--accent)';
+  const sun = sunTimes(now, lat, lon, tz);
+
+  const arrow = (high: boolean) => (
+    <span aria-hidden="true" style={{ color: high ? 'var(--accent)' : 'var(--text-3)' }}>
+      {high ? '▲' : '▼'}
+    </span>
+  );
 
   return (
     <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-line pt-4">
@@ -87,14 +110,36 @@ export default function TideStrip({ tides, tz }: { tides: Tides | null; tz: stri
         <TideArc prevH={phase.previous.h} nextH={phase.next.h} progress={phase.progress} hue={hue} />
         <div className="flex flex-col gap-[0.1rem] leading-tight">
           <span className="font-display text-[1.05rem] font-medium text-fg">{m[PHASE_KEY[phase.label]]()}</span>
-          <span className="inline-flex items-center gap-1 font-mono text-[0.82rem] text-muted">
-            <span aria-hidden="true" style={{ color: nextHigh ? 'var(--accent)' : 'var(--text-3)' }}>
-              {nextHigh ? '▲' : '▼'}
+          <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0 font-mono text-[0.82rem] text-muted">
+            {/* previous extremum (muted) → next extremum + live countdown */}
+            <span className="inline-flex items-center gap-1 text-faint" title={prevHigh ? m.tide_high() : m.tide_low()}>
+              {arrow(prevHigh)}
+              {fmtTimeOfDay(phase.previous.t, locale, tz)}
             </span>
-            {nextHigh ? m.tide_high() : m.tide_low()} · {fmtTimeOfDay(phase.next.t, locale, tz)}
-            <span className="text-faint"> · {countdown(phase.msToNext, m.tide_in())}</span>
+            <span aria-hidden="true" className="text-faint">→</span>
+            <span className="inline-flex items-center gap-1" title={nextHigh ? m.tide_high() : m.tide_low()}>
+              {arrow(nextHigh)}
+              {nextHigh ? m.tide_high() : m.tide_low()} · {fmtTimeOfDay(phase.next.t, locale, tz)}
+            </span>
+            <span className="text-faint">· {countdown(phase.msToNext, m.tide_in())}</span>
           </span>
         </div>
+      </div>
+
+      {/* Sunrise / sunset for the buoy's day (astronomical, no tide dependency). */}
+      <div className="flex items-center gap-3 text-[0.82rem] text-muted">
+        {sun.sunrise != null && (
+          <span className="inline-flex items-center gap-1" title={m.sun_sunrise()}>
+            <span style={{ color: 'var(--warm)' }}><SunGlyph up /></span>
+            <span className="font-mono">{fmtTimeOfDay(sun.sunrise, locale, tz)}</span>
+          </span>
+        )}
+        {sun.sunset != null && (
+          <span className="inline-flex items-center gap-1" title={m.sun_sunset()}>
+            <span className="text-faint"><SunGlyph up={false} /></span>
+            <span className="font-mono">{fmtTimeOfDay(sun.sunset, locale, tz)}</span>
+          </span>
+        )}
       </div>
 
       <div className="ml-auto flex flex-col gap-[0.25rem] max-[720px]:ml-0">

@@ -50,8 +50,10 @@ jobs:
       # each buoy independently and exits non-zero if any failed (fail-fast off).
       #
       # API_MAREE_KEY (repo secret) feeds the tide refresh (ingest/tides.py, spec 0008). It
-      # is ingest-only — the derived tides.json is uploaded to the bucket, the key never
-      # ships to the webapp. If the secret is unset, the tide step logs + skips (non-fatal).
+      # is ingest-only — the derived per-port tides.parquet is uploaded to the bucket (under
+      # tides/<port>/), the key never ships to the webapp. If the secret is unset, the tide
+      # step logs + skips (non-fatal). Each buoy resolves to its nearest port; the 3 buoys
+      # map to 3 distinct ports, so this single run refreshes all three with no collision.
       - name: Refresh every buoy (pull → scrape → tides → build → upload to HF)
         env:
           API_MAREE_KEY: ${{ secrets.API_MAREE_KEY }}

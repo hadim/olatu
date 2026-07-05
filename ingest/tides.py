@@ -1,28 +1,30 @@
-"""Fetch tide predictions from api-maree.fr and derive high/low extrema.
+"""Fetch tide predictions from api-maree.fr and derive high/low extrema, per PORT.
 
-See specs/2026-07-05-0008-tides.md. api-maree.fr serves a dense **water-level** series
-(metres) computed from IFREMER / PREVIMER harmonic components (CC-BY); it has no high/low
-or coefficient endpoint, so we reduce the series to extrema ourselves (a port of
-wave-monitor's `sync-tides.ts findExtrema`). The key is **ingest-only** and never reaches
-the webapp, which only ever reads the derived `tides.json`.
+See specs/2026-07-05-0008-tides.md (+ §8.2 revision). api-maree.fr serves a dense
+**water-level** series (metres) computed from IFREMER / PREVIMER harmonic components
+(CC-BY); it has no high/low or coefficient endpoint, so we reduce the series to extrema
+ourselves (a port of wave-monitor's `sync-tides.ts findExtrema`). The key is **ingest-only**
+and never reaches the webapp, which only ever reads the derived `tides.parquet`.
 
-Per campaign, each run (gated -- see the horizon gate below):
+Tides are keyed by **port**, not buoy (a tide is a property of a place, and buoys can share
+a port). Each buoy resolves to its nearest curated port (schema.resolve_tide_port). Per
+port, each run (gated -- see the horizon gate below):
 
-  1. fetch `/water-levels` for the buoy's `tide_site` over J-30..J+30 at step=10 min, in
-     10-day chunks (1440 pts < the 1500/req cap), tz=UTC (Olatu stores UTC),
+  1. fetch `/water-levels` for the port over J-30..J+30 at step=10 min, in 10-day chunks
+     (1440 pts < the 1500/req cap), tz=UTC (Olatu stores UTC),
   2. reduce to high/low extrema (windowed slope test + parabolic sub-sample + de-dup),
   3. replace-window coalesce into the forward-growing accumulator
-     `raw/<campaign>_tides.csv` (keep old events outside the fetched window, replace inside),
-  4. emit `data/tides.json` (the tier the webapp reads from the HF bucket).
+     `tides/<port>/raw/extrema.csv` (keep old events outside the fetched window, replace inside),
+  4. emit `tides/<port>/data/tides.parquet` (the tier the webapp reads from the HF bucket).
 
-A missing key / bad site / fetch failure is non-fatal: the step logs and falls back to the
-existing accumulator so the rest of the refresh still runs.
+Port meta (label, range_ref, source) is NOT in the tier -- it rides each buoy's manifest
+tide block (build.py). A missing key / bad site / fetch failure is non-fatal: the step logs
+and falls back to the existing accumulator so the rest of the refresh still runs.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 import time
@@ -32,7 +34,7 @@ from pathlib import Path
 import httpx
 import polars as pl
 
-from .schema import CAMPAIGN_ID, buoy
+from .schema import CAMPAIGN_ID, TIDE_PORTS, resolve_tide_port
 
 API_BASE = "https://api-maree.fr/water-levels"
 ENV_KEY = "API_MAREE_KEY"
@@ -51,23 +53,9 @@ SLOPE_W = 3
 MIN_SEPARATION_S = 3 * 3600
 
 # Only fetch when the accumulator's forward horizon drops below this (stateless, quota-
-# polite): a fetch restores +30 days, so it re-fires ~ every 10 days per buoy. The
+# polite): a fetch restores +30 days, so it re-fires ~ every 10 days per port. The
 # accumulator always still brackets "now", so the banner never goes empty between fetches.
 HORIZON_GATE_DAYS = 20
-
-# CC-BY attribution, required by the source (confirmed on api-maree.fr /mentions-legales:
-# IFREMER / PREVIMER harmonic components referenced in Sextant). Re-check the CGU wording
-# before launch. This travels inside tides.json so the webapp can surface it.
-TIDE_SOURCE = {
-    "provider": "api-maree.fr",
-    "upstream": "IFREMER / PREVIMER",
-    "license": "CC-BY",
-    "credit": (
-        "Hauteurs d'eau diffusées par api-maree.fr, calculées à partir de "
-        "composantes harmoniques IFREMER / PREVIMER."
-    ),
-    "url": "https://api-maree.fr",
-}
 
 _ACC_SCHEMA = {"t": pl.Int64, "h": pl.Float64, "k": pl.Utf8}
 
@@ -190,10 +178,18 @@ def find_extrema(pts: list[tuple[float, float]]) -> list[dict]:
 
 
 # ----------------------------------------------------------------------------- accumulator
+#
+# Tides live at a shared, port-keyed root (specs/0008 §8.2):
+#   tides/<port>/raw/extrema.csv     forward-growing high/low accumulator
+#   tides/<port>/data/tides.parquet  published tier (t, h, k -- events only)
 
 
-def _acc_path(raw: Path, campaign: str) -> Path:
-    return raw / f"{campaign}_tides.csv"
+def _acc_path(tides_root: Path, port_id: str) -> Path:
+    return tides_root / port_id / "raw" / "extrema.csv"
+
+
+def _tier_path(tides_root: Path, port_id: str) -> Path:
+    return tides_root / port_id / "data" / "tides.parquet"
 
 
 def _load_acc(path: Path) -> pl.DataFrame:
@@ -202,78 +198,68 @@ def _load_acc(path: Path) -> pl.DataFrame:
     return pl.read_csv(path, schema_overrides=_ACC_SCHEMA)
 
 
-def _write_tides_json(data: Path, meta: dict, acc: pl.DataFrame) -> int:
-    events = [
-        {"t": int(t), "h": round(float(h), 2), "k": k}
-        for t, h, k in acc.sort("t").iter_rows()
-    ]
-    payload = {
-        "site": meta.get("tide_site"),
-        "site_label": meta.get("tide_site_label", meta.get("tide_site")),
-        "timezone": meta["timezone"],
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "range_ref": meta.get("tide_range_ref"),
-        "source": TIDE_SOURCE,
-        "events": events,
-    }
-    data.mkdir(parents=True, exist_ok=True)
-    (data / "tides.json").write_text(
-        json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+def _write_tier(path: Path, acc: pl.DataFrame) -> int:
+    """Write the published Parquet tier (events only: t, h, k). Returns the row count.
+
+    Extrema are tiny (~1460/yr/port) -> a single row group is fine (unlike the wave tiers,
+    this one isn't range-read). Snappy keeps it consistent with the columnar tiers; the
+    webapp reads it via hyparquet like daily.parquet.
+    """
+    df = acc.sort("t").with_columns(
+        pl.col("t").cast(pl.Int64), pl.col("h").round(2), pl.col("k").cast(pl.Utf8)
     )
-    return len(events)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.write_parquet(path, compression="snappy")
+    return df.height
 
 
 # ----------------------------------------------------------------------------------- run
 
 
-def refresh_tides(
-    raw: Path, data: Path, campaign: str, key: str | None, *, force: bool = False
+def refresh_port(
+    tides_root: Path, port_id: str, key: str | None, *, force: bool = False
 ) -> None:
-    """Fetch (gated), coalesce the accumulator, and (re)emit data/tides.json for a campaign."""
-    meta = buoy(campaign)
-    site = meta.get("tide_site")
-    if not site:
-        print(f"  tides: {campaign} has no tide_site -> skip")
+    """Fetch (gated), coalesce the accumulator, and (re)emit the Parquet tier for a port."""
+    if port_id not in TIDE_PORTS:
+        print(f"  tides: unknown port {port_id!r} -> skip")
         return
     if not key:
         print(f"  tides: no {ENV_KEY} -> skip (webapp shows the tide empty-state)")
         return
 
-    acc = _load_acc(_acc_path(raw, campaign))
-    tides_json = data / "tides.json"
+    acc = _load_acc(_acc_path(tides_root, port_id))
+    tier = _tier_path(tides_root, port_id)
     now = time.time()
     horizon = acc["t"].max() if acc.height else None
 
     # Horizon gate: enough forecast in hand -> don't hammer the API. Still publish once if
-    # tides.json is somehow missing (e.g. first build off a pulled accumulator).
+    # the tier is somehow missing (e.g. first build off a pulled accumulator).
     if (
         not force
         and horizon is not None
         and horizon - now >= HORIZON_GATE_DAYS * 86_400
     ):
-        if tides_json.exists():
+        if tier.exists():
             print(
-                f"  tides: {campaign} +{(horizon - now) / 86_400:.0f} d ahead -> skip fetch"
+                f"  tides: {port_id} +{(horizon - now) / 86_400:.0f} d ahead -> skip fetch"
             )
             return
-        print(
-            f"  tides: {campaign} republishing {_write_tides_json(data, meta, acc)} events"
-        )
+        print(f"  tides: {port_id} republishing {_write_tier(tier, acc)} events")
         return
 
     start = _day_midnight_utc(now) - timedelta(days=WINDOW_PAST_DAYS)
     end = _day_midnight_utc(now) + timedelta(days=WINDOW_FWD_DAYS)
     try:
-        pts = fetch_water_levels(key, site, start, end)
+        pts = fetch_water_levels(key, port_id, start, end)
         new_events = find_extrema(pts)
         if not new_events:
             raise TideError(f"no extrema from {len(pts)} points")
     except (httpx.HTTPError, TideError, KeyError, ValueError) as e:
         print(
-            f"  tides: {campaign} fetch failed ({e}) -> keep existing", file=sys.stderr
+            f"  tides: {port_id} fetch failed ({e}) -> keep existing", file=sys.stderr
         )
-        if acc.height and not tides_json.exists():
-            _write_tides_json(data, meta, acc)
+        if acc.height and not tier.exists():
+            _write_tier(tier, acc)
         return
 
     # Replace-window merge: keep old events outside [start, end], replace inside with fresh.
@@ -289,40 +275,59 @@ def refresh_tides(
     kept = acc.filter((pl.col("t") < win_start) | (pl.col("t") > win_end))
     merged = pl.concat([kept, new_df]).unique(subset=["t"], keep="last").sort("t")
 
-    _acc_path(raw, campaign).parent.mkdir(parents=True, exist_ok=True)
-    merged.write_csv(_acc_path(raw, campaign))
-    n = _write_tides_json(data, meta, merged)
+    _acc_path(tides_root, port_id).parent.mkdir(parents=True, exist_ok=True)
+    merged.write_csv(_acc_path(tides_root, port_id))
+    n = _write_tier(tier, merged)
     print(
-        f"  tides: {campaign} {len(new_events)} fresh extrema, {merged.height} total -> tides.json ({n} events)"
+        f"  tides: {port_id} {len(new_events)} fresh extrema, {merged.height} total "
+        f"-> tides.parquet ({n} events)"
     )
+
+
+def refresh_for_campaign(
+    tides_root: Path, campaign: str, key: str | None, *, force: bool = False
+) -> str | None:
+    """Resolve a buoy's nearest port and refresh it. Returns the port id (None if too far)."""
+    port = resolve_tide_port(campaign)
+    if port is None:
+        print(f"  tides: {campaign} has no port within range -> skip")
+        return None
+    refresh_port(tides_root, port["id"], key, force=force)
+    return port["id"]
 
 
 def main() -> None:
     p = argparse.ArgumentParser(
-        description="Fetch + derive tide extrema from api-maree.fr."
+        description="Fetch + derive tide extrema from api-maree.fr (per port)."
     )
-    p.add_argument(
-        "--campaign", default=CAMPAIGN_ID, help=f"campaign id (default: {CAMPAIGN_ID})"
-    )
-    p.add_argument(
-        "--raw",
-        type=Path,
+    g = p.add_mutually_exclusive_group()
+    g.add_argument(
+        "--campaign",
         default=None,
-        help="raw dir (default: hfdata/<campaign>/raw)",
+        help="resolve this buoy's nearest port and refresh it (default: 06403)",
+    )
+    g.add_argument(
+        "--port",
+        default=None,
+        help=f"refresh a port id directly (one of {list(TIDE_PORTS)})",
     )
     p.add_argument(
-        "--data",
+        "--tides-root",
         type=Path,
-        default=None,
-        help="data dir (default: hfdata/<campaign>/data)",
+        default=Path("hfdata") / "tides",
+        help="tides root dir (default: hfdata/tides)",
     )
     p.add_argument(
         "--force", action="store_true", help="fetch even if the horizon gate would skip"
     )
     args = p.parse_args()
-    raw = args.raw or Path("hfdata") / args.campaign / "raw"
-    data = args.data or Path("hfdata") / args.campaign / "data"
-    refresh_tides(raw, data, args.campaign, os.environ.get(ENV_KEY), force=args.force)
+    key = os.environ.get(ENV_KEY)
+    if args.port:
+        refresh_port(args.tides_root, args.port, key, force=args.force)
+    else:
+        refresh_for_campaign(
+            args.tides_root, args.campaign or CAMPAIGN_ID, key, force=args.force
+        )
 
 
 if __name__ == "__main__":

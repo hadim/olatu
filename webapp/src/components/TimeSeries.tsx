@@ -24,7 +24,7 @@ import { m } from '@/paraglide/messages';
 import { cn } from '@/lib/utils';
 import { compass, dirColor, fmtNumber, fmtDateTime, fmtAxisTick } from '../lib/format';
 import { loadParquetTier, type Columnar } from '../lib/parquet';
-import { marnageSeries, marnageAt, type Tides } from '../lib/tides';
+import { reconstructCurve, extremaSeries, tideHeightAt, type TideEvent, type Tides } from '../lib/tides';
 import { iconSvg, type IconName } from './icons';
 import { touchZoomPlugin } from '../lib/uplotTouch';
 import HeatRibbon from './HeatRibbon';
@@ -88,6 +88,43 @@ function drawArrowGlyphs(u: uPlot, xs: number[], dir: (number | null)[], dpr: nu
     ctx.fillStyle = dirColor(d);
     ctx.fill();
     ctx.restore();
+  }
+  ctx.restore();
+}
+
+// Tide extrema markers: ▲ above each high, ▼ below each low, riding the reconstructed
+// water-level curve (spec 0008 §8.3). Density-thinned to a minimum pixel spacing like the
+// direction glyphs; drawn only on narrow windows (the wide-window zig-zag already vertices
+// at the extrema, so markers there would just clutter).
+function drawTideMarkers(u: uPlot, events: TideEvent[], color: string, dpr: number) {
+  const ctx = u.ctx;
+  const { left, top, width, height } = u.bbox;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(left, top, width, height);
+  ctx.clip();
+  ctx.fillStyle = color;
+  const minGap = 20 * dpr;
+  const s = 4 * dpr;
+  let lastX = -Infinity;
+  for (const e of events) {
+    const px = u.valToPos(e.t / 1000, 'x', true);
+    if (px < left - 2 || px > left + width + 2 || px - lastX < minGap) continue;
+    lastX = px;
+    const py = u.valToPos(e.h, 'y', true);
+    const high = e.kind === 'high';
+    ctx.beginPath();
+    if (high) {
+      ctx.moveTo(px, py - s * 1.9);
+      ctx.lineTo(px - s, py - s * 0.4);
+      ctx.lineTo(px + s, py - s * 0.4);
+    } else {
+      ctx.moveTo(px, py + s * 1.9);
+      ctx.lineTo(px - s, py + s * 0.4);
+      ctx.lineTo(px + s, py + s * 0.4);
+    }
+    ctx.closePath();
+    ctx.fill();
   }
   ctx.restore();
 }
@@ -168,14 +205,13 @@ const PANELS: PanelDef[] = [
     glued: true,
   },
   {
-    // Tide (marée): the MARNAGE (tidal range, m) over time — a slowly-varying spring↔neap
-    // signal (not the fast water-level curve), fed from tides.json (external to the wave
-    // Columnar) and accumulating with the tide history. Empty-state only where there's no
-    // tide data. Second-to-last so temp keeps the shared x-axis.
-    titleKey: 'tide_marnage',
+    // Tide (marée): the reconstructed WATER LEVEL (m) over time with ▲ high / ▼ low markers
+    // (spec 0008 §8.3), fed from the per-port tides.parquet (external to the wave Columnar).
+    // Y is auto min/max (water sits well above chart datum). Empty-state only where there's
+    // no tide data. Second-to-last so temp keeps the shared x-axis.
+    titleKey: 'tide_level',
     series: [{ key: 'tide', colorVar: '--c-tide', width: 2, fill: true }],
     tide: true,
-    zeroBased: true,
     emptyKey: 'tide_chart_empty',
   },
   {
@@ -262,7 +298,7 @@ const PANEL_ICON: Partial<Record<MessageKey, IconName>> = {
   cc_direction: 'direction',
   cc_spread: 'spread',
   cc_sea_temp: 'temp',
-  tide_marnage: 'tide',
+  tide_level: 'tide',
 };
 
 const DETAIL_COLUMNS = [
@@ -505,13 +541,20 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
       return [lo - d * f, hi + d * f];
     };
 
-    // Tide (marée) panel data (spec 0008): the MARNAGE (tidal range, m) over time — a
-    // spring↔neap signal that reads at any zoom and accumulates with the tide history.
-    // The full series is built once; uPlot clips it to the window. Hover shows the marnage
-    // of the bracketing cycle; the empty-state shows only where no tide data lands.
-    const tideMarnage = tides ? marnageSeries(tides.events) : { t: [] as number[], m: [] as (number | null)[] };
+    // Tide (marée) panel data (spec 0008 §8.3): the reconstructed WATER LEVEL (m) over the
+    // window. Adaptive so it reads at every zoom — narrow windows get the smooth 10-min
+    // raised-cosine curve (+ ▲/▼ markers), wider ones connect the raw extrema (the cheap
+    // envelope zig-zag; undersampling the cosine would alias). Hover shows the level at the
+    // cursor; the empty-state shows only where the window has no tide extrema.
+    const tideEvents = tides?.events ?? [];
+    const tideNarrow = xmax - xmin <= 21 * DAY;
+    const tideCurve = tideEvents.length
+      ? tideNarrow
+        ? reconstructCurve(tideEvents, xmin, xmax, 600)
+        : extremaSeries(tideEvents, xmin, xmax)
+      : { t: [] as number[], h: [] as (number | null)[] };
     const tideColor = cssVar('--c-tide');
-    const tideInWindow = tideMarnage.t.some((s, i) => s >= xmin && s <= xmax && tideMarnage.m[i] != null);
+    const tideInWindow = tideEvents.some((e) => e.t / 1000 >= xmin && e.t / 1000 <= xmax);
 
     // Insert null break-points across real outages so the line never bridges a gap
     // (daily.parquet omits empty days). gxs/gcols are the gap-aware arrays the charts
@@ -559,12 +602,12 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
           `<span class="inline-flex items-center gap-[0.35rem]">${icon}<span class="text-[0.68rem] uppercase tracking-[0.05em] text-faint">${m[cm.labelKey]()}</span><span class="font-mono text-[0.84rem] text-muted">${val}</span></span>`,
         );
       }
-      // Marnage of the tide cycle at the hovered time (from the extrema, not in gcols).
-      const tm = tides ? marnageAt(tides.events, gxs[idx]) : null;
-      if (tm != null) {
+      // Reconstructed water level at the hovered time (from the extrema, not in gcols).
+      const th = tides ? tideHeightAt(tides.events, gxs[idx]) : null;
+      if (th != null) {
         const icon = iconSvg('tide', { className: 'shrink-0', color: 'var(--c-tide)' });
         chips.push(
-          `<span class="inline-flex items-center gap-[0.35rem]">${icon}<span class="text-[0.68rem] uppercase tracking-[0.05em] text-faint">${m.tide_marnage()}</span><span class="font-mono text-[0.84rem] text-muted">${fmtNumber(tm, locale, 1)} m</span></span>`,
+          `<span class="inline-flex items-center gap-[0.35rem]">${icon}<span class="text-[0.68rem] uppercase tracking-[0.05em] text-faint">${m.tide_level()}</span><span class="font-mono text-[0.84rem] text-muted">${fmtNumber(th, locale, 1)} m</span></span>`,
         );
       }
       return chips.join('');
@@ -614,21 +657,19 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
         hi: Number.isFinite(hi) ? fmt(hi) : '—',
       };
     });
-    // Tide row: marnage (m) min/max/latest across the window, when it has tide data.
+    // Tide row: water level (m) lowest-low / highest-high / current, across the window.
     if (tideInWindow) {
       let lo = Infinity;
       let hi = -Infinity;
-      let latest: number | null = null;
-      for (let i = 0; i < tideMarnage.t.length; i++) {
-        const s = tideMarnage.t[i];
-        const v = tideMarnage.m[i];
-        if (v == null || s < xmin || s > xmax) continue;
-        if (v < lo) lo = v;
-        if (v > hi) hi = v;
-        latest = v;
+      for (const e of tideEvents) {
+        const s = e.t / 1000;
+        if (s < xmin || s > xmax) continue;
+        if (e.h < lo) lo = e.h;
+        if (e.h > hi) hi = e.h;
       }
+      const latest = tideHeightAt(tideEvents, xmax);
       summaryRows.push({
-        label: m.tide_marnage(),
+        label: m.tide_level(),
         latest: latest == null ? '—' : `${fmtNumber(latest, locale, 1)} m`,
         lo: Number.isFinite(lo) ? `${fmtNumber(lo, locale, 1)} m` : '—',
         hi: Number.isFinite(hi) ? `${fmtNumber(hi, locale, 1)} m` : '—',
@@ -680,11 +721,11 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
       let series: uPlot.Series[];
 
       if (panel.tide) {
-        // External marnage-over-time series (smoothed by the Raw/Light/Strong control like
-        // the wave panels). No tide data anywhere → keep the shared x so it's a framed,
-        // empty panel (like temp) and the overlay shows.
-        chartData = tideMarnage.t.length
-          ? [tideMarnage.t, movingAvg(tideMarnage.m, radius)]
+        // External reconstructed water-level curve (already smooth — not run through the
+        // Raw/Light/Strong control, which would damp the PM/BM peaks). No tide data anywhere
+        // → keep the shared x so it's a framed, empty panel (like temp) and the overlay shows.
+        chartData = tideCurve.t.length
+          ? [tideCurve.t, tideCurve.h]
           : [gxs, gxs.map(() => null) as (number | null)[]];
         series = [
           {},
@@ -761,6 +802,9 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
       if (panel.glyph) {
         const dirArr = gcols[panel.series[0].key];
         hooks.draw = [(u) => drawArrowGlyphs(u, gxs, dirArr, DPR)];
+      }
+      if (panel.tide && tideNarrow && tideEvents.length) {
+        hooks.draw = [(u) => drawTideMarkers(u, tideEvents, tideColor, DPR)];
       }
 
       const opts: uPlot.Options = {

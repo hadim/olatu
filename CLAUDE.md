@@ -25,15 +25,16 @@ a spec?"* — if yes, create/update one (see "When does work need a spec?" in
 - [specs/2026-06-27-0002-data-dictionary.md](specs/2026-06-27-0002-data-dictionary.md) —
   canonical schema + plain-language definition of every variable
 - [specs/2026-07-05-0008-tides.md](specs/2026-07-05-0008-tides.md) — tide (marée) feature:
-  api-maree.fr fetch, extrema accumulator, `tides.json` tier, banner strip + chart panel
+  api-maree.fr fetch, extrema accumulator, **per-port Parquet tier** (`tides/<port>/`, §8.2),
+  banner strip + **water-level curve chart** (§8.3), sun times, nearest-port resolution
 
 ## Layout
 
 ```
 ingest/        Python (polars). NOT an installable package. All steps take --campaign.
-  schema.py    per-buoy identity registry (BUOYS) + column mapping, units, sentinel, headline/direction vars
+  schema.py    per-buoy identity (BUOYS) + column mapping/units/sentinel + TIDE_PORTS registry & resolve_tide_port (nearest port)
   scrape.py    fetch the CANDHIS realtime HTML table -> per-year reel CSV (coalesce-merge)
-  tides.py     fetch api-maree.fr water levels -> high/low extrema -> tides.json (spec 0008; needs API_MAREE_KEY)
+  tides.py     fetch api-maree.fr water levels -> high/low extrema -> tides/<port>/data/tides.parquet (spec 0008 §8.2; needs API_MAREE_KEY)
   build.py     CSV -> tiered Parquet/JSON (archive-preferred coalesce)
   update.py    pull → scrape → tides → build → upload to the HF bucket (OIDC in CI) + daily reel snapshot
 pixi.toml      Python env + frontend tasks (no pyproject; no Python library)
@@ -44,13 +45,14 @@ specs/         decisions
 
 > **Data lives in the HF *bucket* `hadim/olatu`, NOT in git** (see specs/0004; migrated
 > from a dataset repo 2026-06-30). Layout: `<campaign>/raw/*.csv` (archive + reel
-> accumulator + `*_tides.csv` tide-extrema accumulator) + `<campaign>/data/…`
-> (manifest/latest/recent.json, `tides.json`, year/*.parquet,
+> accumulator) + `<campaign>/data/…` (manifest/latest/recent.json, year/*.parquet,
 > hourly/*.parquet per year, daily.parquet) + `<campaign>/backup/<UTC-date>/*_reel.csv` (daily reel snapshots,
-> 14-day retention — buckets are non-versioned so this is the only rollback). The webapp
-> fetches `…/buckets/hadim/olatu/resolve/<campaign>/data/…` (public, CORS, range — **no
-> `main` revision**, buckets are unversioned). `hfdata/` (local working mirror) and
-> `webapp/public/data/` are gitignored.
+> 14-day retention — buckets are non-versioned so this is the only rollback). **Tides are a
+> separate, port-keyed root** (specs/0008 §8.2): `tides/<port>/raw/extrema.csv` accumulator +
+> `tides/<port>/data/tides.parquet` tier, shared across buoys (each buoy's manifest `tide`
+> block names its nearest port). The webapp fetches `…/buckets/hadim/olatu/resolve/<campaign>/data/…`
+> (and `…/resolve/tides/<port>/data/…`) — public, CORS, range, **no `main` revision**.
+> `hfdata/` (local working mirror) and `webapp/public/data/` are gitignored.
 
 ## Commands
 
@@ -78,13 +80,18 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
 - **43 archive columns are 100% empty for 06403** (QUALITE, NBSYS, S1–S4) → dropped.
 - **Sea temperature exists only in the realtime feed** → history has none; it
   accumulates forward. Handle missing-temp as a first-class UI state, not an empty chart.
-- **Tides (marée, spec 0008)** come from **api-maree.fr** (needs the `API_MAREE_KEY` env /
-  GitHub secret — **ingest-only**, never in the client). `ingest/tides.py` derives high/low
-  extrema into `raw/<campaign>_tides.csv` (forward-growing, like the reel) + `data/tides.json`;
-  the webapp (`lib/tides.ts`) reconstructs the curve (raised-cosine). Predictions only cover
-  ~±30 days → older windows show the empty-state (like temp). Marnage in **metres**, no
-  coefficient. Missing key/site is non-fatal (tide step skips). Retune `tide_site` /
-  `tide_range_ref` in `schema.py BUOYS` once validated against api-maree.fr `/sites`.
+- **Tides (marée, spec 0008 + §8 revision)** come from **api-maree.fr** (needs the
+  `API_MAREE_KEY` env / GitHub secret — **ingest-only**, never in the client). Keyed by
+  **port, not buoy** (`schema.TIDE_PORTS` + `resolve_tide_port`: each buoy → nearest curated
+  port within `TIDE_MAX_KM=40`, else no tide). `ingest/tides.py` derives high/low extrema into
+  `tides/<port>/raw/extrema.csv` (forward-growing, like the reel) + `tides/<port>/data/tides.parquet`;
+  the manifest `tide` block carries `{port,label,distance_km,range_ref,source}`. The webapp
+  (`lib/tides.ts`) reconstructs the raised-cosine curve. **Banner** = arc + prev/next PM/BM +
+  countdown + marnage (m, no coefficient) + **sunrise/sunset** (`lib/sun.ts`, pure NOAA calc);
+  **chart** = **water-level curve + ▲/▼ markers** (`TimeSeries` tide panel, auto Y; smooth
+  10-min curve ≤21 d, extrema zig-zag wider). Predictions cover ~±30 days → older windows
+  empty-state (like temp). Missing key/port is non-fatal (tide step skips). Valid site ids:
+  06403 `saint-jean-de-luz`, 06402 `boucau-bayonne-biarritz`, 03302 `cap-ferret`.
 - **Series has real gaps** (largest 50 days) → break the line, never interpolate across.
 - **GitHub Pages base path:** fetch webapp assets via `import.meta.env.BASE_URL`,
   never a leading `/`. **Data tiers are different** — fetch them via
@@ -201,19 +208,22 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   from git in `vite.config.js` via `execFileSync` and inlined with Vite `define`
   (`__COMMIT_HASH__` / `__COMMIT_DATE__`, typed in `vite-env.d.ts`).
 
-- **Tides (marée) shipped** (2026-07-05, specs/0008): `ingest/tides.py` fetches
-  **api-maree.fr** `/water-levels` (IFREMER/PREVIMER, CC-BY; `API_MAREE_KEY`, ingest-only)
-  and derives high/low **extrema** into a forward-growing `raw/<campaign>_tides.csv` +
-  `data/tides.json` tier on the HF bucket (gated ~daily by a forward-horizon check).
-  Runtime `webapp/src/lib/tides.ts` (raised-cosine `tidePhase` + `reconstructCurve`) feeds:
-  a **banner tide strip** (`TideStrip.tsx` — arc marker riding the cycle, phase word, next
-  PM/BM + live countdown, **marnage in m** + neap↔spring bar, **no coefficient**) and a
-  **dedicated synced chart panel** in `TimeSeries.tsx` plotting **marnage over time** (the
-  spring↔neap envelope, `marnageSeries`; `--c-tide` indigo, zero-based, smoothing-aware;
-  marnage in the hover card + summary; empty-state only where no tide data — no span cap, so
-  it accumulates like the swell/temp history). Attribution in the footer + glossary.
-  **Owner TODO:** create the api-maree.fr
-  account, add the `API_MAREE_KEY` GitHub secret, and validate `tide_site` ids via `/sites`.
+- **Tides (marée) shipped + reworked** (2026-07-05, specs/0008 incl. §8 revision):
+  `ingest/tides.py` fetches **api-maree.fr** `/water-levels` (IFREMER/PREVIMER, CC-BY;
+  `API_MAREE_KEY`, ingest-only) and derives high/low **extrema**, now **keyed by port** —
+  `tides/<port>/raw/extrema.csv` accumulator + `tides/<port>/data/tides.parquet` tier on the
+  bucket (gated ~daily by a forward-horizon check), shared across buoys. `schema.resolve_tide_port`
+  maps each buoy to its nearest curated port (`TIDE_PORTS`, ≤40 km) and `build.py` writes the
+  result into the manifest `tide` block (or null → empty-state). Runtime `webapp/src/lib/tides.ts`
+  (raised-cosine `tidePhase` / `reconstructCurve` / `extremaSeries` / `tideHeightAt`) feeds:
+  a **banner tide strip** (`TideStrip.tsx` — arc, phase word, **prev + next** PM/BM + live
+  countdown, marnage in m + neap↔spring bar, **no coefficient**, plus **sunrise/sunset** from
+  the pure `lib/sun.ts` NOAA calc) and a **synced chart panel** (`TimeSeries.tsx`) plotting the
+  reconstructed **water-level curve with ▲/▼ high/low markers** (auto min/max Y; smooth 10-min
+  curve on windows ≤21 d, raw-extrema zig-zag wider; water level in hover + summary; empty-state
+  where no extrema). Attribution in footer + glossary. Verified on all 3 buoys with the key;
+  key absent from `dist`. **Owner TODO:** create the api-maree.fr account + add the
+  `API_MAREE_KEY` GitHub secret (site ids already validated via `/sites`).
 
 Next per roadmap: side-by-side buoy comparison (0005 left it out), and the per-locale
 **glossary JSON** + CI **key-parity** check (0001 §8) — the glossary still lives inline in

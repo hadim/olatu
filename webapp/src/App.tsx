@@ -7,7 +7,7 @@ import Footer from './components/Footer';
 import { BannerSkeleton, ChartsSkeleton, StationLocationSkeleton } from './components/Skeletons';
 import { useLocale } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
-import { loadManifest, loadLatest, loadRecent, loadTides, type Manifest, type Series } from './lib/data';
+import { loadManifest, loadLatest, loadRecent, loadTidesForManifest, type Manifest, type Series } from './lib/data';
 import type { Tides } from './lib/tides';
 import { loadParquetTier, type Columnar } from './lib/parquet';
 import { initialCampaign, persistCampaign, campaignUrl } from './lib/buoys';
@@ -201,16 +201,23 @@ export default function App() {
     };
   }, [campaign]);
 
-  // Per-campaign tide extrema. Best-effort: a 404 (buoy has no key/site) just leaves the
-  // tide UI in its empty-state. Static extrema cover ~a month ahead, so — unlike the live
-  // banner tiers — they aren't reloaded on the 5-min refresh; the phase interpolates
-  // client-side and ticks via useNow.
+  // Per-buoy tide extrema (marée). The buoy's manifest names its nearest port (tide block);
+  // we fetch that port's shared tides.parquet (specs/0008 §8.2). Best-effort: no port in
+  // range / unavailable tier leaves the tide UI in its empty-state. Keyed on the PORT so the
+  // 5-min banner refresh (same port) never refetches or blinks; a buoy switch (new port, or
+  // null while the new manifest loads) reloads it. Extrema cover ~a month ahead — the phase
+  // interpolates client-side and ticks via useNow, so they aren't on the live refresh path.
+  const tidePort = ready?.manifest.tide?.port ?? null;
   useEffect(() => {
     let cancelled = false;
-    setTides(null);
-    loadTides(campaign)
+    const mf = ready?.manifest;
+    if (!mf?.tide) {
+      setTides(null);
+      return;
+    }
+    loadTidesForManifest(mf)
       .then((t) => {
-        if (!cancelled) setTides({ campaign, tides: t });
+        if (!cancelled) setTides(t ? { campaign: mf.buoy.campaign_id, tides: t } : null);
       })
       .catch(() => {
         if (!cancelled) setTides(null); // no tides for this buoy — empty-state handles it
@@ -218,7 +225,8 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [campaign]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tidePort]);
 
   return (
     <div className="mx-auto max-w-[1100px] px-5 pb-12 pt-5">

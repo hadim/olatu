@@ -44,7 +44,7 @@ import httpx
 from . import build as build_mod
 from . import scrape as scrape_mod
 from . import tides as tides_mod
-from .schema import CAMPAIGN_ID
+from .schema import CAMPAIGN_ID, resolve_tide_port
 
 DEFAULT_REPO = "hadim/olatu"  # HF bucket id
 HF_AUD = "https://huggingface.co"
@@ -131,6 +131,11 @@ def _data_dir(work: Path, campaign: str) -> Path:
     return work / campaign / "data"
 
 
+def _tides_root(work: Path) -> Path:
+    """Shared, port-keyed tide root: hfdata/tides/<port>/{raw,data} (specs/0008 §8.2)."""
+    return work / "tides"
+
+
 def pull(work: Path, campaign: str, repo: str, token: str | None) -> None:
     """Mirror the bucket's raw inputs locally: reel always (small), archive if absent."""
     from huggingface_hub import sync_bucket
@@ -138,17 +143,37 @@ def pull(work: Path, campaign: str, repo: str, token: str | None) -> None:
     raw = _raw_dir(work, campaign)
     raw.mkdir(parents=True, exist_ok=True)
     src = f"hf://buckets/{repo}/{campaign}/raw"
-    # The forward-growing accumulators (reel + tides) change every run → always pull the
-    # freshest copy (HF canonical) so a local run can't regress what the cron advanced.
-    sync_bucket(
-        src, str(raw), include=["*_reel.csv", "*_tides.csv"], token=token, quiet=True
-    )
+    # The forward-growing reel changes every run → always pull the freshest copy (HF
+    # canonical) so a local run can't regress what the cron advanced.
+    sync_bucket(src, str(raw), include=["*_reel.csv"], token=token, quiet=True)
     # The archive is immutable → pull only if we don't already have it (CI caches it).
     if not list(raw.glob("*_arch.csv")):
         sync_bucket(src, str(raw), include=["*_arch.csv"], token=token, quiet=True)
     n_arch = len(list(raw.glob("*_arch.csv")))
     n_reel = len(list(raw.glob("*_reel.csv")))
     print(f"  pulled raw: {n_arch} archive + {n_reel} reel file(s) -> {raw}")
+
+
+def pull_tides(work: Path, port_id: str, repo: str, token: str | None) -> None:
+    """Mirror a port's forward-growing tide accumulator locally (freshest copy wins).
+
+    First run for a port has no remote prefix yet → tolerate the miss and build from
+    scratch (the refresh re-fetches J±30 anyway).
+    """
+    from huggingface_hub import sync_bucket
+
+    dst = _tides_root(work) / port_id / "raw"
+    dst.mkdir(parents=True, exist_ok=True)
+    try:
+        sync_bucket(
+            f"hf://buckets/{repo}/tides/{port_id}/raw",
+            str(dst),
+            include=["extrema.csv"],
+            token=token,
+            quiet=True,
+        )
+    except Exception as e:  # noqa: BLE001 — missing prefix / transient: non-fatal
+        print(f"  tides: no remote accumulator for {port_id} yet ({e})")
 
 
 def upload(work: Path, campaign: str, repo: str, token: str | None) -> None:
@@ -164,18 +189,25 @@ def upload(work: Path, campaign: str, repo: str, token: str | None) -> None:
     sync_bucket(
         str(work / campaign),
         f"hf://buckets/{repo}/{campaign}",
-        # data/** covers tides.json; raw/*_tides.csv is the forward-growing tide accumulator.
-        include=[
-            "data/**",
-            "raw/*_reel.csv",
-            "raw/*_tides.csv",
-        ],  # never the immutable archive
+        include=["data/**", "raw/*_reel.csv"],  # never the immutable archive
         token=token,
         quiet=True,
     )
-    print(
-        f"  uploaded {campaign}/data + {campaign}/raw/*_{{reel,tides}}.csv to buckets/{repo}"
+    print(f"  uploaded {campaign}/data + {campaign}/raw/*_reel.csv to buckets/{repo}")
+
+
+def upload_tides(work: Path, port_id: str, repo: str, token: str | None) -> None:
+    """Push a port's tide tier + accumulator to the shared tides/<port>/ prefix."""
+    from huggingface_hub import sync_bucket
+
+    sync_bucket(
+        str(_tides_root(work) / port_id),
+        f"hf://buckets/{repo}/tides/{port_id}",
+        include=["data/**", "raw/extrema.csv"],
+        token=token,
+        quiet=True,
     )
+    print(f"  uploaded tides/{port_id}/data + raw/extrema.csv to buckets/{repo}")
 
 
 # Buckets are non-versioned (overwrite-in-place), so a buggy run that corrupts the
@@ -274,10 +306,19 @@ def update(
     if do_scrape:
         scrape_mod.scrape(raw, campaign)
 
-    if do_tides:
-        # Refresh tide predictions (gated ~daily). Ingest-only: the key never reaches the
-        # webapp, which reads the derived tides.json. Missing key / failure is non-fatal.
-        tides_mod.refresh_tides(raw, data, campaign, os.environ.get(tides_mod.ENV_KEY))
+    # Resolve this buoy's nearest tide port once (shared, port-keyed storage — specs/0008
+    # §8.2). None → the buoy has no port within range → build writes tide: null.
+    tide_port = resolve_tide_port(campaign) if do_tides else None
+    if do_tides and tide_port is not None:
+        # Refresh tide predictions for the port (gated ~daily). Ingest-only: the key never
+        # reaches the webapp, which reads the derived tides.parquet. Failure is non-fatal.
+        if do_pull:
+            pull_tides(work, tide_port["id"], repo, token)
+        tides_mod.refresh_port(
+            _tides_root(work), tide_port["id"], os.environ.get(tides_mod.ENV_KEY)
+        )
+    elif do_tides:
+        print(f"  tides: {campaign} has no port within range -> skip")
 
     build_mod.build(raw, data, campaign)
 
@@ -294,6 +335,8 @@ def update(
             )
             print(f"  seeded {campaign}/raw (archive + reel) to buckets/{repo}")
         upload(work, campaign, repo, token)
+        if tide_port is not None:
+            upload_tides(work, tide_port["id"], repo, token)
         snapshot_reel(work, campaign, repo, token)
 
 

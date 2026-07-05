@@ -1,11 +1,11 @@
-// Pure, framework-agnostic tide logic (spec 0008). Ported from the sibling project
-// wave-monitor (`src/lib/tides.ts`). Fed by the per-campaign `tides.json` tier, which
-// carries only the high/low **extrema** derived by ingest/tides.py from api-maree.fr
-// (IFREMER / PREVIMER, CC-BY); the smooth curve is reconstructed here at runtime.
+// Pure, framework-agnostic tide logic (spec 0008, + §8.2/§8.3 revision). Fed by the shared,
+// per-port `tides.parquet` tier (high/low **extrema** derived by ingest/tides.py from
+// api-maree.fr — IFREMER / PREVIMER, CC-BY) plus the port meta from the buoy's manifest
+// `tide` block. The smooth water-level curve is reconstructed here at runtime.
 //
-// The reconstruction is the **raised-cosine** half-sine between consecutive extrema —
-// the theoretical tide shape, not the literal predicted curve (nearshore shallow-water
-// asymmetry is not modelled). Same primitive drives the banner arc and the chart panel.
+// Reconstruction is the **raised-cosine** half-sine between consecutive extrema — the
+// theoretical tide shape, not the literal predicted curve (nearshore shallow-water
+// asymmetry is not modelled). The same primitive drives the banner arc and the chart panel.
 
 export type TideKind = 'high' | 'low';
 
@@ -29,40 +29,50 @@ export interface TideSource {
   url?: string;
 }
 
-/** Parsed `tides.json`. Events are sorted ascending, `t` in ms. */
-export interface Tides {
-  site: string;
-  siteLabel: string;
-  timezone: string;
-  generatedAt: string;
-  rangeRef: TideRangeRef | null;
+/** The buoy manifest's `tide` block (ingest/build.py): which port, how far, gauge ref +
+ *  attribution. `null` on the manifest when no port is within range → tide empty-state. */
+export interface TideMeta {
+  port: string;
+  label: string;
+  distance_km: number;
+  range_ref: TideRangeRef | null;
   source: TideSource | null;
-  events: TideEvent[];
 }
 
-/** Raw wire shape of `tides.json` (see ingest/tides.py `_write_tides_json`). */
-export interface RawTides {
-  site: string;
-  site_label?: string;
-  timezone: string;
-  generated_at?: string;
-  range_ref?: TideRangeRef | null;
-  source?: TideSource | null;
-  events?: { t: number; h: number; k: TideKind }[];
+/** One tide.parquet row (epoch **seconds**). */
+export interface TideRow {
+  t: number;
+  h: number;
+  k: TideKind;
+}
+
+/** Runtime tide model: port meta (from the manifest) + extrema (from the Parquet tier). */
+export interface Tides {
+  label: string;
+  distanceKm: number | null;
+  rangeRef: TideRangeRef | null;
+  source: TideSource | null;
+  /** Sorted ascending, `t` in ms. */
+  events: TideEvent[];
 }
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
-/** Wire → runtime. `events[].t` arrives in epoch **seconds**; we keep ms internally. */
-export function parseTides(raw: RawTides): Tides {
+/** Raised-cosine (half-sine) interpolation between two extrema at fraction `p` ∈ [0,1]. */
+const raisedCosine = (a: number, b: number, p: number) => a + ((b - a) * (1 - Math.cos(Math.PI * p))) / 2;
+
+/** Combine the manifest port meta with the Parquet rows into the runtime model. Rows carry
+ *  epoch **seconds**; we keep ms internally (matches `now` in `tidePhase`). */
+export function buildTides(meta: TideMeta, rows: TideRow[]): Tides {
+  const events = rows
+    .map((r) => ({ t: r.t * 1000, h: r.h, kind: r.k }))
+    .sort((a, b) => a.t - b.t);
   return {
-    site: raw.site,
-    siteLabel: raw.site_label ?? raw.site,
-    timezone: raw.timezone,
-    generatedAt: raw.generated_at ?? '',
-    rangeRef: raw.range_ref ?? null,
-    source: raw.source ?? null,
-    events: (raw.events ?? []).map((e) => ({ t: e.t * 1000, h: e.h, kind: e.k })),
+    label: meta.label,
+    distanceKm: meta.distance_km ?? null,
+    rangeRef: meta.range_ref ?? null,
+    source: meta.source ?? null,
+    events,
   };
 }
 
@@ -107,7 +117,7 @@ export function tidePhase(events: TideEvent[], now: number): TidePhase | null {
   const span = next.t - previous.t;
   const progress = span > 0 ? clamp01((now - previous.t) / span) : 0;
   const amplitude = Math.abs(next.h - previous.h);
-  const height = previous.h + ((next.h - previous.h) * (1 - Math.cos(Math.PI * progress))) / 2;
+  const height = raisedCosine(previous.h, next.h, progress);
   const rising = next.kind === 'high';
 
   let label: TidePhaseLabel;
@@ -118,46 +128,95 @@ export function tidePhase(events: TideEvent[], now: number): TidePhase | null {
   return { previous, next, progress, rising, amplitude, height, msToNext: next.t - now, label };
 }
 
-/**
- * Tidal range (**marnage**) over time — the chart-panel series (spec 0008). One point per
- * extremum, valued at the |Δheight| to the previous extremum, timed at the extremum
- * (epoch **seconds**). Unlike the fast water-level oscillation this is a slowly-varying
- * signal that traces the spring↔neap cycle and reads at any zoom, and it accumulates with
- * the forward-growing tide history. A gap in the extrema (> `gapSec`, i.e. missing
- * predictions) inserts a null so the line breaks instead of inventing a range.
- */
-export function marnageSeries(events: TideEvent[], gapSec = 12 * 3600): { t: number[]; m: (number | null)[] } {
-  const t: number[] = [];
-  const m: (number | null)[] = [];
-  for (let i = 1; i < events.length; i++) {
-    const aSec = events[i - 1].t / 1000;
-    const bSec = events[i].t / 1000;
-    if (bSec - aSec > gapSec) {
-      if (t.length && m[m.length - 1] !== null) {
-        t.push(aSec + 1);
-        m.push(null);
-      }
-      continue;
-    }
-    t.push(bSec);
-    m.push(Math.abs(events[i].h - events[i - 1].h));
-  }
-  return { t, m };
-}
-
-/** Marnage (m) of the tide cycle bracketing `sec` — the |Δheight| of its two extrema. */
-export function marnageAt(events: TideEvent[], sec: number): number | null {
-  let prev: number | null = null;
-  let next: number | null = null;
+/** Reconstructed water level (m) at epoch **seconds**, raised-cosine between the bracketing
+ *  extrema. `null` when `sec` isn't bracketed (before the first / after the last extremum). */
+export function tideHeightAt(events: TideEvent[], sec: number): number | null {
+  const ms = sec * 1000;
+  let prev: TideEvent | null = null;
+  let next: TideEvent | null = null;
   for (const e of events) {
-    const s = e.t / 1000;
-    if (s <= sec) prev = e.h;
+    if (e.t <= ms) prev = e;
     else {
-      next = e.h;
+      next = e;
       break;
     }
   }
-  return prev != null && next != null ? Math.abs(next - prev) : null;
+  if (!prev || !next) return null;
+  const span = next.t - prev.t;
+  return span > 0 ? raisedCosine(prev.h, next.h, (ms - prev.t) / span) : prev.h;
+}
+
+export interface TideSeries {
+  t: number[];
+  h: (number | null)[];
+}
+
+/**
+ * Sample the reconstructed water-level curve over [xmin, xmax] (epoch **seconds**) at
+ * ~`stepSec` — the smooth tide shape for narrow windows (spec 0008 §8.3). A hole in the
+ * extrema wider than `gapSec` (missing predictions) breaks the line. Returns seconds +
+ * metres so it drops straight into the chart's second-axis units.
+ */
+export function reconstructCurve(
+  events: TideEvent[],
+  xminSec: number,
+  xmaxSec: number,
+  stepSec: number,
+  gapSec = 12 * 3600,
+): TideSeries {
+  const t: number[] = [];
+  const h: (number | null)[] = [];
+  let last = -Infinity;
+  for (let i = 1; i < events.length; i++) {
+    const prev = events[i - 1];
+    const next = events[i];
+    const aSec = prev.t / 1000;
+    const bSec = next.t / 1000;
+    if (bSec < xminSec) continue;
+    if (aSec > xmaxSec) break;
+    if (bSec - aSec > gapSec) {
+      if (t.length && h[h.length - 1] !== null) {
+        t.push(aSec + 1);
+        h.push(null);
+      }
+      continue;
+    }
+    const from = Math.max(aSec, xminSec);
+    const to = Math.min(bSec, xmaxSec);
+    const dt = next.t - prev.t;
+    for (let s = from; s <= to + stepSec; s += stepSec) {
+      const ss = Math.min(s, to);
+      if (ss <= last) continue;
+      t.push(ss);
+      h.push(raisedCosine(prev.h, next.h, (ss * 1000 - prev.t) / dt));
+      last = ss;
+    }
+  }
+  return { t, h };
+}
+
+/**
+ * The extrema within [xmin, xmax] (epoch **seconds**), to be connected directly — the cheap
+ * wide-window series whose vertices are the PM/BM and whose upper/lower edges trace the
+ * spring↔neap envelope. (Undersampling the raised-cosine at wide zoom would alias, so we
+ * don't — we draw the real extrema instead.) A hole wider than `gapSec` breaks the line.
+ */
+export function extremaSeries(events: TideEvent[], xminSec: number, xmaxSec: number, gapSec = 12 * 3600): TideSeries {
+  const t: number[] = [];
+  const h: (number | null)[] = [];
+  let lastSec: number | null = null;
+  for (const e of events) {
+    const s = e.t / 1000;
+    if (s < xminSec || s > xmaxSec) continue;
+    if (lastSec !== null && s - lastSec > gapSec) {
+      t.push(lastSec + 1);
+      h.push(null);
+    }
+    t.push(s);
+    h.push(e.h);
+    lastSec = s;
+  }
+  return { t, h };
 }
 
 export type TideMagLabel = 'neap' | 'small' | 'average' | 'large' | 'spring';

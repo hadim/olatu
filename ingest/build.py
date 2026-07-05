@@ -35,8 +35,10 @@ from .schema import (
     NUMERIC_COLS,
     REEL_MAP,
     SENTINEL_MIN,
+    TIDE_SOURCE,
     UNITS,
     buoy,
+    resolve_tide_port,
     variable_source,
 )
 
@@ -273,8 +275,25 @@ def build(src: Path, out: Path, campaign: str = CAMPAIGN_ID) -> None:
 
     # manifest
     meta = buoy(campaign)
+    # Tide (marée) reference for this buoy: its nearest curated port (specs/0008 §8.2), or
+    # None when none is within range -> the webapp shows the tide empty-state. The events
+    # themselves live in the shared tier tides/<port>/data/tides.parquet (written by
+    # ingest/tides.py); the webapp reads this block for the port id + attribution + gauge ref.
+    port = resolve_tide_port(campaign)
+    tide_block = (
+        {
+            "port": port["id"],
+            "label": port["label"],
+            "distance_km": port["distance_km"],
+            "range_ref": port["range_ref"],
+            "source": TIDE_SOURCE,
+        }
+        if port is not None
+        else None
+    )
     manifest = {
         "buoy": meta,
+        "tide": tide_block,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "timezone": meta["timezone"],
         "span": {
@@ -298,9 +317,6 @@ def build(src: Path, out: Path, campaign: str = CAMPAIGN_ID) -> None:
             "latest": "latest.json",
             "recent": "recent.json",
             "daily": "daily.parquet",
-            # Tide extrema (marée), written by ingest/tides.py from api-maree.fr (spec 0008).
-            # A static pointer: the webapp treats a 404 (no key / fetch failed) as "no tides".
-            "tides": "tides.json",
         },
     }
     mbytes = write_json(out / "manifest.json", manifest)

@@ -173,7 +173,7 @@ export default function CurrentConditions({ latest, manifest, tides }: { latest:
         </div>
       </div>
 
-      <TideStrip tides={tides} tz={tz} />
+      <TideStrip tides={tides} tz={tz} lat={manifest.buoy.lat} lon={manifest.buoy.lon} />
     </section>
   );
 }

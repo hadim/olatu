@@ -9,6 +9,8 @@ Mirrors specs/2026-06-27-0002-data-dictionary.md and 0005 -- keep them in sync.
 
 from __future__ import annotations
 
+import math
+
 # CANDHIS encodes "no valid measurement" as 999.999. A 999.999 m height / s period /
 # deg direction is physically impossible, so we null any value at/above the threshold
 # across every numeric column. (Threshold, not exact equality, to be float-repr-safe;
@@ -20,14 +22,8 @@ SENTINEL_MIN = 999.99
 # Per-buoy identity, keyed by CANDHIS campaign id. The default campaign is 06403 (the
 # original Saint-Jean-de-Luz buoy); 06402 (Anglet) was added in spec 0005. The CANDHIS
 # data dialect is identical across campaigns, so only this table differs per buoy.
-# Tide (marée) config, per buoy -- see specs/2026-07-05-0008-tides.md.
-#   tide_site       api-maree.fr `/water-levels` site id. VALIDATE against `/sites` once a
-#                   key exists (values below are best guesses); a bad/absent site just makes
-#                   the fetch fail -> the buoy shows the tide empty-state, never a crash.
-#   tide_range_ref  neap->spring marnage envelope (metres) for the "big tide?" gauge. These
-#                   are REGIONAL constants (not derived from the fetched J+/-30 window, which
-#                   spans ~one spring-neap cycle and would mislabel a monthly max). Retune
-#                   per station once real extrema are observed.
+# Tide config is NOT here: a tide is a property of a PORT, not a buoy (see TIDE_PORTS +
+# resolve_tide_port below and specs/0008 §8.2). Each buoy resolves to its nearest port.
 BUOYS = {
     "06403": {
         "campaign_id": "06403",
@@ -41,9 +37,6 @@ BUOYS = {
         "cadence_minutes": 30,
         "water_depth_m": None,  # not published in open docs
         "timezone": "Europe/Paris",
-        "tide_site": "socoa",  # Socoa is the SHOM reference port for Saint-Jean-de-Luz
-        "tide_site_label": "Socoa (Saint-Jean-de-Luz)",
-        "tide_range_ref": {"neap": 1.2, "spring": 4.5},
     },
     "06402": {
         "campaign_id": "06402",
@@ -57,9 +50,6 @@ BUOYS = {
         "cadence_minutes": 30,
         "water_depth_m": None,  # not published in open docs
         "timezone": "Europe/Paris",
-        "tide_site": "boucau-bayonne-biarritz",  # Adour mouth, at Anglet
-        "tide_site_label": "Boucau-Bayonne (Anglet)",
-        "tide_range_ref": {"neap": 1.2, "spring": 4.5},
     },
     # 03302 Cap Ferret (Gironde / Arcachon). Added realtime-only (no downloaded archive
     # yet) -- its history accumulates forward from the scraper's first run (spec 0005).
@@ -75,10 +65,55 @@ BUOYS = {
         "cadence_minutes": 30,
         "water_depth_m": None,  # not published in open docs
         "timezone": "Europe/Paris",
-        "tide_site": "arcachon-eyrac",  # Arcachon basin (Eyrac); or "cap-ferret" -- validate
-        "tide_site_label": "Arcachon",
-        "tide_range_ref": {"neap": 1.3, "spring": 4.6},
     },
+}
+
+# ------------------------------------------------------------------------- tides / ports
+#
+# Tide (marée) predictions come per-PORT, shared across buoys (specs/0008 §8.2). This is
+# the curated set of api-maree.fr `/water-levels` site ids we actually fetch -- validated
+# against `/sites` (2026-07-05) with lat/lon copied from that catalog. A buoy resolves to
+# its nearest port here (resolve_tide_port); beyond TIDE_MAX_KM it has no tide -> the webapp
+# shows the empty-state. `range_ref` is the neap->spring marnage envelope (metres) for the
+# "big tide?" gauge -- a REGIONAL constant (not derived from the ~one-cycle J±30 window),
+# retune once real extrema are observed.
+TIDE_PORTS = {
+    "saint-jean-de-luz": {
+        "label": "Saint-Jean-de-Luz",
+        "lat": 43.407542,
+        "lon": -1.691879,
+        "range_ref": {"neap": 1.2, "spring": 4.5},
+    },
+    "boucau-bayonne-biarritz": {
+        "label": "Boucau-Bayonne (Anglet)",
+        "lat": 43.528037,
+        "lon": -1.542334,
+        "range_ref": {"neap": 1.2, "spring": 4.5},
+    },
+    "cap-ferret": {
+        "label": "Cap Ferret",
+        "lat": 44.632333,
+        "lon": -1.239067,
+        "range_ref": {"neap": 1.3, "spring": 4.6},
+    },
+}
+
+# A buoy farther than this from every curated port has no meaningful tide reference ->
+# tide empty-state. 40 km comfortably covers our buoys (max is Cap Ferret at ~16.6 km).
+TIDE_MAX_KM = 40.0
+
+# CC-BY attribution, required by the source (confirmed on api-maree.fr /mentions-legales:
+# IFREMER / PREVIMER harmonic components referenced in Sextant). Travels into each buoy's
+# manifest tide block so the webapp can surface it. Re-check the CGU wording before launch.
+TIDE_SOURCE = {
+    "provider": "api-maree.fr",
+    "upstream": "IFREMER / PREVIMER",
+    "license": "CC-BY",
+    "credit": (
+        "Hauteurs d'eau diffusées par api-maree.fr, calculées à partir de "
+        "composantes harmoniques IFREMER / PREVIMER."
+    ),
+    "url": "https://api-maree.fr",
 }
 
 # Default campaign (back-compat for call-sites / CLIs that don't pass --campaign).
@@ -88,6 +123,42 @@ CAMPAIGN_ID = "06403"
 def buoy(campaign: str = CAMPAIGN_ID) -> dict:
     """Return the identity dict for a campaign id (raises KeyError if unknown)."""
     return BUOYS[campaign]
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance (km) between two lat/lon points."""
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def resolve_tide_port(campaign: str = CAMPAIGN_ID) -> dict | None:
+    """Nearest curated tide port to a buoy, or None if none is within TIDE_MAX_KM.
+
+    Returns `{id, label, lat, lon, range_ref, distance_km}` -- the per-buoy tide reference
+    used to fetch (ingest) and to fill the manifest tide block (build). A buoy too far from
+    every port gets None -> the webapp shows the tide empty-state ("marée indisponible").
+    """
+    b = BUOYS[campaign]
+    best_id, best_km = None, math.inf
+    for pid, p in TIDE_PORTS.items():
+        km = _haversine_km(b["lat"], b["lon"], p["lat"], p["lon"])
+        if km < best_km:
+            best_id, best_km = pid, km
+    if best_id is None or best_km > TIDE_MAX_KM:
+        return None
+    p = TIDE_PORTS[best_id]
+    return {
+        "id": best_id,
+        "label": p["label"],
+        "lat": p["lat"],
+        "lon": p["lon"],
+        "range_ref": p["range_ref"],
+        "distance_km": round(best_km, 1),
+    }
 
 
 # Archive CSV column -> canonical name. `DateHeure` is handled separately.
