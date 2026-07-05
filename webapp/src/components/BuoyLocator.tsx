@@ -13,7 +13,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { useTheme } from '../lib/theme';
 import { useLocale } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
-import { BUOYS } from '../lib/buoys';
+import { BUOYS, buoyInfo } from '../lib/buoys';
 
 function rasterStyle(theme: string): unknown {
   const base = theme === 'dark' ? 'dark_all' : 'light_all';
@@ -41,7 +41,11 @@ export default function BuoyLocator({
   const { theme } = useTheme();
   useLocale();
   const mapEl = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<MlMap | null>(null);
   const markers = useRef<Record<string, HTMLButtonElement>>({});
+  // Skip the fly-to on the very first selection effect (mount): the map opens on the
+  // all-buoys overview; only a real buoy *switch* should zoom/pan to the new buoy.
+  const firstSelect = useRef(true);
   // Keep the latest onSelect/selected for the (theme-scoped) marker click handlers
   // without forcing a full map rebuild when only the selection changes.
   const onSelectRef = useRef(onSelect);
@@ -55,24 +59,24 @@ export default function BuoyLocator({
     (async () => {
       const maplibre = await import('maplibre-gl');
       if (cancelled || !mapEl.current) return;
-      const lons = BUOYS.map((b) => b.lon);
-      const lats = BUOYS.map((b) => b.lat);
-      const bounds = new maplibre.LngLatBounds(
-        [Math.min(...lons), Math.min(...lats)],
-        [Math.max(...lons), Math.max(...lats)],
-      );
+      // Open zoomed on the *selected* buoy (like the old static mini-map), not the
+      // all-buoys overview — the segmented control + a scroll-out reveal the others,
+      // and switching flies between them. `selected` is captured per theme-rebuild.
+      const here = buoyInfo(selected);
       map = new maplibre.Map({
         container: mapEl.current,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         style: rasterStyle(theme) as any,
-        bounds,
-        fitBoundsOptions: { padding: { top: 54, bottom: 30, left: 64, right: 64 }, maxZoom: 11 },
+        center: [here.lon, here.lat],
+        zoom: 9.5,
         attributionControl: { compact: true },
         dragRotate: false,
         pitchWithRotate: false,
       });
-      map.scrollZoom.disable(); // a picker, not a pan/zoom surface — keep it calm
+      mapRef.current = map;
+      // Explore-able: scroll-wheel zoom + on-map +/- controls, no rotation.
       map.touchZoomRotate.disableRotation();
+      map.addControl(new maplibre.NavigationControl({ showCompass: false }), 'top-right');
 
       markers.current = {};
       for (const b of BUOYS) {
@@ -100,13 +104,21 @@ export default function BuoyLocator({
       cancelled = true;
       for (const m of created) m.remove();
       map?.remove();
+      mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [theme]);
 
-  // Reflect selection changes without rebuilding the map.
+  // Reflect selection changes without rebuilding the map, and fly to the newly-selected
+  // buoy (zoom + pan) — but not on the initial mount, which keeps the all-buoys overview.
   useEffect(() => {
     for (const b of BUOYS) markers.current[b.campaign_id]?.classList.toggle('locator-marker--active', b.campaign_id === selected);
+    if (firstSelect.current) {
+      firstSelect.current = false;
+      return;
+    }
+    const b = buoyInfo(selected);
+    mapRef.current?.easeTo({ center: [b.lon, b.lat], zoom: 9.5, duration: 900 });
   }, [selected]);
 
   return (

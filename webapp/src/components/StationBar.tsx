@@ -8,12 +8,15 @@ import { useLocale } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { BUOYS } from '../lib/buoys';
+import { HuggingFaceMark, BuoyMark } from './brands';
 
 const BuoyLocator = lazy(() => import('./BuoyLocator'));
 
 const HF_DATA = 'https://huggingface.co/buckets/hadim/olatu';
 const CANDHIS = 'https://candhis.cerema.fr';
-const SOURCE_LINK = 'text-muted no-underline border-b border-line transition-colors hover:text-accent hover:border-accent';
+// Same look as the footer source links (see Footer.tsx) so the whole app's attribution
+// reads as one coherent system (spec 0007).
+const SOURCE_LINK = 'inline-flex items-center gap-1.5 text-muted no-underline transition-colors hover:text-accent';
 
 function BuoySwitcher({ selected, onSelect }: { selected: string; onSelect: (c: string) => void }) {
   return (
@@ -52,14 +55,16 @@ export default function StationBar({ campaign, onSelect }: { campaign: string; o
         <span className="font-mono text-[0.72rem] uppercase tracking-[0.08em] text-accent">{m.picker_eyebrow()}</span>
         <p className="m-0 max-w-[48ch] text-[0.95rem] leading-normal text-muted">{m.intro_description()}</p>
         <BuoySwitcher selected={campaign} onSelect={onSelect} />
-        <p className="mt-[0.15rem] text-[0.8rem] text-faint">
-          {m.data_source()}:{' '}
+        <p className="mt-[0.15rem] flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.8rem] text-faint">
+          <span>{m.data_source()}:</span>
           <a href={CANDHIS} target="_blank" rel="noopener noreferrer" className={SOURCE_LINK}>
-            {m.data_live()}
-          </a>{' '}
-          ·{' '}
+            <BuoyMark size={15} />
+            <span>{m.data_live()}</span>
+          </a>
+          <span className="text-divider" aria-hidden="true">·</span>
           <a href={HF_DATA} target="_blank" rel="noopener noreferrer" className={SOURCE_LINK}>
-            {m.data_dataset()}
+            <HuggingFaceMark size={15} />
+            <span>{m.data_dataset()}</span>
           </a>
         </p>
       </div>

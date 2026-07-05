@@ -1,40 +1,76 @@
 import { useLocale } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
+import { GitHubMark, HuggingFaceMark, BuoyMark } from './brands';
 
 const REPO_URL = 'https://github.com/hadim/olatu';
-const LINK = 'text-muted no-underline hover:text-accent';
+const HF_URL = 'https://huggingface.co/buckets/hadim/olatu';
+const CANDHIS_URL = 'https://candhis.cerema.fr';
+const LINK = 'inline-flex items-center gap-1.5 text-muted no-underline transition-colors hover:text-accent';
 
-function GitHubMark() {
+// Build stamp: format the deployed commit's calendar date in the active locale. Uses a
+// fixed UTC noon (not a bare `new Date(iso)`) so the displayed day never tz-shifts — this
+// is build metadata, not a buoy reading.
+function formatCommitDate(iso: string, locale: string): string {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!parts) return '';
+  const [, y, mo, d] = parts;
+  const dt = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d), 12));
+  return new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', day: 'numeric' }).format(dt);
+}
+
+function Sep() {
   return (
-    <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true" fill="currentColor">
-      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
-    </svg>
+    <span className="text-divider" aria-hidden="true">
+      ·
+    </span>
   );
 }
 
 export default function Footer() {
-  useLocale();
+  const { locale } = useLocale();
+  const hasBuild = __COMMIT_HASH__ !== 'dev' && __COMMIT_DATE__ !== '';
+  const built = __COMMIT_DATE__ ? formatCommitDate(__COMMIT_DATE__, locale) : '';
+
   return (
-    <footer className="mt-10 flex flex-wrap items-center gap-2 border-t border-line pt-5 text-[0.88rem] text-faint">
-      <a className={`inline-flex items-center gap-1.5 font-semibold ${LINK}`} href={REPO_URL} target="_blank" rel="noopener noreferrer">
-        <GitHubMark />
-        <span>{m.footer_open_source()}</span>
-      </a>
-      <span className="text-divider" aria-hidden="true">·</span>
-      <a className={LINK} href={`${REPO_URL}/issues`} target="_blank" rel="noopener noreferrer">
-        {m.footer_report_bug()}
-      </a>
-      <span className="text-divider" aria-hidden="true">·</span>
-      <span>
-        {m.footer_data_by()}{' '}
-        <a className={LINK} href="https://candhis.cerema.fr" target="_blank" rel="noopener noreferrer">
-          Cerema / CANDHIS
+    <footer className="mt-10 flex flex-col gap-2.5 border-t border-line pt-5 text-[0.86rem] text-faint">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+        <a className={`font-semibold ${LINK}`} href={REPO_URL} target="_blank" rel="noopener noreferrer">
+          <GitHubMark size={17} />
+          <span>{m.footer_open_source()}</span>
         </a>
-      </span>
-      <span className="text-divider" aria-hidden="true">·</span>
-      <a className={LINK} href="https://huggingface.co/buckets/hadim/olatu" target="_blank" rel="noopener noreferrer">
-        {m.footer_dataset()} ↗
-      </a>
+        <Sep />
+        <a className={LINK} href={`${REPO_URL}/issues`} target="_blank" rel="noopener noreferrer">
+          {m.footer_report_bug()}
+        </a>
+        <Sep />
+        <a className={LINK} href={HF_URL} target="_blank" rel="noopener noreferrer">
+          <HuggingFaceMark size={16} />
+          <span>{m.footer_dataset()}</span>
+        </a>
+        <Sep />
+        <a className={LINK} href={CANDHIS_URL} target="_blank" rel="noopener noreferrer">
+          <BuoyMark size={16} />
+          <span>{m.footer_data_by()} Cerema / CANDHIS</span>
+        </a>
+      </div>
+
+      {/* Discreet build stamp — which commit is live, and when it shipped. */}
+      <div className="text-[0.76rem] text-faint/80">
+        {hasBuild ? (
+          <a
+            className="font-mono no-underline hover:text-accent"
+            href={`${REPO_URL}/commit/${__COMMIT_HASH__}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={m.footer_build_title()}
+          >
+            {m.footer_build()} {__COMMIT_HASH__}
+            {built ? ` · ${built}` : ''}
+          </a>
+        ) : (
+          <span className="font-mono">{m.footer_build()} dev</span>
+        )}
+      </div>
     </footer>
   );
 }

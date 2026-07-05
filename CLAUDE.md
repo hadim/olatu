@@ -175,6 +175,21 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   "Loading…" line; an `sr-only role=status` carries the announcement. Mirrors the real
   layout so there's no jump when data lands.
 
+- **Identity / nav / attribution polish shipped** (2026-07-05, specs/0007): one **"O"
+  wave-barrel logo** (`components/brands.tsx` `<Logo>` — kept in sync with
+  `public/favicon.svg`) replaces the emoji + separate favicon; the header is a clickable
+  **home** link (`<a href={BASE_URL}>`) with a bigger title + a static headline
+  (`app_headline`). The **locator map** (`BuoyLocator`) is now interactive: scroll-zoom +
+  +/- controls and **flies to the buoy on switch** (`easeTo`; first render keeps the
+  all-buoys overview). The redundant **static bottom mini-map was removed**
+  (`MiniMap.tsx` + `ExpandedMap.tsx` + `public/map/*.png` deleted) — the station block is
+  now a compact Position/Sensor/Operator strip (Water-depth fact dropped: always "not
+  published"). **Data-source attribution unified** across the top bar + footer with one
+  icon family (`brands.tsx`: GitHub / Hugging Face / CANDHIS-buoy). The **footer carries a
+  discreet build stamp** (`Build <sha> · <date>`, links to the GH commit): sha+date read
+  from git in `vite.config.js` via `execFileSync` and inlined with Vite `define`
+  (`__COMMIT_HASH__` / `__COMMIT_DATE__`, typed in `vite-env.d.ts`).
+
 Next per roadmap: side-by-side buoy comparison (0005 left it out), and the per-locale
 **glossary JSON** + CI **key-parity** check (0001 §8) — the glossary still lives inline in
 the Paraglide message dict for now.

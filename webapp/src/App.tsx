@@ -3,7 +3,6 @@ import Header from './components/Header';
 import StationBar from './components/StationBar';
 import CurrentConditions from './components/CurrentConditions';
 import TimeSeries from './components/TimeSeries';
-import MiniMap from './components/MiniMap';
 import Footer from './components/Footer';
 import { BannerSkeleton, ChartsSkeleton, StationLocationSkeleton } from './components/Skeletons';
 import { useLocale } from '@/lib/i18n';
@@ -31,16 +30,6 @@ const HISTORY_COLUMNS = [
   'sea_temperature_c',
 ];
 
-function StationLocation({ manifest }: { manifest: Manifest }) {
-  const b = manifest.buoy;
-  return (
-    <section className="mt-6 grid grid-cols-[minmax(240px,360px)_1fr] items-stretch gap-5 max-[720px]:grid-cols-1">
-      <MiniMap lat={b.lat} lon={b.lon} label={b.name} />
-      <StationFacts manifest={manifest} />
-    </section>
-  );
-}
-
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-[0.2rem]">
@@ -50,12 +39,14 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+// Compact station facts strip (the static locator map was dropped — the top locator map
+// is now interactive and flies to the selected buoy, so a second static map was redundant;
+// water depth was always "not published" for these buoys, so it's dropped too). See spec 0007.
 function StationFacts({ manifest }: { manifest: Manifest }) {
   const b = manifest.buoy;
   return (
-    <dl className="m-0 grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] content-center gap-4 rounded-2xl border border-line px-[1.3rem] py-[1.1rem]">
+    <dl className="mt-6 m-0 grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] content-center gap-4 rounded-2xl border border-line px-[1.3rem] py-[1.1rem]">
       <Fact label={m.station_position()}>{b.lat.toFixed(4)}°N, {Math.abs(b.lon).toFixed(4)}°W</Fact>
-      <Fact label={m.station_depth()}>{b.water_depth_m != null ? `${b.water_depth_m} m` : m.station_not_published()}</Fact>
       <Fact label={m.station_sensor()}>{b.sensor}</Fact>
       <Fact label={m.station_operator()}>{b.operator}</Fact>
     </dl>
@@ -207,7 +198,7 @@ export default function App() {
 
   return (
     <div className="mx-auto max-w-[1100px] px-5 pb-12 pt-5">
-      <Header buoy={ready?.manifest.buoy ?? null} />
+      <Header />
 
       <main>
         <StationBar campaign={campaign} onSelect={setCampaign} />
@@ -251,7 +242,7 @@ export default function App() {
               </>
             )}
 
-            <StationLocation manifest={ready.manifest} />
+            <StationFacts manifest={ready.manifest} />
           </>
         )}
       </main>

@@ -2,8 +2,13 @@ import { useLocale, LOCALES, LOCALE_LABELS, type Locale } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
 import { useTheme } from '../lib/theme';
 import { Button } from '@/components/ui/button';
-import type { Buoy } from '../lib/data';
+import { Logo } from './brands';
 import Glossary from './Glossary';
+
+// Clicking the logo/title returns to the app root (a full reload — this is a single-page
+// app, so "home" = a clean load of the default/persisted buoy). It's a real <a> so
+// middle-click / open-in-new-tab work and it's keyboard-focusable.
+const HOME = import.meta.env.BASE_URL;
 
 function SunIcon() {
   return (
@@ -22,21 +27,31 @@ function MoonIcon() {
   );
 }
 
-export default function Header({ buoy }: { buoy: Buoy | null }) {
+export default function Header() {
   const { locale, setLocale } = useLocale();
   const { theme, toggle } = useTheme();
 
   return (
     <header className="mb-6 flex items-center justify-between gap-4 border-b border-accent pb-4 max-[560px]:flex-col max-[560px]:items-stretch max-[560px]:gap-3.5">
-      <div className="flex items-center gap-[0.7rem]">
-        <span className="text-[1.6rem] leading-none" aria-hidden="true">🌊</span>
-        <div>
-          <h1 className="m-0 font-display text-2xl font-semibold tracking-[-0.01em] max-[560px]:text-[1.35rem]">Olatu</h1>
-          <p className="mt-[0.15rem] font-mono text-[0.72rem] uppercase tracking-[0.04em] text-faint">
-            {buoy ? `CANDHIS ${buoy.campaign_id} · ${buoy.name}` : m.app_tagline()}
+      <a
+        href={HOME}
+        aria-label={`Olatu — ${m.nav_home()}`}
+        title={m.nav_home()}
+        className="group flex items-center gap-[0.85rem] rounded-xl no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-4 focus-visible:ring-offset-bg"
+      >
+        <Logo
+          size={44}
+          className="shrink-0 rounded-[10px] shadow-[0_2px_10px_-4px_rgba(0,0,0,0.5)] transition-transform duration-200 motion-safe:group-hover:-translate-y-[1px] motion-safe:group-hover:scale-[1.04] max-[560px]:h-[38px] max-[560px]:w-[38px]"
+        />
+        <div className="min-w-0">
+          <h1 className="m-0 font-display text-[1.9rem] font-bold leading-none tracking-[-0.015em] text-fg max-[560px]:text-[1.55rem]">
+            Olatu
+          </h1>
+          <p className="mt-[0.28rem] text-[0.85rem] leading-tight text-muted max-[560px]:text-[0.8rem]">
+            {m.app_headline()}
           </p>
         </div>
-      </div>
+      </a>
 
       <div className="flex items-center gap-2 max-[560px]:justify-start">
         <Glossary />

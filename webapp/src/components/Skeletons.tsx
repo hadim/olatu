@@ -79,16 +79,13 @@ export function ChartsSkeleton() {
 
 export function StationLocationSkeleton() {
   return (
-    <section aria-hidden="true" className="mt-6 grid grid-cols-[minmax(240px,360px)_1fr] items-stretch gap-5 max-[720px]:grid-cols-1">
-      <Skel className="aspect-[16/10] w-full rounded-2xl" />
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] content-center gap-4 rounded-2xl border border-line px-[1.3rem] py-[1.1rem]">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="flex flex-col gap-2">
-            <Skel className="h-3 w-20" />
-            <Skel className="h-4 w-32" />
-          </div>
-        ))}
-      </div>
+    <section aria-hidden="true" className="mt-6 grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] content-center gap-4 rounded-2xl border border-line px-[1.3rem] py-[1.1rem]">
+      {Array.from({ length: 3 }).map((_, i) => (
+        <div key={i} className="flex flex-col gap-2">
+          <Skel className="h-3 w-20" />
+          <Skel className="h-4 w-32" />
+        </div>
+      ))}
     </section>
   );
 }
