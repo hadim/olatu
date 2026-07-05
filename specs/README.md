@@ -40,6 +40,7 @@ Ask this for **every** request or task (and when in doubt, **ask the owner**):
 | [0005 — Multi-buoy](2026-06-27-0005-multi-buoy.md) | Accepted | Add CANDHIS 06402 Anglet; finish the campaign parameterization (build.py); webapp buoy switch (segmented control + lazy map picker), top station bar, HF data-source surfacing |
 | [0006 — Stack migration & a11y](2026-06-28-0006-stack-migration-a11y.md) | Accepted | Pay down stack debt (theme/i18n/styling → Tailwind v4 + shadcn/Radix + Paraglide, full utility rewrite) + Phase-7 polish/mobile/a11y (chart fallback table, pinch-zoom, reduced-motion, ARIA, AA contrast) |
 | [0007 — Identity, home nav & attribution](2026-07-05-0007-identity-nav-attribution.md) | Implemented | One "O" wave-barrel logo (favicon + header), clickable home + headline, live buoy-aware locator map (scroll-zoom + fly-to), drop the redundant static mini-map & water-depth fact, unified data-source icon family, discreet footer build stamp |
+| [0008 — Tides (marées)](2026-07-05-0008-tides.md) | Accepted | Tide state in the banner + a dedicated chart panel: fetch api-maree.fr water levels (IFREMER/PREVIMER, CC-BY) in a new `ingest/tides.py`, derive high/low extrema into a forward-growing accumulator + `tides.json` tier on the HF bucket; runtime `lib/tides.ts` (raised-cosine phase + curve); marnage in metres (no coefficient); `API_MAREE_KEY` secret, ingest-only |
 | [LEARNINGS](LEARNINGS.md) | Living | Running log of significant findings (gzip/parquet, etc.) — update on every big finding |
 
 ## Conventions

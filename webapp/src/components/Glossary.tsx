@@ -18,6 +18,7 @@ const TERMS: { labelKey: MessageKey; defKey: MessageKey; src: string; rangeKey: 
   { labelKey: 'cc_direction', defKey: 'def_direction', src: 'DirPic · THETAP', rangeKey: 'gloss_range_direction' },
   { labelKey: 'cc_spread', defKey: 'def_spread', src: 'EtalPic · SIGMAP', rangeKey: 'gloss_range_spread' },
   { labelKey: 'cc_sea_temp', defKey: 'def_sea_temp', src: 'TempMer', rangeKey: 'gloss_range_sea_temp' },
+  { labelKey: 'tide_title', defKey: 'def_tide', src: 'api-maree.fr · IFREMER/PREVIMER', rangeKey: 'gloss_range_tide' },
 ];
 
 // Cardinal anchors of the cyclical direction hue (mirrors format.ts DIR_ANCHORS).

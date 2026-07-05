@@ -298,6 +298,9 @@ def build(src: Path, out: Path, campaign: str = CAMPAIGN_ID) -> None:
             "latest": "latest.json",
             "recent": "recent.json",
             "daily": "daily.parquet",
+            # Tide extrema (marée), written by ingest/tides.py from api-maree.fr (spec 0008).
+            # A static pointer: the webapp treats a 404 (no key / fetch failed) as "no tides".
+            "tides": "tides.json",
         },
     }
     mbytes = write_json(out / "manifest.json", manifest)

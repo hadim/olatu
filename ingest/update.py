@@ -43,6 +43,7 @@ import httpx
 
 from . import build as build_mod
 from . import scrape as scrape_mod
+from . import tides as tides_mod
 from .schema import CAMPAIGN_ID
 
 DEFAULT_REPO = "hadim/olatu"  # HF bucket id
@@ -137,8 +138,11 @@ def pull(work: Path, campaign: str, repo: str, token: str | None) -> None:
     raw = _raw_dir(work, campaign)
     raw.mkdir(parents=True, exist_ok=True)
     src = f"hf://buckets/{repo}/{campaign}/raw"
-    # The accumulator changes every run → always pull the freshest copy (HF canonical).
-    sync_bucket(src, str(raw), include=["*_reel.csv"], token=token, quiet=True)
+    # The forward-growing accumulators (reel + tides) change every run → always pull the
+    # freshest copy (HF canonical) so a local run can't regress what the cron advanced.
+    sync_bucket(
+        src, str(raw), include=["*_reel.csv", "*_tides.csv"], token=token, quiet=True
+    )
     # The archive is immutable → pull only if we don't already have it (CI caches it).
     if not list(raw.glob("*_arch.csv")):
         sync_bucket(src, str(raw), include=["*_arch.csv"], token=token, quiet=True)
@@ -160,11 +164,18 @@ def upload(work: Path, campaign: str, repo: str, token: str | None) -> None:
     sync_bucket(
         str(work / campaign),
         f"hf://buckets/{repo}/{campaign}",
-        include=["data/**", "raw/*_reel.csv"],  # never the immutable archive
+        # data/** covers tides.json; raw/*_tides.csv is the forward-growing tide accumulator.
+        include=[
+            "data/**",
+            "raw/*_reel.csv",
+            "raw/*_tides.csv",
+        ],  # never the immutable archive
         token=token,
         quiet=True,
     )
-    print(f"  uploaded {campaign}/data + {campaign}/raw/*_reel.csv to buckets/{repo}")
+    print(
+        f"  uploaded {campaign}/data + {campaign}/raw/*_{{reel,tides}}.csv to buckets/{repo}"
+    )
 
 
 # Buckets are non-versioned (overwrite-in-place), so a buggy run that corrupts the
@@ -239,6 +250,7 @@ def update(
     *,
     do_pull: bool = True,
     do_scrape: bool = True,
+    do_tides: bool = True,
     do_upload: bool = True,
     seed_src: Path | None = None,
     token=_RESOLVE_TOKEN,
@@ -261,6 +273,11 @@ def update(
 
     if do_scrape:
         scrape_mod.scrape(raw, campaign)
+
+    if do_tides:
+        # Refresh tide predictions (gated ~daily). Ingest-only: the key never reaches the
+        # webapp, which reads the derived tides.json. Missing key / failure is non-fatal.
+        tides_mod.refresh_tides(raw, data, campaign, os.environ.get(tides_mod.ENV_KEY))
 
     build_mod.build(raw, data, campaign)
 
@@ -311,6 +328,11 @@ def main() -> None:
         help="Skip the live scrape (just rebuild + upload)",
     )
     p.add_argument(
+        "--no-tides",
+        action="store_true",
+        help="Skip the tide refresh (api-maree.fr); build without touching tides.json",
+    )
+    p.add_argument(
         "--no-upload", action="store_true", help="Build locally without uploading"
     )
     p.add_argument(
@@ -342,6 +364,7 @@ def main() -> None:
                 work=args.work,
                 do_pull=do_pull,
                 do_scrape=not args.no_scrape,
+                do_tides=not args.no_tides,
                 do_upload=do_upload,
                 seed_src=args.seed_src,
                 token=token,

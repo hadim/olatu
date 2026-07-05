@@ -48,5 +48,11 @@ jobs:
       # All buoys in one job: one checkout, one env, and crucially ONE OIDC token
       # exchange shared across campaigns (avoids the per-buoy 429s). update.py refreshes
       # each buoy independently and exits non-zero if any failed (fail-fast off).
-      - name: Refresh every buoy (pull → scrape → build → upload to HF)
+      #
+      # API_MAREE_KEY (repo secret) feeds the tide refresh (ingest/tides.py, spec 0008). It
+      # is ingest-only — the derived tides.json is uploaded to the bucket, the key never
+      # ships to the webapp. If the secret is unset, the tide step logs + skips (non-fatal).
+      - name: Refresh every buoy (pull → scrape → tides → build → upload to HF)
+        env:
+          API_MAREE_KEY: ${{ secrets.API_MAREE_KEY }}
         run: pixi run -e data update --campaign 06403 06402 03302

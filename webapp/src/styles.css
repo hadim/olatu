@@ -34,6 +34,7 @@
   --c-period: #7cc4ff;
   --c-dir: #b59cf0;
   --c-temp: #ff8a5b;
+  --c-tide: #5b8ff5; /* tide/marée — a deeper indigo-blue, distinct from the sky-blue period */
   color-scheme: dark;
 }
 
@@ -57,6 +58,7 @@
   --c-period: #2e7fc4;
   --c-dir: #7a4fc0;
   --c-temp: #e85c2b;
+  --c-tide: #2f6fd0; /* tide/marée */
   color-scheme: light;
 }
 
@@ -87,6 +89,7 @@
   --color-period: var(--c-period);
   --color-dir: var(--c-dir);
   --color-temp: var(--c-temp);
+  --color-tide: var(--c-tide);
 }
 
 /* ---- base ---- */

@@ -20,6 +20,14 @@ SENTINEL_MIN = 999.99
 # Per-buoy identity, keyed by CANDHIS campaign id. The default campaign is 06403 (the
 # original Saint-Jean-de-Luz buoy); 06402 (Anglet) was added in spec 0005. The CANDHIS
 # data dialect is identical across campaigns, so only this table differs per buoy.
+# Tide (marée) config, per buoy -- see specs/2026-07-05-0008-tides.md.
+#   tide_site       api-maree.fr `/water-levels` site id. VALIDATE against `/sites` once a
+#                   key exists (values below are best guesses); a bad/absent site just makes
+#                   the fetch fail -> the buoy shows the tide empty-state, never a crash.
+#   tide_range_ref  neap->spring marnage envelope (metres) for the "big tide?" gauge. These
+#                   are REGIONAL constants (not derived from the fetched J+/-30 window, which
+#                   spans ~one spring-neap cycle and would mislabel a monthly max). Retune
+#                   per station once real extrema are observed.
 BUOYS = {
     "06403": {
         "campaign_id": "06403",
@@ -33,6 +41,9 @@ BUOYS = {
         "cadence_minutes": 30,
         "water_depth_m": None,  # not published in open docs
         "timezone": "Europe/Paris",
+        "tide_site": "socoa",  # Socoa is the SHOM reference port for Saint-Jean-de-Luz
+        "tide_site_label": "Socoa (Saint-Jean-de-Luz)",
+        "tide_range_ref": {"neap": 1.2, "spring": 4.5},
     },
     "06402": {
         "campaign_id": "06402",
@@ -46,6 +57,9 @@ BUOYS = {
         "cadence_minutes": 30,
         "water_depth_m": None,  # not published in open docs
         "timezone": "Europe/Paris",
+        "tide_site": "boucau-bayonne-biarritz",  # Adour mouth, at Anglet
+        "tide_site_label": "Boucau-Bayonne (Anglet)",
+        "tide_range_ref": {"neap": 1.2, "spring": 4.5},
     },
     # 03302 Cap Ferret (Gironde / Arcachon). Added realtime-only (no downloaded archive
     # yet) -- its history accumulates forward from the scraper's first run (spec 0005).
@@ -61,6 +75,9 @@ BUOYS = {
         "cadence_minutes": 30,
         "water_depth_m": None,  # not published in open docs
         "timezone": "Europe/Paris",
+        "tide_site": "arcachon-eyrac",  # Arcachon basin (Eyrac); or "cap-ferret" -- validate
+        "tide_site_label": "Arcachon",
+        "tide_range_ref": {"neap": 1.3, "spring": 4.6},
     },
 }
 

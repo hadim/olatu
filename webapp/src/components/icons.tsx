@@ -22,6 +22,8 @@ export const ICON_PATHS = {
   spread: '<path d="M12 4l-6 12M12 4l6 12"/><path d="M6 16a8 8 0 0 0 12 0"/>',
   /** Sea temperature — a thermometer. */
   temp: '<path d="M14 14.76V5a2 2 0 0 0-4 0v9.76a4 4 0 1 0 4 0z"/>',
+  /** Tide (marée) — a swell crest over two shore/datum lines (water level rising/falling). */
+  tide: '<path d="M2 9c2.4 0 2.4 3 4.8 3S9.2 9 11.6 9 14 12 16.4 12 18.8 9 21.2 9"/><path d="M3 15.5h18"/><path d="M3 19h18"/>',
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;
@@ -52,6 +54,7 @@ export const MaxWaveIcon = (p: IconProps) => <Icon {...p} name="maxWave" />;
 export const PeriodIcon = (p: IconProps) => <Icon {...p} name="period" />;
 export const DirectionIcon = (p: IconProps) => <Icon {...p} name="direction" />;
 export const TempIcon = (p: IconProps) => <Icon {...p} name="temp" />;
+export const TideIcon = (p: IconProps) => <Icon {...p} name="tide" />;
 
 /** Raw `<svg>` markup for DOM/innerHTML contexts (the uPlot panel titles + hover card). */
 export function iconSvg(name: IconName, opts: { size?: number; color?: string; className?: string } = {}): string {

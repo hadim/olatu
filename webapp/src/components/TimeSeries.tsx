@@ -24,6 +24,7 @@ import { m } from '@/paraglide/messages';
 import { cn } from '@/lib/utils';
 import { compass, dirColor, fmtNumber, fmtDateTime, fmtAxisTick } from '../lib/format';
 import { loadParquetTier, type Columnar } from '../lib/parquet';
+import { marnageSeries, marnageAt, type Tides } from '../lib/tides';
 import { iconSvg, type IconName } from './icons';
 import { touchZoomPlugin } from '../lib/uplotTouch';
 import HeatRibbon from './HeatRibbon';
@@ -138,6 +139,7 @@ interface PanelDef {
   titleKey: MessageKey;
   series: { key: string; colorVar: string; width?: number; fill?: boolean }[];
   glyph?: boolean; // direction: single centred arrow row, no linear y-axis
+  tide?: boolean; // marée: an external reconstructed curve + PM/BM markers (spec 0008)
   zeroBased?: boolean; // y-axis anchored at 0 (spread magnitude)
   glued?: boolean; // no top gap — sits flush under the panel above
   emptyKey?: MessageKey;
@@ -164,6 +166,17 @@ const PANELS: PanelDef[] = [
     series: [{ key: 'peak_directional_spread_deg', colorVar: '--c-dir', width: 1.5 }],
     zeroBased: true,
     glued: true,
+  },
+  {
+    // Tide (marée): the MARNAGE (tidal range, m) over time — a slowly-varying spring↔neap
+    // signal (not the fast water-level curve), fed from tides.json (external to the wave
+    // Columnar) and accumulating with the tide history. Empty-state only where there's no
+    // tide data. Second-to-last so temp keeps the shared x-axis.
+    titleKey: 'tide_marnage',
+    series: [{ key: 'tide', colorVar: '--c-tide', width: 2, fill: true }],
+    tide: true,
+    zeroBased: true,
+    emptyKey: 'tide_chart_empty',
   },
   {
     titleKey: 'cc_sea_temp',
@@ -249,6 +262,7 @@ const PANEL_ICON: Partial<Record<MessageKey, IconName>> = {
   cc_direction: 'direction',
   cc_spread: 'spread',
   cc_sea_temp: 'temp',
+  tide_marnage: 'tide',
 };
 
 const DETAIL_COLUMNS = [
@@ -278,7 +292,7 @@ function mergeColumnar(parts: Columnar[]): Columnar {
   return out;
 }
 
-export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles, lastT }: { campaign: string; data: Columnar; tz: string; yearFiles: Record<number, string>; hourlyFiles: Record<number, string>; lastT?: number }) {
+export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles, lastT, tides }: { campaign: string; data: Columnar; tz: string; yearFiles: Record<number, string>; hourlyFiles: Record<number, string>; lastT?: number; tides: Tides | null }) {
   const { theme } = useTheme();
   const { locale } = useLocale();
   const hostRef = useRef<HTMLDivElement>(null);
@@ -491,6 +505,14 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
       return [lo - d * f, hi + d * f];
     };
 
+    // Tide (marée) panel data (spec 0008): the MARNAGE (tidal range, m) over time — a
+    // spring↔neap signal that reads at any zoom and accumulates with the tide history.
+    // The full series is built once; uPlot clips it to the window. Hover shows the marnage
+    // of the bracketing cycle; the empty-state shows only where no tide data lands.
+    const tideMarnage = tides ? marnageSeries(tides.events) : { t: [] as number[], m: [] as (number | null)[] };
+    const tideColor = cssVar('--c-tide');
+    const tideInWindow = tideMarnage.t.some((s, i) => s >= xmin && s <= xmax && tideMarnage.m[i] != null);
+
     // Insert null break-points across real outages so the line never bridges a gap
     // (daily.parquet omits empty days). gxs/gcols are the gap-aware arrays the charts
     // AND the hover card read from — uPlot's cursor idx indexes into these.
@@ -535,6 +557,14 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
         const icon = iconSvg(cm.icon, { className: 'shrink-0', color: `var(${cm.colorVar})` });
         chips.push(
           `<span class="inline-flex items-center gap-[0.35rem]">${icon}<span class="text-[0.68rem] uppercase tracking-[0.05em] text-faint">${m[cm.labelKey]()}</span><span class="font-mono text-[0.84rem] text-muted">${val}</span></span>`,
+        );
+      }
+      // Marnage of the tide cycle at the hovered time (from the extrema, not in gcols).
+      const tm = tides ? marnageAt(tides.events, gxs[idx]) : null;
+      if (tm != null) {
+        const icon = iconSvg('tide', { className: 'shrink-0', color: 'var(--c-tide)' });
+        chips.push(
+          `<span class="inline-flex items-center gap-[0.35rem]">${icon}<span class="text-[0.68rem] uppercase tracking-[0.05em] text-faint">${m.tide_marnage()}</span><span class="font-mono text-[0.84rem] text-muted">${fmtNumber(tm, locale, 1)} m</span></span>`,
         );
       }
       return chips.join('');
@@ -584,6 +614,26 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
         hi: Number.isFinite(hi) ? fmt(hi) : '—',
       };
     });
+    // Tide row: marnage (m) min/max/latest across the window, when it has tide data.
+    if (tideInWindow) {
+      let lo = Infinity;
+      let hi = -Infinity;
+      let latest: number | null = null;
+      for (let i = 0; i < tideMarnage.t.length; i++) {
+        const s = tideMarnage.t[i];
+        const v = tideMarnage.m[i];
+        if (v == null || s < xmin || s > xmax) continue;
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+        latest = v;
+      }
+      summaryRows.push({
+        label: m.tide_marnage(),
+        latest: latest == null ? '—' : `${fmtNumber(latest, locale, 1)} m`,
+        lo: Number.isFinite(lo) ? `${fmtNumber(lo, locale, 1)} m` : '—',
+        hi: Number.isFinite(hi) ? `${fmtNumber(hi, locale, 1)} m` : '—',
+      });
+    }
     setSummary(summaryRows);
 
     PANELS.forEach((panel, idx) => {
@@ -622,14 +672,25 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
         }
         return false;
       };
-      const hasData = panel.series.some((srs) => inWindow(srs.key));
+      const hasData = panel.tide ? tideInWindow : panel.series.some((srs) => inWindow(srs.key));
 
       const plotted = (key: string) => movingAvg(gcols[key], radius);
 
       let chartData: uPlot.AlignedData;
       let series: uPlot.Series[];
 
-      if (panel.glyph) {
+      if (panel.tide) {
+        // External marnage-over-time series (smoothed by the Raw/Light/Strong control like
+        // the wave panels). No tide data anywhere → keep the shared x so it's a framed,
+        // empty panel (like temp) and the overlay shows.
+        chartData = tideMarnage.t.length
+          ? [tideMarnage.t, movingAvg(tideMarnage.m, radius)]
+          : [gxs, gxs.map(() => null) as (number | null)[]];
+        series = [
+          {},
+          { label: 'tide', stroke: tideColor, width: 2, fill: `${tideColor}22`, value: (_u, v) => (v == null ? '—' : `${v.toFixed(1)} m`) },
+        ];
+      } else if (panel.glyph) {
         // Direction: no linear y-axis (it's cyclical). A constant series (0.5 on a [0,1]
         // scale) feeds uPlot's cursor index and pins the crosshair dot to the centred
         // row; the arrows themselves are painted in the draw hook. Rotation + colour carry
@@ -682,7 +743,10 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
       };
 
       const hooks: uPlot.Hooks.Arrays = {
-        setCursor: [(u) => renderCard(u.cursor.idx)],
+        // The tide panel's x-data differs from the wave gxs, so its cursor idx would corrupt
+        // the shared (gxs-indexed) hover card. Leave its setCursor empty and let the x-synced
+        // wave panels drive the card; hovering the tide panel still moves every crosshair.
+        setCursor: panel.tide ? [] : [(u) => renderCard(u.cursor.idx)],
         setScale: [
           (u, key) => {
             if (key !== 'x' || syncing) return;
@@ -792,7 +856,7 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
       plotsRef.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, detail, theme, locale, range.min, range.max, smooth, tz]);
+  }, [data, detail, theme, locale, range.min, range.max, smooth, tz, tides]);
 
   return (
     <section className="mt-6">

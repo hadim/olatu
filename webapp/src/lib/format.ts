@@ -31,6 +31,11 @@ export function fmtClock(ms: number, locale: Locale, timeZone: string): string {
   }).format(new Date(ms));
 }
 
+/** Time-of-day only (HH:MM) in the buoy's zone — for tide extrema labels. */
+export function fmtTimeOfDay(ms: number, locale: Locale, timeZone: string): string {
+  return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', timeZone }).format(new Date(ms));
+}
+
 /** Full date + time for the chart hover card, e.g. "12 Jan 2024, 14:30". */
 export function fmtDateTime(ms: number, locale: Locale, timeZone: string): string {
   return new Intl.DateTimeFormat(locale, {

@@ -24,6 +24,8 @@ a spec?"* — if yes, create/update one (see "When does work need a spec?" in
   vision, **chosen stack**, data-ops, feature spec, UX direction, **roadmap (7 phases)**
 - [specs/2026-06-27-0002-data-dictionary.md](specs/2026-06-27-0002-data-dictionary.md) —
   canonical schema + plain-language definition of every variable
+- [specs/2026-07-05-0008-tides.md](specs/2026-07-05-0008-tides.md) — tide (marée) feature:
+  api-maree.fr fetch, extrema accumulator, `tides.json` tier, banner strip + chart panel
 
 ## Layout
 
@@ -31,8 +33,9 @@ a spec?"* — if yes, create/update one (see "When does work need a spec?" in
 ingest/        Python (polars). NOT an installable package. All steps take --campaign.
   schema.py    per-buoy identity registry (BUOYS) + column mapping, units, sentinel, headline/direction vars
   scrape.py    fetch the CANDHIS realtime HTML table -> per-year reel CSV (coalesce-merge)
+  tides.py     fetch api-maree.fr water levels -> high/low extrema -> tides.json (spec 0008; needs API_MAREE_KEY)
   build.py     CSV -> tiered Parquet/JSON (archive-preferred coalesce)
-  update.py    pull → scrape → build → upload to the HF bucket (OIDC in CI) + daily reel snapshot
+  update.py    pull → scrape → tides → build → upload to the HF bucket (OIDC in CI) + daily reel snapshot
 pixi.toml      Python env + frontend tasks (no pyproject; no Python library)
 webapp/        the frontend (reads data tiers from the HF bucket at runtime)
 specs/         decisions
@@ -41,7 +44,8 @@ specs/         decisions
 
 > **Data lives in the HF *bucket* `hadim/olatu`, NOT in git** (see specs/0004; migrated
 > from a dataset repo 2026-06-30). Layout: `<campaign>/raw/*.csv` (archive + reel
-> accumulator) + `<campaign>/data/…` (manifest/latest/recent.json, year/*.parquet,
+> accumulator + `*_tides.csv` tide-extrema accumulator) + `<campaign>/data/…`
+> (manifest/latest/recent.json, `tides.json`, year/*.parquet,
 > hourly/*.parquet per year, daily.parquet) + `<campaign>/backup/<UTC-date>/*_reel.csv` (daily reel snapshots,
 > 14-day retention — buckets are non-versioned so this is the only rollback). The webapp
 > fetches `…/buckets/hadim/olatu/resolve/<campaign>/data/…` (public, CORS, range — **no
@@ -74,6 +78,13 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
 - **43 archive columns are 100% empty for 06403** (QUALITE, NBSYS, S1–S4) → dropped.
 - **Sea temperature exists only in the realtime feed** → history has none; it
   accumulates forward. Handle missing-temp as a first-class UI state, not an empty chart.
+- **Tides (marée, spec 0008)** come from **api-maree.fr** (needs the `API_MAREE_KEY` env /
+  GitHub secret — **ingest-only**, never in the client). `ingest/tides.py` derives high/low
+  extrema into `raw/<campaign>_tides.csv` (forward-growing, like the reel) + `data/tides.json`;
+  the webapp (`lib/tides.ts`) reconstructs the curve (raised-cosine). Predictions only cover
+  ~±30 days → older windows show the empty-state (like temp). Marnage in **metres**, no
+  coefficient. Missing key/site is non-fatal (tide step skips). Retune `tide_site` /
+  `tide_range_ref` in `schema.py BUOYS` once validated against api-maree.fr `/sites`.
 - **Series has real gaps** (largest 50 days) → break the line, never interpolate across.
 - **GitHub Pages base path:** fetch webapp assets via `import.meta.env.BASE_URL`,
   never a leading `/`. **Data tiers are different** — fetch them via
@@ -189,6 +200,20 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   discreet build stamp** (`Build <sha> · <date>`, links to the GH commit): sha+date read
   from git in `vite.config.js` via `execFileSync` and inlined with Vite `define`
   (`__COMMIT_HASH__` / `__COMMIT_DATE__`, typed in `vite-env.d.ts`).
+
+- **Tides (marée) shipped** (2026-07-05, specs/0008): `ingest/tides.py` fetches
+  **api-maree.fr** `/water-levels` (IFREMER/PREVIMER, CC-BY; `API_MAREE_KEY`, ingest-only)
+  and derives high/low **extrema** into a forward-growing `raw/<campaign>_tides.csv` +
+  `data/tides.json` tier on the HF bucket (gated ~daily by a forward-horizon check).
+  Runtime `webapp/src/lib/tides.ts` (raised-cosine `tidePhase` + `reconstructCurve`) feeds:
+  a **banner tide strip** (`TideStrip.tsx` — arc marker riding the cycle, phase word, next
+  PM/BM + live countdown, **marnage in m** + neap↔spring bar, **no coefficient**) and a
+  **dedicated synced chart panel** in `TimeSeries.tsx` plotting **marnage over time** (the
+  spring↔neap envelope, `marnageSeries`; `--c-tide` indigo, zero-based, smoothing-aware;
+  marnage in the hover card + summary; empty-state only where no tide data — no span cap, so
+  it accumulates like the swell/temp history). Attribution in the footer + glossary.
+  **Owner TODO:** create the api-maree.fr
+  account, add the `API_MAREE_KEY` GitHub secret, and validate `tide_site` ids via `/sites`.
 
 Next per roadmap: side-by-side buoy comparison (0005 left it out), and the per-locale
 **glossary JSON** + CI **key-parity** check (0001 §8) — the glossary still lives inline in

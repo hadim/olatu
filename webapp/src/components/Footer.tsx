@@ -1,10 +1,12 @@
 import { useLocale } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
 import { GitHubMark, HuggingFaceMark, BuoyMark } from './brands';
+import { TideIcon } from './icons';
 
 const REPO_URL = 'https://github.com/hadim/olatu';
 const HF_URL = 'https://huggingface.co/buckets/hadim/olatu';
 const CANDHIS_URL = 'https://candhis.cerema.fr';
+const TIDE_URL = 'https://api-maree.fr';
 const LINK = 'inline-flex items-center gap-1.5 text-muted no-underline transition-colors hover:text-accent';
 
 // Build stamp: format the deployed commit's calendar date in the active locale. Uses a
@@ -51,6 +53,11 @@ export default function Footer() {
         <a className={LINK} href={CANDHIS_URL} target="_blank" rel="noopener noreferrer">
           <BuoyMark size={16} />
           <span>{m.footer_data_by()} Cerema / CANDHIS</span>
+        </a>
+        <Sep />
+        <a className={LINK} href={TIDE_URL} target="_blank" rel="noopener noreferrer" title={m.tide_source()}>
+          <TideIcon size={15} />
+          <span>api-maree.fr</span>
         </a>
       </div>
 

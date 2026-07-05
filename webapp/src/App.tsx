@@ -7,7 +7,8 @@ import Footer from './components/Footer';
 import { BannerSkeleton, ChartsSkeleton, StationLocationSkeleton } from './components/Skeletons';
 import { useLocale } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
-import { loadManifest, loadLatest, loadRecent, type Manifest, type Series } from './lib/data';
+import { loadManifest, loadLatest, loadRecent, loadTides, type Manifest, type Series } from './lib/data';
+import type { Tides } from './lib/tides';
 import { loadParquetTier, type Columnar } from './lib/parquet';
 import { initialCampaign, persistCampaign, campaignUrl } from './lib/buoys';
 
@@ -59,6 +60,9 @@ export default function App() {
   const [data, setData] = useState<Loaded | null>(null);
   const [history, setHistory] = useState<{ campaign: string; cols: Columnar } | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  // Tide extrema (marée). Best-effort + campaign-tagged like `history`; absent for a buoy
+  // with no key/site, in which case the banner strip + chart panel show the empty-state.
+  const [tides, setTides] = useState<{ campaign: string; tides: Tides } | null>(null);
   const [error, setError] = useState<string | null>(null);
   // The build's stamp; used to detect when the HF dataset has a fresh upload so a
   // background refresh only swaps state when there is genuinely something new.
@@ -154,6 +158,7 @@ export default function App() {
   // is what makes a buoy switch race-free (no new-campaign + old-manifest pairing).
   const ready = data && data.campaign === campaign ? data : null;
   const histCols = history && history.campaign === campaign ? history.cols : null;
+  const tideData = tides && tides.campaign === campaign ? tides.tides : null;
 
   // Reflect the selected buoy in the tab/title (nice for shared ?buoy= links). The
   // static index.html keeps the keyword-rich title for crawlers that don't run JS, and
@@ -196,6 +201,25 @@ export default function App() {
     };
   }, [campaign]);
 
+  // Per-campaign tide extrema. Best-effort: a 404 (buoy has no key/site) just leaves the
+  // tide UI in its empty-state. Static extrema cover ~a month ahead, so — unlike the live
+  // banner tiers — they aren't reloaded on the 5-min refresh; the phase interpolates
+  // client-side and ticks via useNow.
+  useEffect(() => {
+    let cancelled = false;
+    setTides(null);
+    loadTides(campaign)
+      .then((t) => {
+        if (!cancelled) setTides({ campaign, tides: t });
+      })
+      .catch(() => {
+        if (!cancelled) setTides(null); // no tides for this buoy — empty-state handles it
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [campaign]);
+
   return (
     <div className="mx-auto max-w-[1100px] px-5 pb-12 pt-5">
       <Header />
@@ -221,7 +245,7 @@ export default function App() {
 
         {ready && (
           <>
-            <CurrentConditions latest={ready.latest} manifest={ready.manifest} />
+            <CurrentConditions latest={ready.latest} manifest={ready.manifest} tides={tideData} />
 
             {histCols ? (
               <TimeSeries
@@ -232,6 +256,7 @@ export default function App() {
                 lastT={lastT}
                 yearFiles={yearFiles}
                 hourlyFiles={hourlyFiles}
+                tides={tideData}
               />
             ) : historyError ? (
               <div className="mt-8 text-base text-danger">{m.state_charts_error()}</div>

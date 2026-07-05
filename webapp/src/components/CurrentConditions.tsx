@@ -6,6 +6,8 @@ import { compass, dirColor, fmtNumber, fmtClock, freshness, relativeAgo, type Fr
 import { useNow } from '../lib/useNow';
 import { WaveHeightIcon, MaxWaveIcon, PeriodIcon, DirectionIcon, TempIcon } from './icons';
 import InfoPopover from './InfoPopover';
+import TideStrip from './TideStrip';
+import type { Tides } from '../lib/tides';
 
 const LABEL_ICON = 'mr-1.5 shrink-0';
 
@@ -95,7 +97,7 @@ function StalenessBadge({ fresh, stampMs, tz, now }: { fresh: Freshness; stampMs
   );
 }
 
-export default function CurrentConditions({ latest, manifest }: { latest: Series; manifest: Manifest }) {
+export default function CurrentConditions({ latest, manifest, tides }: { latest: Series; manifest: Manifest; tides: Tides | null }) {
   const { locale } = useLocale();
   const tz = manifest.timezone;
   const now = useNow(30_000);
@@ -170,6 +172,8 @@ export default function CurrentConditions({ latest, manifest }: { latest: Series
           </div>
         </div>
       </div>
+
+      <TideStrip tides={tides} tz={tz} />
     </section>
   );
 }
