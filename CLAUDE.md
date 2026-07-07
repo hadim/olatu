@@ -114,6 +114,12 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   (`build.read_archive` returns None, history accumulates forward). Drop archive CSVs into the
   campaign's `raw/` later to backfill (they coalesce) — this is how Cap Ferret went from
   realtime-only to full history from 2010.
+- **Analytics/consent (spec 0011)** is consent-gated: `webapp/src/lib/analytics.ts` injects
+  gtag (GA4 `G-XWQEVH6TD8`) **only after an explicit Accept** — never load a tracker before
+  consent, and keep Consent Mode ad signals denied. The gtag shim pushes the raw `arguments`
+  object; don't "clean it up" into a spread array (GA won't parse it). **Legal pages** are
+  hash routes (`#/privacy` etc., `webapp/src/lib/route.ts`) — path routing would break the
+  relative Vite `base`; keep new static pages on the hash router.
 - **Tides (marée, spec 0008)** come from **api-maree.fr** — needs `API_MAREE_KEY` (env / GitHub
   secret, **ingest-only, never in the client**). Keyed by **port, not buoy**
   (`schema.TIDE_PORTS` + `resolve_tide_port`: each buoy → nearest curated port ≤ `TIDE_MAX_KM=40`,
@@ -124,7 +130,7 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
 
 ## Status
 
-Shipped and live at **olatu.io** — foundation → PWA (specs 0001–0010). The full
+Shipped and live at **olatu.io** — foundation → PWA → analytics/legal (specs 0001–0011). The full
 feature-by-feature history is in **[docs/HISTORY.md](docs/HISTORY.md)**; the spec index +
 statuses are in [specs/README.md](specs/README.md).
 

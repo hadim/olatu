@@ -9,6 +9,31 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-07-07 — Analytics, consent & legal pages (spec 0011)
+
+Consent-gated **Google Analytics 4** (`G-XWQEVH6TD8`) + the site's legal surface.
+`webapp/src/lib/analytics.ts` is a reactive consent store (`localStorage` `olatu.consent`,
+`useSyncExternalStore`) that **injects gtag only after an explicit Accept** — nothing hits
+Google before consent (stronger than default Consent Mode). Consent Mode v2 signals are set
+(`analytics_storage` granted; `ad_storage`/`ad_user_data`/`ad_personalization` **denied**),
+`anonymize_ip` on. The gtag shim must push the raw `arguments` object (GA requirement), so
+it's a plain function cast to a variadic signature — **don't spread into an array**, GA won't
+parse it. `ConsentBanner.tsx` is a persisted, revocable Accept/Decline bar (Decline as
+prominent as Accept); the privacy page embeds the same controls to change your mind.
+
+Three EN/FR/ES pages — **mentions légales / privacy / contact** — live in
+`webapp/src/pages/LegalPage.tsx`, reached via a tiny **hash router** (`webapp/src/lib/route.ts`,
+`#/privacy`) chosen over path routing because the Vite `base` is relative (`./`) — path routes
+would break asset resolution and need a GH-Pages `404.html`; hash routes need zero config and
+work offline in the PWA. `App.tsx` swaps the dashboard for `<LegalPage>` off-route
+(Header/Footer/ConsentBanner shared); footer gains a Legal · Privacy · Contact row. Editor =
+**Hadrien Mary** (personal, non-commercial), contact **via GitHub** (no email), host GitHub
+Pages. GA4 measurement ID is public → hard-coded, **no CI/secret change**. Verified end-to-end
+(Playwright): no Google request pre-consent; Accept → gtag 200 + `page_view` with
+`anonymize_ip`, `gcs=G101`. **Dev gotcha:** the old PWA service worker stale-serves the prior
+bundle until it auto-updates — unregister the SW / clear caches after a rebuild when verifying
+locally.
+
 ## 2026-07-05 — Installable PWA (spec 0010)
 
 Olatu is installable (Add to Home Screen) on Android/iOS/desktop with an offline app shell,

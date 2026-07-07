@@ -4,7 +4,11 @@ import StationBar from './components/StationBar';
 import CurrentConditions from './components/CurrentConditions';
 import TimeSeries from './components/TimeSeries';
 import Footer from './components/Footer';
+import ConsentBanner from './components/ConsentBanner';
+import LegalPage from './pages/LegalPage';
 import { BannerSkeleton, ChartsSkeleton, StationLocationSkeleton } from './components/Skeletons';
+import { useRoute } from '@/lib/route';
+import { initAnalytics } from '@/lib/analytics';
 import { useLocale } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
 import { loadManifest, loadLatest, loadRecent, loadTidesForManifest, type Manifest, type Series } from './lib/data';
@@ -56,7 +60,14 @@ function StationFacts({ manifest }: { manifest: Manifest }) {
 
 export default function App() {
   useLocale();
+  const route = useRoute();
   const [campaign, setCampaignState] = useState<string>(initialCampaign);
+
+  // Restore analytics for a returning visitor who already granted consent (no-op otherwise;
+  // the gtag script is never fetched before an explicit "Accept"). See spec 0011.
+  useEffect(() => {
+    initAnalytics();
+  }, []);
   const [data, setData] = useState<Loaded | null>(null);
   const [history, setHistory] = useState<{ campaign: string; cols: Columnar } | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -228,6 +239,17 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tidePort]);
 
+  if (route !== 'home') {
+    return (
+      <div className="mx-auto max-w-[1100px] px-5 pb-12 pt-5">
+        <Header />
+        <LegalPage route={route} />
+        <Footer />
+        <ConsentBanner />
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-[1100px] px-5 pb-12 pt-5">
       <Header />
@@ -281,6 +303,7 @@ export default function App() {
       </main>
 
       <Footer />
+      <ConsentBanner />
     </div>
   );
 }

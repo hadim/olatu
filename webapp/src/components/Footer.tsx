@@ -2,6 +2,7 @@ import { useLocale } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
 import { GitHubMark, HuggingFaceMark, BuoyMark } from './brands';
 import { TideIcon } from './icons';
+import { routeHref } from '@/lib/route';
 
 const REPO_URL = 'https://github.com/hadim/olatu';
 const HF_URL = 'https://huggingface.co/buckets/hadim/olatu';
@@ -58,6 +59,21 @@ export default function Footer() {
         <a className={LINK} href={TIDE_URL} target="_blank" rel="noopener noreferrer" title={m.tide_source()}>
           <TideIcon size={15} />
           <span>api-maree.fr</span>
+        </a>
+      </div>
+
+      {/* Legal pages (spec 0011) — hash routes, so no reload / no server config. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+        <a className={LINK} href={routeHref('legal')}>
+          {m.footer_legal()}
+        </a>
+        <Sep />
+        <a className={LINK} href={routeHref('privacy')}>
+          {m.footer_privacy()}
+        </a>
+        <Sep />
+        <a className={LINK} href={routeHref('contact')}>
+          {m.footer_contact()}
         </a>
       </div>
 
