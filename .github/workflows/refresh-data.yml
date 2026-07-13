@@ -26,6 +26,12 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    # A refresh takes ~20-60s. Cap it well above that but far below the 6h default: when HF
+    # stalls mid-read, the job would otherwise hang for hours AND — because the concurrency
+    # group above never cancels in progress — queue every subsequent cron behind it, so one
+    # outage silently stops the data pipeline entirely. Bounded here and, more precisely,
+    # per network step by ingest/ui.py's watchdog (which dumps stacks before it dies).
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 

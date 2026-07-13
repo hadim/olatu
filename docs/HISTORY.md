@@ -9,6 +9,33 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-07-13 — Data refresh survives an HF outage (resilience + diagnosability)
+
+Hardened `ingest/` after a Hugging Face Xet outage failed one refresh and **hung the next
+for 20+ min**, wedging the cron queue (full diagnosis in
+[LEARNINGS](../specs/LEARNINGS.md#2026-07-13--an-hf-xet-outage-hung-the-refresh-a-hang-with-no-stack-is-the-real-bug)).
+
+- **`ui.watchdog(seconds, label)`** — bounds any network step. On expiry it prints the step,
+  **dumps every thread's stack** (top frame = the stuck call) and hard-exits `75`. A hang is
+  now as readable as a crash. `OLATU_NET_TIMEOUT` (default 600s, `0` disables — seeding a
+  bucket legitimately takes minutes).
+- **`update._net(label, fn, …)`** — every bucket call now goes through one named wrapper:
+  watchdog + exponential-backoff retry of **transport** faults (reset/timeout), giving up as
+  a `RuntimeError` that `main()` already catches per campaign. It also warns when a step is
+  merely *slow* (≥30s) — the early warning for the next outage.
+- **`_post_with_retry` retries connection errors**, not just 429/5xx. The outage's
+  `ConnectError: Connection reset by peer` hit the OIDC exchange — the run's *first* call —
+  and used to take all three buoys down before any work began.
+- **Self-healing mirror** — `pull()` deletes and **re-fetches** 0-byte archives (a pull killed
+  mid-download); `build._read_raw_csv` replaces polars' bare `NoDataError: empty CSV` with the
+  filename and the fix.
+- **`timeout-minutes: 15`** on the refresh job (runs take 20–60s), so a hang can never again
+  queue every later cron behind it (`concurrency` is `cancel-in-progress: false` by design).
+- **Run-context line** at the top of every run: bucket, `huggingface_hub` version, auth source
+  (OIDC / `HF_TOKEN` / local login), `API_MAREE_KEY` presence, net timeout.
+
+---
+
 ## 2026-07-07 — Analytics, consent & legal pages (spec 0011)
 
 Consent-gated **Google Analytics 4** (`G-XWQEVH6TD8`) + the site's legal surface.

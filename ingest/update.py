@@ -60,6 +60,17 @@ HF_AUD = "https://huggingface.co"
 # retry, so a single transient blip aborts the whole run. Back off and retry.
 _RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 
+# A *transport* fault (reset, refused, timeout) is as transient as a 5xx and must retry the
+# same way. It didn't: on 2026-07-13 HF dropped connections mid-handshake and the run died
+# on the very first call with `ConnectError: Connection reset by peer`, before any buoy was
+# touched. httpx.TransportError covers Connect/Read/Write/Pool errors + protocol resets;
+# OSError catches the same faults when they surface from huggingface_hub's own stack.
+_TRANSIENT = (httpx.TransportError, OSError)
+
+# Upper bound on any single network step. HF stalling mid-read used to hang the run
+# forever (see ui.watchdog); 10 min is ~20x a healthy full-archive pull. 0 disables.
+NET_TIMEOUT_S = float(os.environ.get("OLATU_NET_TIMEOUT", "600"))
+
 # Sentinel: lets update() resolve its own token (library use) while main() resolves
 # once and shares it across campaigns (one OIDC exchange per run, not one per buoy).
 _RESOLVE_TOKEN = object()
@@ -69,17 +80,65 @@ _RESOLVE_TOKEN = object()
 
 
 def _post_with_retry(url: str, *, attempts: int = 5, **kwargs) -> httpx.Response:
-    """POST, retrying transient 429/5xx with Retry-After-aware exponential backoff."""
-    resp = httpx.post(url, **kwargs)
-    for i in range(attempts - 1):
-        if resp.status_code not in _RETRY_STATUS:
+    """POST, retrying transient faults — 429/5xx *and* connection errors — with backoff.
+
+    Retrying only status codes isn't enough: a reset peer raises instead of answering, and
+    that exception used to escape and abort the whole refresh (2026-07-13). Both paths back
+    off the same way; the status path honours Retry-After.
+    """
+    last: Exception | None = None
+    for i in range(attempts):
+        try:
+            resp = httpx.post(url, **kwargs)
+        except _TRANSIENT as e:
+            last = e
+            if i == attempts - 1:
+                break
+            delay = 2.0**i
+            ui.warn(f"HF unreachable ({type(e).__name__}); retrying in {delay:.0f}s")
+            time.sleep(delay)
+            continue
+        # Last attempt: hand the response back so the caller reports the real status.
+        if resp.status_code not in _RETRY_STATUS or i == attempts - 1:
             return resp
         retry_after = resp.headers.get("retry-after", "")
         delay = float(retry_after) if retry_after.isdigit() else 2.0**i
         ui.warn(f"HF returned {resp.status_code}; retrying in {delay:.0f}s")
         time.sleep(delay)
-        resp = httpx.post(url, **kwargs)
-    return resp
+    raise RuntimeError(f"HF unreachable after {attempts} attempts: {last!r}")
+
+
+# --------------------------------------------------------------------- resilience
+
+
+def _net(label: str, fn, *args, attempts: int = 3, **kwargs):
+    """Run one HF network step under a watchdog, retrying transient transport faults.
+
+    Every bucket call goes through here, so an outage produces a *named* failure ("pull
+    06403 failed after 3 attempts: ConnectError…") instead of a bare traceback or, worse,
+    silence. Retries raise RuntimeError on give-up, which main() catches per campaign — one
+    buoy's blip no longer takes the other two down with it.
+    """
+    with ui.watchdog(NET_TIMEOUT_S, label):
+        t0 = time.perf_counter()
+        for i in range(attempts):
+            try:
+                out = fn(*args, **kwargs)
+                break
+            except _TRANSIENT as e:
+                if i == attempts - 1:
+                    raise RuntimeError(
+                        f"{label} failed after {attempts} attempts: {type(e).__name__}: {e}"
+                    ) from e
+                delay = 2.0**i
+                ui.warn(f"{label}: {type(e).__name__}: {e} — retrying in {delay:.0f}s")
+                time.sleep(delay)
+    # A step that's merely slow (rather than hung) is the early warning for the next
+    # outage — surface it instead of letting it hide inside the phase total.
+    elapsed = time.perf_counter() - t0
+    if elapsed >= 30:
+        ui.warn(f"{label} was slow: {elapsed:.0f}s")
+    return out
 
 
 def resolve_token(repo: str) -> str | None:
@@ -146,8 +205,19 @@ def _buoy_prefix(campaign: str) -> str:
     return f"buoys/{campaign}"
 
 
+def _truncated_archives(raw: Path) -> list[Path]:
+    """Archive files a previous run left empty (0 bytes) — a pull killed mid-download.
+
+    These used to be permanent: pull() skipped the archive sync whenever *any* *_arch.csv
+    existed, so the empty file was never re-fetched, and every later run died in polars on
+    a bare `NoDataError: empty CSV` naming neither the file nor the fix. Detect them so the
+    mirror heals itself instead.
+    """
+    return [f for f in sorted(raw.glob("*_arch.csv")) if f.stat().st_size == 0]
+
+
 def pull(work: Path, campaign: str, repo: str, token: str | None) -> None:
-    """Mirror the bucket's raw inputs locally: reel always (small), archive if absent."""
+    """Mirror the bucket's raw inputs locally: reel always (small), archive if absent/damaged."""
     from huggingface_hub import sync_bucket
 
     raw = _raw_dir(work, campaign)
@@ -156,8 +226,15 @@ def pull(work: Path, campaign: str, repo: str, token: str | None) -> None:
     # The forward-growing reel changes every run → always pull the freshest copy (HF
     # canonical) so a local run can't regress what the cron advanced.
     sync_bucket(src, str(raw), include=["*_reel.csv"], token=token, quiet=True)
-    # The archive is immutable → pull only if we don't already have it (CI caches it).
-    if not list(raw.glob("*_arch.csv")):
+    truncated = _truncated_archives(raw)
+    for f in truncated:
+        ui.warn(f"{f.name} is empty (truncated download) — re-fetching")
+        f.unlink()
+    # The archive is immutable → pull only if we don't already have it (CI caches it). But
+    # re-sync whenever we just dropped a truncated file: "some *_arch.csv exists" is not
+    # "the archive is complete", and skipping here would silently leave those years out of
+    # the build — a *quieter* bug than the crash it replaced.
+    if truncated or not list(raw.glob("*_arch.csv")):
         sync_bucket(src, str(raw), include=["*_arch.csv"], token=token, quiet=True)
     n_arch = len(list(raw.glob("*_arch.csv")))
     n_reel = len(list(raw.glob("*_reel.csv")))
@@ -334,7 +411,7 @@ def update(
             )
         elif do_pull:
             ui.step(ui.ICON_PULL, "pull")
-            pull(work, campaign, repo, token)
+            _net(f"pull {campaign}", pull, work, campaign, repo, token)
 
         # --- scrape the live CANDHIS feed into the reel accumulator ---
         if do_scrape:
@@ -347,7 +424,14 @@ def update(
             # Ingest-only: the key never reaches the webapp, which reads the derived
             # tides.parquet. A failure is non-fatal (logged, existing accumulator kept).
             if do_pull:
-                pull_tides(work, tide_port["id"], repo, token)
+                _net(
+                    f"pull tides {tide_port['id']}",
+                    pull_tides,
+                    work,
+                    tide_port["id"],
+                    repo,
+                    token,
+                )
             status = tides_mod.refresh_port(
                 _tides_root(work), tide_port["id"], os.environ.get(tides_mod.ENV_KEY)
             )
@@ -376,7 +460,9 @@ def update(
             if seed_src is not None:
                 from huggingface_hub import sync_bucket
 
-                sync_bucket(
+                _net(
+                    f"seed {campaign}/raw",
+                    sync_bucket,
                     str(raw),
                     f"hf://buckets/{repo}/{_buoy_prefix(campaign)}/raw",
                     token=token,
@@ -385,10 +471,17 @@ def update(
                 ui.detail(
                     f"seeded {_buoy_prefix(campaign)}/raw (archive + reel) → buckets/{repo}"
                 )
-            upload(work, campaign, repo, token)
+            _net(f"upload {campaign}", upload, work, campaign, repo, token)
             if tide_port is not None:
-                upload_tides(work, tide_port["id"], repo, token)
-            snapshot_reel(work, campaign, repo, token)
+                _net(
+                    f"upload tides {tide_port['id']}",
+                    upload_tides,
+                    work,
+                    tide_port["id"],
+                    repo,
+                    token,
+                )
+            _net(f"snapshot {campaign}", snapshot_reel, work, campaign, repo, token)
 
     # Summary facts, read back from the freshly-written manifest (decoupled from build()).
     try:
@@ -482,10 +575,28 @@ def main(
     # the same bucket, so one OIDC exchange authorizes them all (the every-30-min cron
     # otherwise made 3 exchanges/run and occasionally tripped HF's 429 rate limit).
     try:
-        token = resolve_token(repo) if (do_pull or do_upload) else None
+        token = _net("auth", resolve_token, repo) if (do_pull or do_upload) else None
     except RuntimeError as e:
         ui.err(f"update aborted: {e}")
         raise typer.Exit(1)
+
+    # One grep-able line of run context. When a refresh misbehaves this is the first thing
+    # you want from the log: which client talked to which bucket, with which credential,
+    # under which timeout — so an HF-side outage can't be mistaken for a code change.
+    import huggingface_hub as hf
+
+    auth = (
+        "HF_TOKEN env"
+        if os.environ.get("HF_TOKEN")
+        else "OIDC"
+        if token
+        else "local hf login"
+    )
+    tide_key = "set" if os.environ.get(tides_mod.ENV_KEY) else "MISSING"
+    ui.detail(
+        f"bucket {repo} · huggingface_hub {hf.__version__} · auth {auth} · "
+        f"{tides_mod.ENV_KEY} {tide_key} · net timeout {NET_TIMEOUT_S:.0f}s"
+    )
 
     # Refresh each buoy independently: one buoy's failure (e.g. its CANDHIS feed is
     # down) must not skip the others, but the run as a whole still reports failure.

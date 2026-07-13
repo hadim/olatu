@@ -52,6 +52,25 @@ DT = "datetime_utc"
 # --------------------------------------------------------------------------- read
 
 
+def _read_raw_csv(path: str) -> pl.DataFrame:
+    """Read one CANDHIS CSV, failing loudly (and usefully) on a truncated download.
+
+    A pull killed mid-download leaves a 0-byte CSV, on which polars raises a bare
+    `NoDataError: empty CSV` — no filename, no remedy, and it isn't a RuntimeError, so
+    update()'s per-campaign guard doesn't catch it and the whole refresh dies. Name the
+    file and the fix instead. (update.pull() now also deletes these on sight, so this is
+    the backstop for a raw dir populated by hand or by --seed-src.)
+
+    Everything is read as Utf8 so empty fields become null deterministically.
+    """
+    if Path(path).stat().st_size == 0:
+        raise RuntimeError(
+            f"{Path(path).name} is empty — a truncated download. Delete it and re-run "
+            "`pixi run update` to re-pull it from the bucket."
+        )
+    return pl.read_csv(path, separator=";", infer_schema_length=0)
+
+
 def _clean_numeric(df: pl.DataFrame, cols: list[str]) -> pl.DataFrame:
     """Cast mapped columns to Float64 and turn the CANDHIS sentinel (999.999) into null."""
     return df.with_columns(
@@ -73,8 +92,7 @@ def read_archive(src: Path, campaign: str = CAMPAIGN_ID) -> pl.DataFrame | None:
         return None
     frames = []
     for f in files:
-        # read everything as Utf8 so empty fields -> null deterministically
-        raw = pl.read_csv(f, separator=";", infer_schema_length=0)
+        raw = _read_raw_csv(f)
         keep = ["DateHeure"] + [c for c in ARCH_MAP if c in raw.columns]
         df = raw.select(keep).rename({**ARCH_MAP, "DateHeure": DT})
         df = df.with_columns(
@@ -91,7 +109,7 @@ def read_realtime(src: Path, campaign: str = CAMPAIGN_ID) -> pl.DataFrame | None
         return None
     frames = []
     for f in files:
-        raw = pl.read_csv(f, separator=";", infer_schema_length=0)
+        raw = _read_raw_csv(f)
         keep = ["Date"] + [c for c in REEL_MAP if c in raw.columns]
         df = raw.select(keep).rename({**REEL_MAP, "Date": DT})
         df = df.with_columns(

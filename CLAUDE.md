@@ -120,6 +120,12 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   object; don't "clean it up" into a spread array (GA won't parse it). **Legal pages** are
   hash routes (`#/privacy` etc., `webapp/src/lib/route.ts`) — path routing would break the
   relative Vite `base`; keep new static pages on the hash router.
+- **Never add an unbounded network call to `ingest/`.** Route every HF bucket call through
+  `update._net(label, fn, …)` (watchdog + transport-fault retry) and give network work a
+  `ui.watchdog`. A hang is worse than a crash here: the refresh cron is `concurrency:
+  cancel-in-progress: false`, so one wedged run queues **every** later refresh behind it and
+  the pipeline stops silently. Retry *transport* faults (reset/timeout), not just 5xx.
+  See the 2026-07-13 LEARNINGS entry.
 - **Tides (marée, spec 0008)** come from **api-maree.fr** — needs `API_MAREE_KEY` (env / GitHub
   secret, **ingest-only, never in the client**). Keyed by **port, not buoy**
   (`schema.TIDE_PORTS` + `resolve_tide_port`: each buoy → nearest curated port ≤ `TIDE_MAX_KM=40`,

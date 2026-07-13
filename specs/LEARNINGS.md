@@ -9,6 +9,44 @@ Format per entry: **date — title** · what we found · why it matters · resol
 
 ---
 
+## 2026-07-13 — an HF Xet outage hung the refresh; a hang with no stack is the real bug
+
+**Finding.** The `*/30` refresh failed, then **hung for 20+ min** (CI and locally). It looked
+like our code; it wasn't. Hugging Face's **Xet CAS bridge** (`cas-bridge.xethub.hf.co`, where
+every `…/resolve/<key>` 302-redirects) started refusing public content with **`403
+AccessDenied`** — control test: a parquet in the public `rajpurkar/squad` dataset 403'd too,
+while its non-Xet `README.md` still served `200`. Our bucket was `private: false` throughout,
+and even *authenticated* reads 403'd. During the same window `huggingface.co` reset
+connections mid-handshake. Note the asymmetry that made this confusing: the **Python client
+kept working** (it speaks the Xet protocol directly, not the CAS-bridge redirect), so ingest
+could still pull and push while **the webapp read path was dead** — olatu.io served no data.
+
+**Why it matters.** Three latent weaknesses turned an upstream blip into a stopped pipeline:
+(1) `_post_with_retry` retried *status codes* only, so the reset raised straight out of the
+first call (the OIDC exchange) and killed all three buoys before any work started;
+(2) nothing bounded a network step, so a stalled read hung **forever** — and since the cron's
+`concurrency` group is `cancel-in-progress: false`, that one wedged run **queued every
+subsequent refresh behind it**, silently stopping the data pipeline (the GH job's 6h default
+timeout is no backstop at a 30-min cadence);
+(3) the interrupted pull left **0-byte archive CSVs**, which `pull()` could never repair —
+it skipped the archive sync whenever *any* `*_arch.csv` existed — so every later run died in
+polars on a bare `NoDataError: empty CSV` naming neither the file nor the fix.
+
+The deeper lesson is (2): a crash tells you where it broke, **a hang tells you nothing**. The
+log simply stopped at `↓ pull`, which is why this cost hours instead of minutes.
+
+**Resolution.** Retry transport faults (reset/timeout), not just 5xx — see
+`update._post_with_retry` and `update._net`, which wraps *every* bucket call in a named
+retry + a watchdog. `ui.watchdog` bounds each network step (`OLATU_NET_TIMEOUT`, default
+600s) and, on expiry, **dumps every thread's stack and aborts** — the top frame names the
+stuck call, so the next outage is readable straight from the log. `timeout-minutes: 15` on
+the CI job keeps a hang from wedging the queue. `pull()` now deletes and re-fetches truncated
+archives (careful: deleting without forcing the re-sync silently drops those years from the
+build — a *quieter* bug than the crash it replaced), and `build._read_raw_csv` names the file
+and the remedy. Nothing corrupt reached the bucket: the run hung before `build`.
+
+---
+
 ## 2026-06-30 — public HF **buckets** now serve the browser too (CORS + range); store moved bucket-ward
 
 **Finding.** The 2026-06-28 entry below concluded buckets had "no public browser URL".
