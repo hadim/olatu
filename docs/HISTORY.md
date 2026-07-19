@@ -9,6 +9,21 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-07-19 — Denser station bar + remembered smoothing (UX polish)
+
+Two quality-of-life refinements to existing features, both persisted like the other prefs:
+
+- **The station bar collapses** (spec 0005) — it's the tallest thing above the charts (the
+  locator map dominates), so it now defaults to a **dense one-line bar**: eyebrow + a compact
+  buoy switcher (name-only chips) + a small chevron. Expand restores the intro, source links
+  and map. Remembered in `olatu.station_collapsed` (**default collapsed**; only an explicit
+  expand writes `0`). Folds to two rows on a phone (eyebrow + chevron up top, switcher
+  full-width below, via `order` + `basis-full`). ~410 px expanded → ~49 px collapsed.
+- **Chart smoothing is remembered** (spec 0006) — Raw/Light/Strong now persists across
+  sessions in `olatu.smooth`, mirroring the range preset (`olatu.range`) exactly.
+
+---
+
 ## 2026-07-13 — Data refresh survives an HF outage (resilience + diagnosability)
 
 Hardened `ingest/` after a Hugging Face Xet outage failed one refresh and **hung the next

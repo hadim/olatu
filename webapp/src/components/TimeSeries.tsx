@@ -254,6 +254,19 @@ function presetRange(key: string, t0: number, tn: number): { min: number; max: n
 type Smooth = 'raw' | 'light' | 'strong';
 const SMOOTH_RADIUS: Record<Smooth, number> = { raw: 0, light: 2, strong: 7 };
 
+// The chosen smoothing is remembered across sessions, exactly like the range preset above.
+const SMOOTH_STORE = 'olatu.smooth';
+const DEFAULT_SMOOTH: Smooth = 'raw';
+function storedSmooth(): Smooth {
+  try {
+    const v = localStorage.getItem(SMOOTH_STORE);
+    if (v === 'raw' || v === 'light' || v === 'strong') return v;
+  } catch {
+    /* storage unavailable (private mode) — fall back to the default */
+  }
+  return DEFAULT_SMOOTH;
+}
+
 /** Centred moving average that never crosses a null (a gap break): the window stops
  *  at the first null on each side, so smoothing can't bridge an outage. */
 function movingAvg(arr: (number | null)[], radius: number): (number | null)[] {
@@ -341,7 +354,7 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
   // handler below); Reset / double-click return here — back to the active preset — which
   // reloads the coarser tier. Seeded lazily from the initial preset on first render.
   const presetBaseRef = useRef<{ min: number; max: number; mode: string } | null>(null);
-  const [smooth, setSmooth] = useState<Smooth>('raw');
+  const [smooth, setSmooth] = useState<Smooth>(storedSmooth);
 
   const resetZoom = () => {
     const b = presetBaseRef.current;
@@ -934,7 +947,19 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
         <div className="flex flex-wrap items-center gap-[0.4rem]" role="group" aria-label={m.chart_smoothing()}>
           <span className="mr-[0.15rem] text-[0.72rem] uppercase tracking-[0.06em] text-faint">{m.chart_smoothing()}</span>
           {(['raw', 'light', 'strong'] as Smooth[]).map((s) => (
-            <button key={s} type="button" className={chipCls(smooth === s)} onClick={() => setSmooth(s)}>
+            <button
+              key={s}
+              type="button"
+              className={chipCls(smooth === s)}
+              onClick={() => {
+                try {
+                  localStorage.setItem(SMOOTH_STORE, s);
+                } catch {
+                  /* storage unavailable — the choice still applies for this session */
+                }
+                setSmooth(s);
+              }}
+            >
               {m[`chart_smooth_${s}` as MessageKey]()}
             </button>
           ))}

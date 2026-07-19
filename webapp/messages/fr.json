@@ -7,6 +7,8 @@
   "picker_choose": "Choisir une bouée",
   "picker_map_label": "Carte de localisation des bouées",
   "picker_map_hint": "Choisissez une bouée sur la carte",
+  "station_collapse": "Réduire",
+  "station_expand": "Agrandir",
   "data_source": "Données",
   "data_live": "en direct de CANDHIS",
   "data_dataset": "données ouvertes sur Hugging Face",

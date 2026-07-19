@@ -7,6 +7,8 @@
   "picker_choose": "Elegir una boya",
   "picker_map_label": "Mapa de ubicación de las boyas",
   "picker_map_hint": "Elige una boya en el mapa",
+  "station_collapse": "Reducir",
+  "station_expand": "Ampliar",
   "data_source": "Datos",
   "data_live": "en directo de CANDHIS",
   "data_dataset": "datos abiertos en Hugging Face",

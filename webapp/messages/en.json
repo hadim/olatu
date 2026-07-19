@@ -7,6 +7,8 @@
   "picker_choose": "Choose a buoy",
   "picker_map_label": "Buoy locator map",
   "picker_map_hint": "Pick a buoy on the map",
+  "station_collapse": "Collapse",
+  "station_expand": "Expand",
   "data_source": "Data",
   "data_live": "live from CANDHIS",
   "data_dataset": "open data on Hugging Face",
