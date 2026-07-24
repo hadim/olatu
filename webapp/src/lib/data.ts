@@ -32,6 +32,13 @@ export function tidesBase(port: string): string {
   return `${DATA_ROOT}tides/${port}/data/`;
 }
 
+/** Base URL for a shared wind station's tier (ends in `/`). Wind is keyed by STATION, not
+ *  campaign (spec 0012/0013): `wind/<station>/data/…`. A station is a full buoy-shaped tiered
+ *  dataset, so its tiers load with the same code paths as a buoy — only this base URL differs. */
+export function windBase(station: string): string {
+  return `${DATA_ROOT}wind/${station}/data/`;
+}
+
 export interface Buoy {
   campaign_id: string;
   name: string;
@@ -53,10 +60,58 @@ export interface VariableDef {
   headline: boolean;
 }
 
+/** Attribution block travelling with a data source (wind: Météo-France / Licence Ouverte). */
+export interface SourceMeta {
+  provider: string;
+  dataset?: string;
+  license: string;
+  credit: string;
+  url: string;
+}
+
+/** The buoy manifest's `wind` **pointer** (ingest/build.py): which station to pair, how far,
+ *  + attribution. `null` when no station is within range → wind empty-state (mirror of `tide`). */
+export interface WindMeta {
+  station: string;
+  num_poste: string;
+  label: string;
+  distance_km: number;
+  source: SourceMeta;
+}
+
+/** A wind station's own identity (from its buoy-shaped manifest at `wind/<station>/data/`). */
+export interface WindStation {
+  id: string;
+  num_poste: string;
+  label: string;
+  dept: string;
+  lat: number;
+  lon: number;
+  altitude_m: number;
+}
+
+/** A wind station's manifest — buoy-shaped (spec 0012 §5) so it loads like a buoy. */
+export interface WindManifest {
+  station: WindStation;
+  source: SourceMeta;
+  generated_at: string;
+  timezone: string;
+  cadence: string;
+  span: { start: string; end: string };
+  rows: number;
+  variables: { name: string; unit: string; headline: boolean }[];
+  years: { year: number; file: string; rows: number; byteLength: number }[];
+  hourly_files: { year: number; file: string; rows: number; byteLength: number }[];
+  coverage: Record<string, { start: string; end: string } | null>;
+  tiers: Record<string, string>;
+}
+
 export interface Manifest {
   buoy: Buoy;
   /** Nearest tide port for this buoy (ingest/build.py), or null if none within range. */
   tide: TideMeta | null;
+  /** Nearest wind station for this buoy (ingest/build.py), or null if none within range. */
+  wind: WindMeta | null;
   generated_at: string;
   timezone: string;
   span: { start: string; end: string };
@@ -74,22 +129,50 @@ export interface Series {
   [variable: string]: (number | null)[];
 }
 
-async function loadJSON<T>(campaign: string, name: string): Promise<T> {
-  const res = await fetch(`${dataBase(campaign)}${name}`, { cache: 'no-cache' });
-  if (!res.ok) throw new Error(`Failed to load ${campaign}/${name} (${res.status})`);
+/** The paired wind station, resolved + loaded by App for a buoy (spec 0013). Aggregates the
+ *  station's own manifest + latest readings with the buoy→station distance and whether the
+ *  pairing is a user override (vs. the manifest default), so the UI can attribute it honestly. */
+export interface WindData {
+  /** Station id (bucket key), e.g. "socoa". */
+  station: string;
+  manifest: WindManifest;
+  latest: Series;
+  /** Buoy → station great-circle distance (km). */
+  distanceKm: number;
+  /** True when the user pinned a non-default station for this buoy. */
+  isOverride: boolean;
+}
+
+async function loadJSONFrom<T>(base: string, name: string): Promise<T> {
+  const res = await fetch(`${base}${name}`, { cache: 'no-cache' });
+  if (!res.ok) throw new Error(`Failed to load ${base}${name} (${res.status})`);
   return (await res.json()) as T;
 }
 
 export function loadManifest(campaign: string) {
-  return loadJSON<Manifest>(campaign, 'manifest.json');
+  return loadJSONFrom<Manifest>(dataBase(campaign), 'manifest.json');
 }
 
 export function loadLatest(campaign: string) {
-  return loadJSON<Series>(campaign, 'latest.json');
+  return loadJSONFrom<Series>(dataBase(campaign), 'latest.json');
 }
 
 export function loadRecent(campaign: string) {
-  return loadJSON<Series>(campaign, 'recent.json');
+  return loadJSONFrom<Series>(dataBase(campaign), 'recent.json');
+}
+
+/** Wind station tiers (buoy-shaped; spec 0012/0013). Keyed by STATION id, not campaign — a
+ *  buoy resolves its paired station via `manifest.wind.station` (or a user override). */
+export function loadWindManifest(station: string) {
+  return loadJSONFrom<WindManifest>(windBase(station), 'manifest.json');
+}
+
+export function loadWindLatest(station: string) {
+  return loadJSONFrom<Series>(windBase(station), 'latest.json');
+}
+
+export function loadWindRecent(station: string) {
+  return loadJSONFrom<Series>(windBase(station), 'recent.json');
 }
 
 /** Tide extrema for a buoy: reads its manifest's `tide` block for the port + attribution,

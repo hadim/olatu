@@ -9,6 +9,34 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-07-24 — Wind in the webapp: the Mer/Air realm system (spec 0013)
+
+Surfaces the wind data (spec 0012) in the app around one visual axis: every datum belongs to a
+**realm** — **Mer** (the buoy, offshore: swell, direction, sea temp — **teal**) or **Air** (the
+paired station, onshore: wind, gust, air temp, rain — **amber `--c-wind`**, the one new token).
+Colour **+** glyph, constant across all three surfaces, so "buoy" vs "station" reads at a glance.
+
+- **Selection** — the existing collapsible station bar is **kept**; a new **amber station picker**
+  (Radix popover) sits beside the teal buoy switcher. Default = the buoy manifest's `wind` pointer
+  (nearest station); the user can pin any curated station, **persisted per buoy** (`olatu.station`).
+  Honest attribution everywhere (name · distance · character · Météo-France), never "wind at the buoy".
+- **Current conditions** — rebuilt into **two realm zones** (Mer, Air) joined by the one cross-realm
+  **bridge**: the **offshore / onshore verdict** from station `wind_direction_deg` × buoy
+  `peak_direction_deg` (`lib/wind.ts`; swell-relative approximation). The two temperatures are now
+  unmistakable — sea temp teal in the Mer zone, air temp amber in the Air zone (glyph + zone + colour,
+  never colour alone). Humidity/pressure are first-class nullable (em-dash where a station drops them).
+- **Timeseries** — the station's four Air panels (wind mean+gust, wind direction, air temp, rain) plot
+  on the **exact same x-axis + crosshair** as the buoy panels (a station carries its own time grid,
+  like the tide panel). Every panel is **realm-tagged** (coloured left bar + Mer/Air chip). New
+  **hide + reorder**: a drag handle + an eye per panel, hidden panels drop into a click-to-restore
+  chip tray; order + hidden set **persisted** (`olatu.charts.order`, `olatu.charts.hidden`).
+
+Data layer: a station loads with the **same code path as a buoy** — `windBase(station)` +
+station-keyed tier loaders (`loadWind*`, `loadWindParquetTier`) mirror the buoy ones; `App` resolves
+the paired station and threads it down, race-tagged `{campaign, station}` like tides. New `--c-wind`
+token (both themes), wind/station/rain/humidity/pressure/eye/grip icons, EN/FR/ES strings. Follow-ups
+noted in the spec: a combined air+sea temperature panel, and a map buoy↔station pairing line.
+
 ## 2026-07-24 — Wind (vent) per buoy from Météo-France (spec 0012, ingest only)
 
 New data source: **wind from the nearest coastal Météo-France station**, keyed per-station and
@@ -16,7 +44,7 @@ shared across buoys like tides/ports (`schema.resolve_wind_station`, `WIND_MAX_K
 06403→**Socoa** (1.6 km), 06402→**Biarritz-Pays-Basque** (9.5 km), 03302→**Cap-Ferret** (15.6 km).
 New `ingest/wind.py`; canonical 8-var schema (wind speed/dir, gust + dir, air temp, rain, humidity,
 pressure — the last two nullable where a station drops them). Each buoy manifest gains a `wind`
-**pointer** block (station id, distance, Licence Ouverte attribution). **Not yet in the webapp.**
+**pointer** block (station id, distance, Licence Ouverte attribution). *(Now surfaced in the webapp — see the spec 0013 entry above.)*
 
 Each station is **one unified series structured exactly like a buoy campaign** so the webapp can
 later plot a station beside a buoy on the same time axis at any zoom (`build_station` mirrors

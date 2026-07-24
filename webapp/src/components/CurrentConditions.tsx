@@ -1,10 +1,16 @@
 import type { ReactNode } from 'react';
 import { useLocale, type Locale, type MessageKey } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
-import { lastValue, latestTimestamp, type Manifest, type Series } from '../lib/data';
+import { lastValue, latestTimestamp, type Manifest, type Series, type WindData } from '../lib/data';
 import { compass, dirColor, fmtNumber, fmtClock, freshness, relativeAgo, type Freshness } from '../lib/format';
+import { shoreRelation, shoreColorVar } from '../lib/wind';
+import { stationInfo } from '../lib/stations';
 import { useNow } from '../lib/useNow';
-import { WaveHeightIcon, MaxWaveIcon, PeriodIcon, DirectionIcon, TempIcon } from './icons';
+import {
+  WaveHeightIcon, MaxWaveIcon, PeriodIcon, DirectionIcon, TempIcon,
+  WindIcon, StationIcon, RainIcon, HumidityIcon, PressureIcon,
+} from './icons';
+import { BuoyMark } from './brands';
 import InfoPopover from './InfoPopover';
 import TideStrip from './TideStrip';
 import type { Tides } from '../lib/tides';
@@ -22,13 +28,15 @@ function conePath(cx: number, cy: number, ri: number, ro: number, halfDeg: numbe
   return `M${p(ro, a1)} A${ro} ${ro} 0 0 1 ${p(ro, a2)} L${p(ri, a2)} A${ri} ${ri} 0 0 0 ${p(ri, a1)} Z`;
 }
 
-function CompassDial({ deg, spread, locale }: { deg: number | null; spread: number | null; locale: Locale }) {
+/** Compass rose. `color` overrides the cyclical direction hue (used by the Air realm to fix the
+ *  wind arrow to amber); `second` draws a faint secondary marker (the gust direction). */
+function CompassDial({
+  deg, spread, locale, color, second,
+}: { deg: number | null; spread: number | null; locale: Locale; color?: string; second?: number | null }) {
   const dirText = deg != null ? compass(deg, locale) : '—';
-  // The dial shares the charts' cyclical from-direction hue so the banner and the
-  // direction track read as one system (N teal · E blue · S gold · W pink).
-  const hue = deg != null ? dirColor(deg) : null;
+  const hue = color ?? (deg != null ? dirColor(deg) : null);
   return (
-    <div className="relative aspect-square w-full max-w-[200px]" role="img" aria-label={deg != null ? `from ${compass(deg, locale)}` : 'no direction'}>
+    <div className="relative aspect-square w-full max-w-[176px]" role="img" aria-label={deg != null ? `from ${compass(deg, locale)}` : 'no direction'}>
       <svg viewBox="0 0 120 120" width="100%" height="100%">
         <circle cx="60" cy="60" r="56" className="fill-none stroke-line [stroke-width:2]" />
         {['N', 'E', 'S', 'W'].map((c, i) => {
@@ -39,6 +47,11 @@ function CompassDial({ deg, spread, locale }: { deg: number | null; spread: numb
             </text>
           );
         })}
+        {second != null && (
+          <g transform={`rotate(${second + 180} 60 60)`}>
+            <path d="M60 16 L56 29 L64 29 Z" style={hue ? { fill: hue, opacity: 0.4 } : undefined} className="fill-accent [opacity:0.4]" />
+          </g>
+        )}
         {deg != null && (
           <g transform={`rotate(${deg + 180} 60 60)`}>
             {spread != null && <path d={conePath(60, 60, 30, 50, spread)} style={hue ? { fill: `${hue}33` } : undefined} />}
@@ -47,25 +60,58 @@ function CompassDial({ deg, spread, locale }: { deg: number | null; spread: numb
         )}
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-[0.05rem]">
-        <span className="font-display text-[clamp(1.5rem,4vw,2rem)] font-bold leading-none tracking-[-0.01em] text-fg">{dirText}</span>
-        {deg != null && <span className="font-mono text-[0.82rem] text-muted">{Math.round(deg)}°</span>}
+        <span className="font-display text-[clamp(1.4rem,3.6vw,1.85rem)] font-bold leading-none tracking-[-0.01em] text-fg">{dirText}</span>
+        {deg != null && <span className="font-mono text-[0.78rem] text-muted">{Math.round(deg)}°</span>}
       </div>
     </div>
   );
 }
 
-function Gauge({ label, value, unit, defKey, tone, icon }: { label: string; value: string; unit?: string; defKey: MessageKey; tone?: 'warm'; icon?: ReactNode }) {
+function Gauge({
+  label, value, unit, defKey, accent, icon,
+}: { label: string; value: string; unit?: string; defKey: MessageKey; accent?: string; icon?: ReactNode }) {
   return (
     <div className="flex flex-col gap-[0.1rem] max-[720px]:items-center">
-      <span className="inline-flex items-center text-[0.78rem] uppercase tracking-[0.06em] text-faint">
+      <span className="inline-flex items-center text-[0.72rem] uppercase tracking-[0.05em] text-faint">
         {icon}
         {label}
         <InfoPopover title={label} body={m[defKey]()} />
       </span>
-      <span className={`font-display text-[1.7rem] font-medium [font-feature-settings:'tnum'] ${tone === 'warm' ? 'text-warm' : ''}`}>
+      <span className="font-display text-[1.5rem] font-medium [font-feature-settings:'tnum']" style={accent ? { color: accent } : undefined}>
         {value}
-        {unit && <span className="text-[0.9rem] text-muted"> {unit}</span>}
+        {unit && <span className="text-[0.85rem] text-muted"> {unit}</span>}
       </span>
+    </div>
+  );
+}
+
+/** A small "comes-from" arrow for the offshore/onshore bridge (realm-coloured). */
+function MiniArrow({ deg, color }: { deg: number | null; color: string }) {
+  if (deg == null) return <span className="text-faint">—</span>;
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true">
+      <g transform={`rotate(${deg} 12 12)`}>
+        <path d="M12 3 L8 12 L12 10 L16 12 Z" style={{ fill: color }} />
+        <line x1="12" y1="10" x2="12" y2="20.5" style={{ stroke: color }} strokeWidth="1.6" strokeLinecap="round" />
+      </g>
+    </svg>
+  );
+}
+
+const ZONE: Record<'sea' | 'air', string> = {
+  sea: 'border-[color-mix(in_oklab,var(--accent)_22%,var(--hairline))] bg-[color-mix(in_oklab,var(--accent)_6%,var(--surface))]',
+  air: 'border-[color-mix(in_oklab,var(--c-wind)_24%,var(--hairline))] bg-[color-mix(in_oklab,var(--c-wind)_7%,var(--surface))]',
+};
+
+/** Zone header: a coloured realm tag + a source chip (buoy or station attribution). */
+function ZoneHeader({ realm, tag, children }: { realm: 'sea' | 'air'; tag: string; children: ReactNode }) {
+  const bg = realm === 'sea' ? 'var(--accent)' : 'var(--c-wind)';
+  return (
+    <div className="mb-2.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+      <span className="rounded-md px-2 py-[0.1rem] font-display text-[0.72rem] font-bold uppercase tracking-[0.05em]" style={{ background: bg, color: '#08201a' }}>
+        {tag}
+      </span>
+      <span className="inline-flex items-center gap-1.5 font-mono text-[0.72rem] text-muted">{children}</span>
     </div>
   );
 }
@@ -97,27 +143,73 @@ function StalenessBadge({ fresh, stampMs, tz, now }: { fresh: Freshness; stampMs
   );
 }
 
-export default function CurrentConditions({ latest, manifest, tides }: { latest: Series; manifest: Manifest; tides: Tides | null }) {
+/** The offshore/onshore verdict — the only cross-realm synthesis (station wind × buoy swell). */
+function ShoreBridge({ swellDeg, windDeg, locale }: { swellDeg: number | null; windDeg: number | null; locale: Locale }) {
+  const shore = shoreRelation(windDeg, swellDeg);
+  const label = shore === 'offshore' ? m.cc_offshore() : shore === 'onshore' ? m.cc_onshore() : m.cc_cross_shore();
+  return (
+    <div className="my-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-dashed border-divider bg-surface-2 px-3.5 py-2">
+      <span className="inline-flex items-center gap-1.5 font-mono text-[0.74rem] text-muted">
+        <MiniArrow deg={swellDeg} color="var(--accent)" />
+        {m.cc_swell()} {swellDeg != null && compass(swellDeg, locale)}
+      </span>
+      <span className="font-mono text-[0.72rem] text-faint">/</span>
+      <span className="inline-flex items-center gap-1.5 font-mono text-[0.74rem] text-muted">
+        <MiniArrow deg={windDeg} color="var(--c-wind)" />
+        {m.cc_wind()} {windDeg != null && compass(windDeg, locale)}
+      </span>
+      {shore ? (
+        <span className="ml-auto inline-flex items-center gap-1 rounded-full px-3 py-[0.35rem] font-display text-[0.9rem] font-bold" style={{ background: `var(${shoreColorVar(shore)})`, color: '#08201a' }}>
+          {label}
+          <InfoPopover title={m.cc_shore()} body={m.def_offshore()} triggerClassName="text-[#08201a] opacity-70 hover:opacity-100" />
+        </span>
+      ) : (
+        <span className="ml-auto font-mono text-[0.74rem] text-faint">{m.cc_shore()} —</span>
+      )}
+    </div>
+  );
+}
+
+export default function CurrentConditions({
+  latest, manifest, tides, wind,
+}: { latest: Series; manifest: Manifest; tides: Tides | null; wind: WindData | null }) {
   const { locale } = useLocale();
   const tz = manifest.timezone;
   const now = useNow(30_000);
 
+  // Sea (buoy) realm
   const hs = lastValue(latest, 'significant_wave_height_m');
   const hmax = lastValue(latest, 'max_wave_height_m');
   const period = lastValue(latest, 'significant_period_s');
   const dir = lastValue(latest, 'peak_direction_deg');
   const spread = lastValue(latest, 'peak_directional_spread_deg');
-  const temp = lastValue(latest, 'sea_temperature_c');
+  const seaTemp = lastValue(latest, 'sea_temperature_c');
+
+  // Air (station) realm
+  const wl = wind?.latest;
+  const windSpeed = wl ? lastValue(wl, 'wind_speed_ms') : null;
+  const windDir = wl ? lastValue(wl, 'wind_direction_deg') : null;
+  const gust = wl ? lastValue(wl, 'wind_gust_ms') : null;
+  const gustDir = wl ? lastValue(wl, 'wind_gust_direction_deg') : null;
+  const airTemp = wl ? lastValue(wl, 'air_temperature_c') : null;
+  const rain = wl ? lastValue(wl, 'precipitation_mm') : null;
+  const humidity = wl ? lastValue(wl, 'humidity_pct') : null;
+  const pressure = wl ? lastValue(wl, 'pressure_msl_hpa') : null;
+
+  const num = (v: { value: number } | null, digits = 1) => (v ? fmtNumber(v.value, locale, digits) : '—');
 
   const stampMs = latestTimestamp(latest);
   const fresh = stampMs != null ? freshness(now - stampMs) : 'stale';
 
+  const kind = wind ? stationInfo(wind.station)?.kind : undefined;
+  const kindLabel = kind ? m[`station_kind_${kind.replaceAll('-', '_')}` as MessageKey]() : '';
+
   return (
     <section
       aria-label={m.cc_title()}
-      className={`relative rounded-2xl border border-line bg-surface px-6 pb-6 pt-5 shadow-[0_0_40px_-28px_var(--accent)] ${fresh === 'stale' ? 'saturate-[0.55]' : ''}`}
+      className={`relative flex flex-col gap-2 rounded-2xl border border-line bg-surface px-5 pb-5 pt-4 shadow-[0_0_40px_-28px_var(--accent)] ${fresh === 'stale' ? 'saturate-[0.55]' : ''}`}
     >
-      <div className="mb-[1.1rem] flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <span className="font-mono text-[0.74rem] uppercase tracking-[0.08em] text-faint">
           {m.cc_title()}
           <span className="text-muted"> · {manifest.buoy.name}</span>
@@ -125,53 +217,94 @@ export default function CurrentConditions({ latest, manifest, tides }: { latest:
         <StalenessBadge fresh={fresh} stampMs={stampMs} tz={tz} now={now} />
       </div>
 
-      <div className="grid grid-cols-[minmax(170px,0.85fr)_1.5fr] items-center gap-x-8 gap-y-7 max-[720px]:grid-cols-1 max-[720px]:justify-items-center max-[720px]:gap-6">
-        {/* left: direction-only instrument (arrow + spread cone) */}
-        <div className="flex flex-col items-center gap-2">
-          <CompassDial deg={dir?.value ?? null} spread={spread?.value ?? null} locale={locale} />
-          <div className="flex flex-col items-center gap-[0.1rem] text-center">
-            <span className="inline-flex items-center text-[0.86rem] text-muted">
-              <DirectionIcon className={LABEL_ICON} style={{ color: 'var(--c-dir)' }} />
-              {m.cc_direction()}
-              <InfoPopover title={m.cc_direction()} body={m.def_direction()} />
-            </span>
-            {dir && (
-              <span className="font-mono text-[0.84rem] text-accent">
-                {m.cc_from()} {compass(dir.value, locale)} · {Math.round(dir.value)}°
+      {/* ---- MER (buoy) zone ---- */}
+      <div className={`rounded-xl border p-3.5 ${ZONE.sea}`}>
+        <ZoneHeader realm="sea" tag={m.cc_realm_sea()}>
+          <BuoyMark size={15} className="text-accent" />
+          {m.cc_buoy()} {manifest.buoy.campaign_id} · {manifest.buoy.network}
+        </ZoneHeader>
+        <div className="grid grid-cols-[minmax(150px,0.8fr)_1.5fr] items-center gap-x-6 gap-y-5 max-[720px]:grid-cols-1 max-[720px]:justify-items-center">
+          <div className="flex flex-col items-center gap-1.5">
+            <CompassDial deg={dir?.value ?? null} spread={spread?.value ?? null} locale={locale} />
+            <div className="flex flex-col items-center gap-[0.1rem] text-center">
+              <span className="inline-flex items-center text-[0.82rem] text-muted">
+                <DirectionIcon className={LABEL_ICON} style={{ color: 'var(--c-dir)' }} />
+                {m.cc_direction()}
+                <InfoPopover title={m.cc_direction()} body={m.def_direction()} />
               </span>
-            )}
-            {spread && (
-              <span className="inline-flex items-center font-mono text-[0.78rem] text-faint">
-                {m.cc_spread()} ±{Math.round(spread.value)}°
-                <InfoPopover title={m.cc_spread()} body={m.def_spread()} />
+              {dir && <span className="font-mono text-[0.82rem] text-accent">{m.cc_from()} {compass(dir.value, locale)} · {Math.round(dir.value)}°</span>}
+              {spread && (
+                <span className="inline-flex items-center font-mono text-[0.76rem] text-faint">
+                  {m.cc_spread()} ±{Math.round(spread.value)}°
+                  <InfoPopover title={m.cc_spread()} body={m.def_spread()} />
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-col gap-4 border-l border-line pl-6 max-[720px]:w-full max-[720px]:items-center max-[720px]:border-l-0 max-[720px]:pl-0">
+            <div className="flex flex-col gap-[0.15rem] max-[720px]:items-center">
+              <span className="inline-flex items-center text-[0.8rem] uppercase tracking-[0.05em] text-faint">
+                <WaveHeightIcon className={LABEL_ICON} style={{ color: 'var(--c-height)' }} />
+                {m.cc_wave_height()}
+                <InfoPopover title={m.cc_wave_height()} body={m.def_wave_height()} />
               </span>
-            )}
-          </div>
-        </div>
-
-        {/* right: the readouts — wave height is the hero */}
-        <div className="flex flex-col gap-[1.35rem] border-l border-line pl-8 max-[720px]:w-full max-[720px]:items-center max-[720px]:border-l-0 max-[720px]:pl-0">
-          <div className="flex flex-col gap-[0.15rem] max-[720px]:items-center">
-            <span className="inline-flex items-center text-[0.82rem] uppercase tracking-[0.06em] text-faint">
-              <WaveHeightIcon className={LABEL_ICON} style={{ color: 'var(--c-height)' }} />
-              {m.cc_wave_height()}
-              <InfoPopover title={m.cc_wave_height()} body={m.def_wave_height()} />
-            </span>
-            <span className="font-display text-[clamp(2.7rem,6vw,3.5rem)] font-bold leading-none tracking-[-0.02em] text-accent [font-feature-settings:'tnum']">
-              {hs ? fmtNumber(hs.value, locale, 1) : '—'}
-              <span className="ml-[0.15rem] text-[1.15rem] text-muted">m</span>
-            </span>
-          </div>
-
-          {/* Fixed 3-column grid: equal tracks so the layout never reshuffles as the
-              values change width (a flex-wrap row jittered between one and two lines). */}
-          <div className="grid w-full grid-cols-3 gap-[1.3rem] [&>*+*]:border-l [&>*+*]:border-line [&>*+*]:pl-[1.3rem] max-[720px]:text-center max-[420px]:grid-cols-1 max-[420px]:[&>*+*]:border-l-0 max-[420px]:[&>*+*]:pl-0">
-            <Gauge label={m.cc_max_wave()} value={hmax ? fmtNumber(hmax.value, locale, 1) : '—'} unit="m" defKey="def_max_wave" icon={<MaxWaveIcon className={LABEL_ICON} style={{ color: 'var(--c-max)' }} />} />
-            <Gauge label={m.cc_period()} value={period ? fmtNumber(period.value, locale, 1) : '—'} unit="s" defKey="def_period" icon={<PeriodIcon className={LABEL_ICON} style={{ color: 'var(--c-period)' }} />} />
-            <Gauge label={m.cc_sea_temp()} value={temp ? fmtNumber(temp.value, locale, 1) : '—'} unit="°C" defKey="def_sea_temp" tone="warm" icon={<TempIcon className={LABEL_ICON} style={{ color: 'var(--c-temp)' }} />} />
+              <span className="font-display text-[clamp(2.4rem,5.5vw,3.1rem)] font-bold leading-none tracking-[-0.02em] text-accent [font-feature-settings:'tnum']">
+                {hs ? fmtNumber(hs.value, locale, 1) : '—'}
+                <span className="ml-[0.15rem] text-[1.1rem] text-muted">m</span>
+              </span>
+            </div>
+            <div className="grid w-full grid-cols-3 gap-[1.2rem] [&>*+*]:border-l [&>*+*]:border-line [&>*+*]:pl-[1.2rem] max-[720px]:text-center max-[420px]:grid-cols-1 max-[420px]:[&>*+*]:border-l-0 max-[420px]:[&>*+*]:pl-0">
+              <Gauge label={m.cc_max_wave()} value={num(hmax)} unit="m" defKey="def_max_wave" icon={<MaxWaveIcon className={LABEL_ICON} style={{ color: 'var(--c-max)' }} />} />
+              <Gauge label={m.cc_period()} value={num(period)} unit="s" defKey="def_period" icon={<PeriodIcon className={LABEL_ICON} style={{ color: 'var(--c-period)' }} />} />
+              <Gauge label={m.cc_sea_temp()} value={num(seaTemp)} unit="°C" defKey="def_sea_temp" accent="var(--accent)" icon={<TempIcon className={LABEL_ICON} style={{ color: 'var(--accent)' }} />} />
+            </div>
           </div>
         </div>
       </div>
+
+      {/* ---- offshore/onshore bridge ---- */}
+      <ShoreBridge swellDeg={dir?.value ?? null} windDeg={windDir?.value ?? null} locale={locale} />
+
+      {/* ---- AIR (station) zone ---- */}
+      {wind ? (
+        <div className={`rounded-xl border p-3.5 ${ZONE.air}`}>
+          <ZoneHeader realm="air" tag={m.cc_realm_air()}>
+            <StationIcon size={15} style={{ color: 'var(--c-wind)' }} />
+            {m.cc_station()} {wind.manifest.station.label} <span className="text-faint">· {fmtNumber(wind.distanceKm, locale, 1)} km{kindLabel ? ` · ${kindLabel}` : ''} · {wind.manifest.source.provider}</span>
+          </ZoneHeader>
+          <div className="grid grid-cols-[minmax(150px,0.8fr)_1.5fr] items-center gap-x-6 gap-y-5 max-[720px]:grid-cols-1 max-[720px]:justify-items-center">
+            <div className="flex flex-col items-center gap-1.5">
+              <CompassDial deg={windDir?.value ?? null} spread={null} second={gustDir?.value ?? null} color="var(--c-wind)" locale={locale} />
+              <div className="flex flex-col items-center gap-[0.1rem] text-center">
+                <span className="inline-flex items-center text-[0.82rem] text-muted">
+                  <WindIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)' }} />
+                  {m.cc_wind_dir()}
+                  <InfoPopover title={m.cc_wind_dir()} body={m.def_wind()} />
+                </span>
+                {windDir && <span className="font-mono text-[0.82rem]" style={{ color: 'var(--c-wind)' }}>{m.cc_from()} {compass(windDir.value, locale)} · {Math.round(windDir.value)}°</span>}
+                {gustDir && <span className="font-mono text-[0.76rem] text-faint">{m.cc_gust().toLowerCase()} {compass(gustDir.value, locale)} · {Math.round(gustDir.value)}°</span>}
+              </div>
+            </div>
+            <div className="flex flex-col gap-3.5 border-l border-line pl-6 max-[720px]:w-full max-[720px]:items-center max-[720px]:border-l-0 max-[720px]:pl-0">
+              <div className="grid w-full grid-cols-4 gap-[1rem] [&>*+*]:border-l [&>*+*]:border-line [&>*+*]:pl-[1rem] max-[720px]:text-center max-[520px]:grid-cols-2 max-[520px]:gap-y-4 max-[520px]:[&>*]:border-l-0 max-[520px]:[&>*]:pl-0">
+                <Gauge label={m.cc_wind()} value={num(windSpeed)} unit="m/s" defKey="def_wind" accent="var(--c-wind)" icon={<WindIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)' }} />} />
+                <Gauge label={m.cc_gust()} value={num(gust)} unit="m/s" defKey="def_gust" icon={<WindIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)', opacity: 0.7 }} />} />
+                <Gauge label={m.cc_air_temp()} value={num(airTemp)} unit="°C" defKey="def_air_temp" accent="var(--c-wind)" icon={<TempIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)' }} />} />
+                <Gauge label={m.cc_rain()} value={num(rain)} unit="mm" defKey="def_rain" icon={<RainIcon className={LABEL_ICON} style={{ color: 'var(--c-period)' }} />} />
+              </div>
+              <div className="grid w-full max-w-[22rem] grid-cols-2 gap-[1rem] text-[0.9rem] opacity-80 [&>*+*]:border-l [&>*+*]:border-line [&>*+*]:pl-[1rem]">
+                <Gauge label={m.cc_humidity()} value={humidity ? fmtNumber(humidity.value, locale, 0) : '—'} unit={humidity ? '%' : undefined} defKey="def_humidity" icon={<HumidityIcon className={LABEL_ICON} style={{ color: 'var(--c-tide)' }} />} />
+                <Gauge label={m.cc_pressure()} value={pressure ? fmtNumber(pressure.value, locale, 0) : '—'} unit={pressure ? 'hPa' : undefined} defKey="def_pressure" icon={<PressureIcon className={LABEL_ICON} style={{ color: 'var(--text-3)' }} />} />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className={`flex items-center gap-2.5 rounded-xl border border-dashed p-3.5 ${ZONE.air}`}>
+          <StationIcon size={16} style={{ color: 'var(--c-wind)' }} />
+          <span className="font-mono text-[0.78rem] text-muted">{manifest.wind ? m.cc_wind_unavailable() : m.cc_wind_none()}</span>
+        </div>
+      )}
 
       <TideStrip tides={tides} tz={tz} lat={manifest.buoy.lat} lon={manifest.buoy.lon} />
     </section>

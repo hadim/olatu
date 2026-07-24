@@ -9,20 +9,22 @@
 // in full anyway.
 
 import { parquetReadObjects } from 'hyparquet';
-import { dataBase } from './data';
+import { dataBase, windBase } from './data';
 
 export interface Columnar {
   t: number[]; // epoch seconds
   [variable: string]: (number | null)[];
 }
 
-/** Load a Parquet tier (e.g. "daily.parquet") for a campaign, decoding only the wanted columns. */
-export async function loadParquetTier(campaign: string, name: string, columns: string[]): Promise<Columnar> {
+/** Load a Parquet tier from an explicit base URL, decoding only the wanted columns. Both buoy
+ *  and wind-station tiers share the `datetime_utc` time column (ingest/build.py, ingest/wind.py),
+ *  so the body is identical — only the base URL differs. */
+export async function loadParquetTierFrom(base: string, name: string, columns: string[]): Promise<Columnar> {
   // Revalidate every load: HF serves parquet with no cache-control, so the browser
   // would heuristically cache a stale copy — making the chart lag the (no-cache) JSON
   // banner by a refresh cycle. `no-cache` returns a cheap 304 when unchanged.
-  const res = await fetch(`${dataBase(campaign)}${name}`, { cache: 'no-cache' });
-  if (!res.ok) throw new Error(`Failed to load ${campaign}/${name} (${res.status})`);
+  const res = await fetch(`${base}${name}`, { cache: 'no-cache' });
+  if (!res.ok) throw new Error(`Failed to load ${base}${name} (${res.status})`);
   const file = await res.arrayBuffer();
 
   const rows = (await parquetReadObjects({
@@ -43,4 +45,14 @@ export async function loadParquetTier(campaign: string, name: string, columns: s
     }
   }
   return out;
+}
+
+/** Load a Parquet tier (e.g. "daily.parquet") for a buoy campaign. */
+export function loadParquetTier(campaign: string, name: string, columns: string[]): Promise<Columnar> {
+  return loadParquetTierFrom(dataBase(campaign), name, columns);
+}
+
+/** Load a Parquet tier for a wind station (`wind/<station>/data/…`) — spec 0012/0013. */
+export function loadWindParquetTier(station: string, name: string, columns: string[]): Promise<Columnar> {
+  return loadParquetTierFrom(windBase(station), name, columns);
 }

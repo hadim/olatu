@@ -152,14 +152,25 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   distance, never "wind at the buoy". Non-fatal; `update()` scrapes the 6-min feed + rebuilds
   tiers every run, while the **hourly history is a one-shot seed** (`pixi run wind --seed`), never
   re-fetched — forward growth is 6-min only.
+- **Wind webapp (spec 0013)** = the **Air realm** (amber `--c-wind`) opposite the buoy **Mer realm**
+  (teal), one colour+glyph system across selection · current conditions · timeseries so "buoy vs
+  station" reads at a glance. A **station picker** sits beside the (kept) collapsible buoy switcher:
+  default = the manifest `wind` pointer, override **persisted per buoy** (`olatu.station`). A station
+  loads with the **same code path as a buoy** (`data.windBase(station)` + `loadWind*` +
+  `loadWindParquetTier`); `App` threads it down race-tagged `{campaign, station}`. Current Conditions
+  is two realm **zones** joined by the **offshore/onshore** bridge (`lib/wind.ts` — station
+  `wind_direction_deg` × buoy `peak_direction_deg`, swell-relative approx). Station timeseries share
+  the buoy's x-axis with per-panel **hide/reorder** (persisted `olatu.charts.order|hidden`). Keep the
+  temp/direction disambiguation carried by **zone + glyph + colour**, never colour alone.
 
 ## Status
 
-Shipped and live at **olatu.io** — foundation → PWA → analytics/legal → wind ingest (specs
-0001–0012). The full feature-by-feature history is in **[docs/HISTORY.md](docs/HISTORY.md)**; the
-spec index + statuses are in [specs/README.md](specs/README.md).
+Shipped and live at **olatu.io** — foundation → PWA → analytics/legal → wind ingest → wind in the
+webapp (specs 0001–0013). The full feature-by-feature history is in
+**[docs/HISTORY.md](docs/HISTORY.md)**; the spec index + statuses are in [specs/README.md](specs/README.md).
 
 **Open owner TODO:** add the **`API_MAREE_KEY`** (tides) and **`METEOFRANCE_API_KEY`** (6-min
 live wind) GitHub secrets so both refresh in CI — the hourly wind history is keyless and already
-seeded to the bucket (2010→). **Next per roadmap:** surface wind in the webapp (offshore/onshore
-vs swell — spec 0012 Phase 3), side-by-side buoy comparison, per-locale glossary JSON.
+seeded to the bucket (2010→). **Next per roadmap:** a combined air+sea temperature chart panel + a
+map buoy↔station pairing line (spec 0013 follow-ups), side-by-side buoy comparison, per-locale
+glossary JSON.

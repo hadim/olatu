@@ -11,10 +11,11 @@ import { useRoute } from '@/lib/route';
 import { initAnalytics } from '@/lib/analytics';
 import { useLocale } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
-import { loadManifest, loadLatest, loadRecent, loadTidesForManifest, type Manifest, type Series } from './lib/data';
+import { loadManifest, loadLatest, loadRecent, loadTidesForManifest, loadWindManifest, loadWindLatest, type Manifest, type Series, type WindData } from './lib/data';
 import type { Tides } from './lib/tides';
-import { loadParquetTier, type Columnar } from './lib/parquet';
-import { initialCampaign, persistCampaign, campaignUrl } from './lib/buoys';
+import { loadParquetTier, loadWindParquetTier, type Columnar } from './lib/parquet';
+import { initialCampaign, persistCampaign, campaignUrl, buoyInfo } from './lib/buoys';
+import { stationForBuoy, hasStationOverride, persistStation, clearStation, stationsForBuoy } from './lib/stations';
 
 interface Loaded {
   // The campaign these tiers belong to. Render only uses `data` when this matches the
@@ -33,6 +34,17 @@ const HISTORY_COLUMNS = [
   'peak_direction_deg',
   'peak_directional_spread_deg',
   'sea_temperature_c',
+];
+
+const WIND_HISTORY_COLUMNS = [
+  'wind_speed_ms',
+  'wind_gust_ms',
+  'wind_direction_deg',
+  'wind_gust_direction_deg',
+  'air_temperature_c',
+  'precipitation_mm',
+  'humidity_pct',
+  'pressure_msl_hpa',
 ];
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
@@ -83,6 +95,15 @@ export default function App() {
   const campaignRef = useRef(campaign);
   campaignRef.current = campaign;
 
+  // Paired wind station (spec 0013). Resolved per buoy = manifest default (nearest station) OR
+  // the user's persisted per-buoy override. Loaded + tagged {campaign, station} like tides so a
+  // buoy/station switch never pairs mismatched data.
+  const [wind, setWind] = useState<{ campaign: string; station: string; data: WindData } | null>(null);
+  const [windHistory, setWindHistory] = useState<{ campaign: string; station: string; cols: Columnar } | null>(null);
+  // Bumped after a station pick to re-derive the resolved station from storage.
+  const [stationTick, setStationTick] = useState(0);
+  const stationRef = useRef<string | null>(null);
+
   const setCampaign = useCallback((c: string) => {
     if (c === campaignRef.current) return;
     persistCampaign(c);
@@ -95,6 +116,16 @@ export default function App() {
       /* history unavailable — state + storage still update */
     }
     setCampaignState(c);
+  }, []);
+
+  // Pick a wind station for the current buoy: persist as a per-buoy override, or clear the
+  // override when the choice IS the manifest default (so it keeps tracking the default). The
+  // stationTick bump re-derives the resolved station, which reloads the wind tiers. Spec 0013.
+  const onSelectStation = useCallback((id: string, isDefault: boolean) => {
+    const c = campaignRef.current;
+    if (isDefault) clearStation(c);
+    else persistStation(c, id);
+    setStationTick((t) => t + 1);
   }, []);
 
   // Deep-link the buoy in the URL so a copied link opens the same buoy. On mount,
@@ -145,6 +176,15 @@ export default function App() {
       if (c !== campaignRef.current) return;
       generatedAtRef.current = manifest.generated_at;
       setData({ campaign: c, manifest, latest, recent });
+      // Refresh the paired station's live readings on the same cadence (the 6-min feed grows
+      // every run); best-effort, campaign+station-guarded so a switch mid-flight can't cross data.
+      const st = stationRef.current;
+      if (st) {
+        const wl = await loadWindLatest(st).catch(() => null);
+        if (wl && st === stationRef.current && c === campaignRef.current) {
+          setWind((w) => (w && w.station === st && w.campaign === c ? { campaign: c, station: st, data: { ...w.data, latest: wl } } : w));
+        }
+      }
     } catch (e) {
       console.error('Background data refresh failed:', e);
     }
@@ -171,6 +211,18 @@ export default function App() {
   const histCols = history && history.campaign === campaign ? history.cols : null;
   const tideData = tides && tides.campaign === campaign ? tides.tides : null;
 
+  // Resolved wind station for this buoy: the user's per-buoy override, else the manifest default
+  // (nearest station). null → no station in range → wind empty-state. Race-tagged like tides.
+  const defaultStation = ready?.manifest.wind?.station ?? null;
+  const stationId = useMemo(
+    () => stationForBuoy(campaign, defaultStation),
+    [campaign, defaultStation, stationTick],
+  );
+  stationRef.current = stationId;
+  const windData = wind && wind.campaign === campaign && wind.station === stationId ? wind.data : null;
+  const windHistCols =
+    windHistory && windHistory.campaign === campaign && windHistory.station === stationId ? windHistory.cols : null;
+
   // Reflect the selected buoy in the tab/title (nice for shared ?buoy= links). The
   // static index.html keeps the keyword-rich title for crawlers that don't run JS, and
   // the Open Graph/Twitter titles are static too, so link previews stay on-brand.
@@ -191,6 +243,14 @@ export default function App() {
   const lastT = useMemo(
     () => (ready ? Math.floor(Date.parse(ready.manifest.span.end) / 1000) : 0),
     [ready?.manifest],
+  );
+  const windYearFiles = useMemo(
+    () => Object.fromEntries((windData?.manifest.years ?? []).map((y) => [y.year, y.file])),
+    [windData?.manifest],
+  );
+  const windHourlyFiles = useMemo(
+    () => Object.fromEntries((windData?.manifest.hourly_files ?? []).map((h) => [h.year, h.file])),
+    [windData?.manifest],
   );
 
   // Per-campaign history (daily means). Reloads when the buoy switches.
@@ -239,6 +299,49 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tidePort]);
 
+  // Load the paired station's tiers (buoy-shaped: manifest + latest readings). Keyed on the
+  // resolved station so a station override reloads it; tagged {campaign, station} for race safety.
+  useEffect(() => {
+    let cancelled = false;
+    setWind(null);
+    if (!stationId) return;
+    const buoy = buoyInfo(campaign);
+    Promise.all([loadWindManifest(stationId), loadWindLatest(stationId)])
+      .then(([wm, wl]) => {
+        if (cancelled) return;
+        const dist = stationsForBuoy(buoy.lat, buoy.lon).find((s) => s.id === stationId)?.distanceKm ?? 0;
+        setWind({
+          campaign,
+          station: stationId,
+          data: { station: stationId, manifest: wm, latest: wl, distanceKm: dist, isOverride: hasStationOverride(campaign) },
+        });
+      })
+      .catch((e) => {
+        console.error('Failed to load wind station:', e);
+        if (!cancelled) setWind(null); // → CurrentConditions wind empty-state
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [campaign, stationId]);
+
+  // Wind history (daily means) for the charts, keyed by station. Best-effort like the buoy history.
+  useEffect(() => {
+    let cancelled = false;
+    setWindHistory(null);
+    if (!stationId) return;
+    loadWindParquetTier(stationId, 'daily.parquet', WIND_HISTORY_COLUMNS)
+      .then((cols) => {
+        if (!cancelled) setWindHistory({ campaign, station: stationId, cols });
+      })
+      .catch((e) => {
+        console.error('Failed to load wind history (daily.parquet):', e);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [campaign, stationId]);
+
   if (route !== 'home') {
     return (
       <div className="mx-auto max-w-[1100px] px-5 pb-12 pt-5">
@@ -255,7 +358,13 @@ export default function App() {
       <Header />
 
       <main>
-        <StationBar campaign={campaign} onSelect={setCampaign} />
+        <StationBar
+          campaign={campaign}
+          onSelect={setCampaign}
+          selectedStation={stationId}
+          defaultStation={defaultStation}
+          onSelectStation={onSelectStation}
+        />
 
         {error && (
           <div className="mt-8 text-base text-danger">
@@ -275,7 +384,7 @@ export default function App() {
 
         {ready && (
           <>
-            <CurrentConditions latest={ready.latest} manifest={ready.manifest} tides={tideData} />
+            <CurrentConditions latest={ready.latest} manifest={ready.manifest} tides={tideData} wind={windData} />
 
             {histCols ? (
               <TimeSeries
@@ -287,6 +396,10 @@ export default function App() {
                 yearFiles={yearFiles}
                 hourlyFiles={hourlyFiles}
                 tides={tideData}
+                windStation={windData ? windData.station : null}
+                windHistory={windHistCols}
+                windYearFiles={windYearFiles}
+                windHourlyFiles={windHourlyFiles}
               />
             ) : historyError ? (
               <div className="mt-8 text-base text-danger">{m.state_charts_error()}</div>

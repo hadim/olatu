@@ -9,12 +9,104 @@
 // map. The choice is remembered across sessions, like the chart range/smoothing prefs.
 
 import { lazy, Suspense, useState } from 'react';
-import { useLocale } from '@/lib/i18n';
+import { useLocale, type MessageKey } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
 import { cn } from '@/lib/utils';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { BUOYS } from '../lib/buoys';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { BUOYS, buoyInfo } from '../lib/buoys';
+import { stationsForBuoy } from '../lib/stations';
 import { HuggingFaceMark, BuoyMark } from './brands';
+import { StationIcon } from './icons';
+
+interface StationPickerProps {
+  campaign: string;
+  selected: string | null;
+  defaultStation: string | null;
+  onSelect: (id: string, isDefault: boolean) => void;
+  compact?: boolean;
+}
+
+// The wind-station picker (Air realm — amber). Default = the buoy's nearest station (manifest
+// pointer); the user may pin any curated station, remembered per buoy. Kept visually distinct
+// from the teal buoy switcher so "station" (on land) never reads as "buoy" (offshore). Spec 0013.
+function StationPicker({ campaign, selected, defaultStation, onSelect, compact = false }: StationPickerProps) {
+  const [open, setOpen] = useState(false);
+  const buoy = buoyInfo(campaign);
+  const choices = stationsForBuoy(buoy.lat, buoy.lon);
+  const cur = selected ? choices.find((c) => c.id === selected) : undefined;
+  const kindLabel = (kind: string) => m[`station_kind_${kind.replaceAll('-', '_')}` as MessageKey]();
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={m.station_change()}
+          className={cn(
+            'inline-flex items-center gap-[0.5rem] rounded-[0.6rem] border text-fg transition-colors',
+            'border-[color-mix(in_oklab,var(--c-wind)_40%,var(--divider))] bg-[color-mix(in_oklab,var(--c-wind)_10%,var(--surface-2))] hover:border-[var(--c-wind)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--c-wind)]',
+            compact ? 'px-[0.6rem] py-[0.32rem]' : 'px-[0.75rem] py-[0.42rem]',
+          )}
+        >
+          <StationIcon size={compact ? 14 : 16} style={{ color: 'var(--c-wind)' }} className="shrink-0" />
+          {cur ? (
+            <span className="inline-flex items-baseline gap-1.5 leading-none">
+              <span className="font-display text-[0.86rem] font-semibold">{cur.label}</span>
+              <span className="font-mono text-[0.66rem] text-faint">{cur.distanceKm.toFixed(1)} km</span>
+            </span>
+          ) : (
+            <span className="font-display text-[0.84rem] text-muted">{m.cc_wind_none()}</span>
+          )}
+          <span aria-hidden="true" className="text-[0.7rem] text-faint">▾</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" role="listbox" aria-label={m.station_wind_heading()} className="flex w-[20rem] flex-col gap-0.5 p-1.5">
+        <div className="px-2 pb-1 pt-1 font-mono text-[0.64rem] uppercase tracking-[0.07em] text-[color:var(--c-wind)]">{m.station_wind_heading()}</div>
+        {choices.map((s) => {
+          const isDefault = s.id === defaultStation;
+          const isSel = s.id === selected;
+          return (
+            <button
+              key={s.id}
+              type="button"
+              role="option"
+              aria-selected={isSel}
+              onClick={() => {
+                onSelect(s.id, isDefault);
+                setOpen(false);
+              }}
+              className={cn(
+                'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-surface-2',
+                isSel && 'bg-[color-mix(in_oklab,var(--c-wind)_12%,transparent)]',
+              )}
+            >
+              <StationIcon size={16} style={{ color: 'var(--c-wind)' }} className="shrink-0" />
+              <span className="flex min-w-0 flex-col leading-tight">
+                <span className="font-display text-[0.86rem] font-medium text-fg">
+                  {s.label}
+                  {isDefault && (
+                    <span className="ml-1.5 rounded-[0.3rem] bg-[color-mix(in_oklab,var(--c-wind)_16%,transparent)] px-1 py-[0.05rem] font-mono text-[0.58rem] uppercase tracking-[0.04em] text-[color:var(--c-wind)]">
+                      {m.station_nearest()}
+                    </span>
+                  )}
+                </span>
+                <span className="font-mono text-[0.64rem] text-faint">
+                  {s.distanceKm.toFixed(1)} km · {kindLabel(s.kind)} · {s.altitude_m} m
+                </span>
+              </span>
+              {isSel && (
+                <span className="ml-auto shrink-0 text-[0.9rem]" style={{ color: 'var(--c-wind)' }} aria-hidden="true">
+                  ✓
+                </span>
+              )}
+            </button>
+          );
+        })}
+        <p className="px-2 pb-1 pt-1.5 text-[0.72rem] leading-snug text-faint">{m.station_pick_help()}</p>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 const BuoyLocator = lazy(() => import('./BuoyLocator'));
 
@@ -77,7 +169,19 @@ function BuoySwitcher({ selected, onSelect, compact = false }: { selected: strin
   );
 }
 
-export default function StationBar({ campaign, onSelect }: { campaign: string; onSelect: (campaign: string) => void }) {
+export default function StationBar({
+  campaign,
+  onSelect,
+  selectedStation,
+  defaultStation,
+  onSelectStation,
+}: {
+  campaign: string;
+  onSelect: (campaign: string) => void;
+  selectedStation: string | null;
+  defaultStation: string | null;
+  onSelectStation: (id: string, isDefault: boolean) => void;
+}) {
   useLocale();
   const [collapsed, setCollapsed] = useState(storedCollapsed);
 
@@ -120,6 +224,9 @@ export default function StationBar({ campaign, onSelect }: { campaign: string; o
           <div className="max-[560px]:order-3 max-[560px]:basis-full">
             <BuoySwitcher selected={campaign} onSelect={onSelect} compact />
           </div>
+          <div className="max-[560px]:order-4 max-[560px]:basis-full">
+            <StationPicker campaign={campaign} selected={selectedStation} defaultStation={defaultStation} onSelect={onSelectStation} compact />
+          </div>
           <div className="ml-auto shrink-0 max-[560px]:order-2">{toggleBtn}</div>
         </div>
       ) : (
@@ -132,6 +239,12 @@ export default function StationBar({ campaign, onSelect }: { campaign: string; o
             <div className="flex min-w-0 flex-col gap-[0.65rem]">
               <p className="m-0 max-w-[48ch] text-[0.95rem] leading-normal text-muted">{m.intro_description()}</p>
               <BuoySwitcher selected={campaign} onSelect={onSelect} />
+              <div className="mt-[0.1rem] flex flex-col gap-[0.35rem]">
+                <span className="font-mono text-[0.68rem] uppercase tracking-[0.08em] text-[color:var(--c-wind)]">{m.station_wind_heading()}</span>
+                <div>
+                  <StationPicker campaign={campaign} selected={selectedStation} defaultStation={defaultStation} onSelect={onSelectStation} />
+                </div>
+              </div>
               <p className="mt-[0.15rem] flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.8rem] text-faint">
                 <span>{m.data_source()}:</span>
                 <a href={CANDHIS} target="_blank" rel="noopener noreferrer" className={SOURCE_LINK}>

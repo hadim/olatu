@@ -23,7 +23,7 @@ import { useLocale, type MessageKey } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
 import { cn } from '@/lib/utils';
 import { compass, dirColor, fmtNumber, fmtDateTime, fmtAxisTick } from '../lib/format';
-import { loadParquetTier, type Columnar } from '../lib/parquet';
+import { loadParquetTier, loadWindParquetTier, type Columnar } from '../lib/parquet';
 import { reconstructCurve, extremaSeries, tideHeightAt, type TideEvent, type Tides } from '../lib/tides';
 import { iconSvg, type IconName } from './icons';
 import { touchZoomPlugin } from '../lib/uplotTouch';
@@ -50,7 +50,7 @@ const mEnd = (y: number, mo: number) => Date.UTC(y, mo + 1, 1) / 1000 - 1;
  *  (0°≡360°), so it isn't projected onto a linear y-axis (which would print N twice and
  *  make a swell near north leap top↔bottom). Instead every arrow sits on ONE centred
  *  row — rotation + colour carry the direction, both inherently wrap-correct. */
-function drawArrowGlyphs(u: uPlot, xs: number[], dir: (number | null)[], dpr: number) {
+function drawArrowGlyphs(u: uPlot, xs: number[], dir: (number | null)[], dpr: number, color?: string) {
   const ctx = u.ctx;
   const { left, top, width, height } = u.bbox;
   ctx.save();
@@ -85,11 +85,40 @@ function drawArrowGlyphs(u: uPlot, xs: number[], dir: (number | null)[], dpr: nu
     ctx.lineTo(-s * 0.2, s * 0.55);
     ctx.lineTo(-s * 0.66, s * 0.55);
     ctx.closePath();
-    ctx.fillStyle = dirColor(d);
+    // Swell arrows carry the cyclical from-direction hue; wind arrows use a fixed realm
+    // colour (amber) so the two direction rows never read as the same series (spec 0013).
+    ctx.fillStyle = color ?? dirColor(d);
     ctx.fill();
     ctx.restore();
   }
   ctx.restore();
+}
+
+/** Insert null break-points across real outages (gaps > 4× the median cadence) so a line
+ *  never bridges a gap. Returns the gap-aware x + per-key columns the charts and hover card
+ *  read from. Shared by the buoy and the wind-station sources (each has its own x-grid). */
+function gapAware(src: Columnar): { gxs: number[]; gcols: Record<string, (number | null)[]> } {
+  const sxs = src.t;
+  let cadence = Infinity;
+  for (let i = 1; i < sxs.length; i++) {
+    const d = sxs[i] - sxs[i - 1];
+    if (d > 0 && d < cadence) cadence = d;
+  }
+  if (!Number.isFinite(cadence)) cadence = DAY;
+  const gapThreshold = 4 * cadence;
+  const keys = Object.keys(src).filter((k) => k !== 't');
+  const gxs: number[] = [];
+  const gcols: Record<string, (number | null)[]> = {};
+  for (const k of keys) gcols[k] = [];
+  for (let i = 0; i < sxs.length; i++) {
+    if (i > 0 && sxs[i] - sxs[i - 1] > gapThreshold) {
+      gxs.push(sxs[i - 1] + cadence);
+      for (const k of keys) gcols[k].push(null);
+    }
+    gxs.push(sxs[i]);
+    for (const k of keys) gcols[k].push((src[k] as (number | null)[])[i]);
+  }
+  return { gxs, gcols };
 }
 
 // Tide extrema markers: ▲ above each high, ▼ below each low, riding the reconstructed
@@ -173,32 +202,44 @@ function dayBoundaries(xmin: number, xmax: number, tz: string): number[] {
 const DAY_SEP_MAX = 45 * DAY;
 
 interface PanelDef {
+  /** Stable id for order/hidden persistence (spec 0013). */
+  id: string;
+  /** Data realm: `sea` reads the buoy source, `air` reads the paired wind station. */
+  realm: 'sea' | 'air';
   titleKey: MessageKey;
-  series: { key: string; colorVar: string; width?: number; fill?: boolean }[];
+  series: { key: string; colorVar: string; width?: number; fill?: boolean; dash?: number[] }[];
   glyph?: boolean; // direction: single centred arrow row, no linear y-axis
   tide?: boolean; // marée: an external reconstructed curve + PM/BM markers (spec 0008)
   zeroBased?: boolean; // y-axis anchored at 0 (spread magnitude)
-  glued?: boolean; // no top gap — sits flush under the panel above
+  glued?: boolean; // no top gap — sits flush under the panel above (a child of the panel above)
   emptyKey?: MessageKey;
 }
 
-const PANELS: PanelDef[] = [
+// Sea realm (buoy). `spread` is glued under `swelldir` — it's a child of that panel, so the two
+// move + hide together (the reorder/hide units are the non-glued panels; spec 0013).
+const SEA_PANELS: PanelDef[] = [
   {
+    id: 'height',
+    realm: 'sea',
     titleKey: 'cc_wave_height',
     series: [
       { key: 'significant_wave_height_m', colorVar: '--c-height', width: 2, fill: true },
       { key: 'max_wave_height_m', colorVar: '--c-max', width: 1 },
     ],
   },
-  { titleKey: 'cc_period', series: [{ key: 'significant_period_s', colorVar: '--c-period', width: 2 }] },
+  { id: 'period', realm: 'sea', titleKey: 'cc_period', series: [{ key: 'significant_period_s', colorVar: '--c-period', width: 2 }] },
   {
     // Direction: a single row of colour+rotation arrows (see drawArrowGlyphs) — no y-axis.
+    id: 'swelldir',
+    realm: 'sea',
     titleKey: 'cc_direction',
     series: [{ key: 'peak_direction_deg', colorVar: '--c-dir' }],
     glyph: true,
   },
   {
     // Étalement (spread): its own honest 0-based line, glued flush under the arrow row.
+    id: 'spread',
+    realm: 'sea',
     titleKey: 'cc_spread',
     series: [{ key: 'peak_directional_spread_deg', colorVar: '--c-dir', width: 1.5 }],
     zeroBased: true,
@@ -208,18 +249,68 @@ const PANELS: PanelDef[] = [
     // Tide (marée): the reconstructed WATER LEVEL (m) over time with ▲ high / ▼ low markers
     // (spec 0008 §8.3), fed from the per-port tides.parquet (external to the wave Columnar).
     // Y is auto min/max (water sits well above chart datum). Empty-state only where there's
-    // no tide data. Second-to-last so temp keeps the shared x-axis.
+    // no tide data.
+    id: 'tide',
+    realm: 'sea',
     titleKey: 'tide_level',
     series: [{ key: 'tide', colorVar: '--c-tide', width: 2, fill: true }],
     tide: true,
     emptyKey: 'tide_chart_empty',
   },
   {
+    id: 'seatemp',
+    realm: 'sea',
     titleKey: 'cc_sea_temp',
     series: [{ key: 'sea_temperature_c', colorVar: '--c-temp', width: 2, fill: true }],
     emptyKey: 'chart_temp_unavailable',
   },
 ];
+
+// Air realm (the paired wind station) — plotted on the SAME x-axis as the buoy (spec 0013).
+const AIR_PANELS: PanelDef[] = [
+  {
+    id: 'wind',
+    realm: 'air',
+    titleKey: 'cc_wind',
+    series: [
+      { key: 'wind_speed_ms', colorVar: '--c-wind', width: 2, fill: true },
+      { key: 'wind_gust_ms', colorVar: '--c-wind', width: 1, dash: [4, 4] },
+    ],
+    emptyKey: 'cc_wind_unavailable',
+  },
+  { id: 'winddir', realm: 'air', titleKey: 'cc_wind_dir', series: [{ key: 'wind_direction_deg', colorVar: '--c-wind' }], glyph: true, emptyKey: 'cc_wind_unavailable' },
+  { id: 'airtemp', realm: 'air', titleKey: 'cc_air_temp', series: [{ key: 'air_temperature_c', colorVar: '--c-wind', width: 2, fill: true }], emptyKey: 'cc_wind_unavailable' },
+  { id: 'rain', realm: 'air', titleKey: 'cc_rain', series: [{ key: 'precipitation_mm', colorVar: '--c-period', width: 1.5, fill: true }], zeroBased: true, emptyKey: 'cc_wind_unavailable' },
+];
+
+const WIND_DETAIL_COLUMNS = ['wind_speed_ms', 'wind_gust_ms', 'wind_direction_deg', 'air_temperature_c', 'precipitation_mm'];
+const REALM_COLOR: Record<'sea' | 'air', string> = { sea: 'var(--accent)', air: 'var(--c-wind)' };
+
+// Panel order + hidden set are remembered across sessions (spec 0013). Both are JSON arrays of
+// unit ids; unknown/new ids are tolerated (a future panel just appends). The reorder/hide UNIT is
+// a non-glued panel — a glued child (spread) always travels with its parent.
+const CHARTS_ORDER_STORE = 'olatu.charts.order';
+const CHARTS_HIDDEN_STORE = 'olatu.charts.hidden';
+function storedIds(key: string): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) || '[]') as unknown;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+function persistIds(key: string, ids: string[]): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(ids));
+  } catch {
+    /* storage unavailable — the change still applies for this session */
+  }
+}
+
+// Imperative per-panel header controls (drag handle + hide eye), styled as a literal class string
+// so Tailwind's source scanner keeps these utilities.
+const TS_CTL =
+  'inline-flex h-6 w-6 items-center justify-center rounded-md border border-transparent text-faint transition-colors hover:border-line hover:bg-surface hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
 
 const PRESETS: { key: string; days: number | null }[] = [
   { key: '1D', days: 1 },
@@ -312,6 +403,10 @@ const PANEL_ICON: Partial<Record<MessageKey, IconName>> = {
   cc_spread: 'spread',
   cc_sea_temp: 'temp',
   tide_level: 'tide',
+  cc_wind: 'wind',
+  cc_wind_dir: 'wind',
+  cc_air_temp: 'temp',
+  cc_rain: 'rain',
 };
 
 const DETAIL_COLUMNS = [
@@ -328,12 +423,12 @@ const DETAIL_COLUMNS = [
 const DETAIL_30MIN = 120 * DAY;
 const DETAIL_HOURLY = 800 * DAY;
 
-function mergeColumnar(parts: Columnar[]): Columnar {
+function mergeColumnar(parts: Columnar[], cols: string[]): Columnar {
   const out: Columnar = { t: [] };
-  for (const c of DETAIL_COLUMNS) out[c] = [];
+  for (const c of cols) out[c] = [];
   for (const p of parts) {
     for (let i = 0; i < p.t.length; i++) out.t.push(p.t[i]);
-    for (const c of DETAIL_COLUMNS) {
+    for (const c of cols) {
       const a = (p[c] as (number | null)[]) ?? [];
       for (let i = 0; i < p.t.length; i++) out[c].push(a[i] ?? null);
     }
@@ -341,7 +436,31 @@ function mergeColumnar(parts: Columnar[]): Columnar {
   return out;
 }
 
-export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles, lastT, tides }: { campaign: string; data: Columnar; tz: string; yearFiles: Record<number, string>; hourlyFiles: Record<number, string>; lastT?: number; tides: Tides | null }) {
+export default function TimeSeries({
+  campaign,
+  data,
+  tz,
+  yearFiles,
+  hourlyFiles,
+  lastT,
+  tides,
+  windStation = null,
+  windHistory = null,
+  windYearFiles = {},
+  windHourlyFiles = {},
+}: {
+  campaign: string;
+  data: Columnar;
+  tz: string;
+  yearFiles: Record<number, string>;
+  hourlyFiles: Record<number, string>;
+  lastT?: number;
+  tides: Tides | null;
+  windStation?: string | null;
+  windHistory?: Columnar | null;
+  windYearFiles?: Record<number, string>;
+  windHourlyFiles?: Record<number, string>;
+}) {
   const { theme } = useTheme();
   const { locale } = useLocale();
   const hostRef = useRef<HTMLDivElement>(null);
@@ -387,6 +506,73 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
   const [summary, setSummary] = useState<{ label: string; latest: string; lo: string; hi: string }[]>([]);
   const detailCache = useRef<Map<number, Columnar>>(new Map());
   const hourlyCache = useRef<Map<number, Columnar>>(new Map());
+  // Paired wind station: its own detail tiers (same tiering as the buoy, station-keyed) + caches.
+  const [windDetail, setWindDetail] = useState<Columnar | null>(null);
+  const windDetailCache = useRef<Map<number, Columnar>>(new Map());
+  const windHourlyCache = useRef<Map<number, Columnar>>(new Map());
+  // Sea panels always; the paired station's Air panels only when a station is resolved (spec 0013).
+  const allPanels = useMemo(() => (windStation ? [...SEA_PANELS, ...AIR_PANELS] : SEA_PANELS), [windStation]);
+  const panelById = useMemo(() => new Map(allPanels.map((p) => [p.id, p])), [allPanels]);
+
+  // Panel order + hidden set (persisted). `order` is kept as the FULL reconciled unit list, so the
+  // drag/hide handlers can splice it directly. Seed it reconciled to avoid an empty first paint.
+  const [order, setOrder] = useState<string[]>(() => {
+    const stored = storedIds(CHARTS_ORDER_STORE);
+    const unitIds = (windStation ? [...SEA_PANELS, ...AIR_PANELS] : SEA_PANELS).filter((p) => !p.glued).map((p) => p.id);
+    return [...stored.filter((id) => unitIds.includes(id)), ...unitIds.filter((id) => !stored.includes(id))];
+  });
+  const [hidden, setHidden] = useState<string[]>(() => storedIds(CHARTS_HIDDEN_STORE));
+  const dragIdRef = useRef<string | null>(null);
+
+  // Keep `order` complete when the available panels change (e.g. the wind station resolves): append
+  // any missing unit id, preserving the stored order for the rest.
+  useEffect(() => {
+    const unitIds = allPanels.filter((p) => !p.glued).map((p) => p.id);
+    setOrder((prev) => {
+      const next = [...prev.filter((id) => unitIds.includes(id)), ...unitIds.filter((id) => !prev.includes(id))];
+      return next.length === prev.length && next.every((v, i) => v === prev[i]) ? prev : next;
+    });
+  }, [allPanels]);
+
+  useEffect(() => persistIds(CHARTS_ORDER_STORE, order), [order]);
+  useEffect(() => persistIds(CHARTS_HIDDEN_STORE, hidden), [hidden]);
+
+  const hideUnit = (id: string) => setHidden((h) => (h.includes(id) ? h : [...h, id]));
+  const showUnit = (id: string) => setHidden((h) => h.filter((x) => x !== id));
+  const moveUnit = (from: string, to: string, after: boolean) =>
+    setOrder((prev) => {
+      if (from === to) return prev;
+      const list = prev.filter((x) => x !== from);
+      const ti = list.indexOf(to);
+      if (ti < 0) return prev;
+      list.splice(after ? ti + 1 : ti, 0, from);
+      return list;
+    });
+
+  // The flat, ordered, visible panel list the render effect iterates: each visible unit followed
+  // by its glued children (spread under swelldir). Hidden units are collected for the chip tray.
+  const { visibleFlat, hiddenUnits } = useMemo(() => {
+    const gluedAfter = new Map<string, PanelDef[]>();
+    let lastUnit: string | null = null;
+    for (const p of allPanels) {
+      if (p.glued && lastUnit) gluedAfter.set(lastUnit, [...(gluedAfter.get(lastUnit) ?? []), p]);
+      else lastUnit = p.id;
+    }
+    const hiddenSet = new Set(hidden);
+    const flat: PanelDef[] = [];
+    const hiddenU: string[] = [];
+    for (const id of order) {
+      const p = panelById.get(id);
+      if (!p || p.glued) continue;
+      if (hiddenSet.has(id)) {
+        hiddenU.push(id);
+        continue;
+      }
+      flat.push(p);
+      for (const g of gluedAfter.get(id) ?? []) flat.push(g);
+    }
+    return { visibleFlat: flat, hiddenUnits: hiddenU };
+  }, [allPanels, order, hidden, panelById]);
 
   const years = useMemo(() => {
     const a: number[] = [];
@@ -488,7 +674,7 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
         }
         parts.push(c);
       }
-      if (!cancelled) setDetail(mergeColumnar(parts));
+      if (!cancelled) setDetail(mergeColumnar(parts, DETAIL_COLUMNS));
     };
 
     (async () => {
@@ -511,6 +697,57 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
       cancelled = true;
     };
   }, [campaign, range.min, range.max, yearFiles, hourlyFiles]);
+
+  // A station override (no campaign change → no remount) must not read the previous station's
+  // per-year cache (both cache under the same year key), so clear it when the station changes.
+  useEffect(() => {
+    windDetailCache.current.clear();
+    windHourlyCache.current.clear();
+  }, [windStation]);
+
+  // Wind detail tiers — the same tiering as the buoy (30-min → hourly → daily by span), keyed by
+  // station via loadWindParquetTier. Best-effort; no station → no wind detail (daily fallback).
+  useEffect(() => {
+    if (!windStation) {
+      setWindDetail(null);
+      return;
+    }
+    const span = range.max - range.min;
+    let cancelled = false;
+    const loadTiles = async (files: Record<number, string>, cache: Map<number, Columnar>) => {
+      const needed: number[] = [];
+      for (let y = new Date(range.min * 1000).getUTCFullYear(); y <= new Date(range.max * 1000).getUTCFullYear(); y++) {
+        if (files[y]) needed.push(y);
+      }
+      if (needed.length === 0) {
+        if (!cancelled) setWindDetail(null);
+        return;
+      }
+      const parts: Columnar[] = [];
+      for (const y of needed) {
+        let c = cache.get(y);
+        if (!c) {
+          c = await loadWindParquetTier(windStation, files[y], WIND_DETAIL_COLUMNS);
+          cache.set(y, c);
+        }
+        parts.push(c);
+      }
+      if (!cancelled) setWindDetail(mergeColumnar(parts, WIND_DETAIL_COLUMNS));
+    };
+    (async () => {
+      try {
+        if (span <= DETAIL_30MIN) await loadTiles(windYearFiles, windDetailCache.current);
+        else if (span <= DETAIL_HOURLY) await loadTiles(windHourlyFiles, windHourlyCache.current);
+        else if (!cancelled) setWindDetail(null);
+      } catch (e) {
+        console.error('Failed to load wind detail tier:', e);
+        if (!cancelled) setWindDetail(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [windStation, range.min, range.max, windYearFiles, windHourlyFiles]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -570,29 +807,16 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
     const tideInWindow = tideEvents.some((e) => e.t / 1000 >= xmin && e.t / 1000 <= xmax);
 
     // Insert null break-points across real outages so the line never bridges a gap
-    // (daily.parquet omits empty days). gxs/gcols are the gap-aware arrays the charts
-    // AND the hover card read from — uPlot's cursor idx indexes into these.
-    const cadence = (() => {
-      let c = Infinity;
-      for (let i = 1; i < sxs.length; i++) {
-        const d = sxs[i] - sxs[i - 1];
-        if (d > 0 && d < c) c = d;
-      }
-      return Number.isFinite(c) ? c : DAY;
-    })();
-    const gapThreshold = 4 * cadence;
-    const KEYS = Object.keys(src).filter((k) => k !== 't');
-    const gxs: number[] = [];
-    const gcols: Record<string, (number | null)[]> = {};
-    for (const k of KEYS) gcols[k] = [];
-    for (let i = 0; i < sxs.length; i++) {
-      if (i > 0 && sxs[i] - sxs[i - 1] > gapThreshold) {
-        gxs.push(sxs[i - 1] + cadence);
-        for (const k of KEYS) gcols[k].push(null);
-      }
-      gxs.push(sxs[i]);
-      for (const k of KEYS) gcols[k].push((src[k] as (number | null)[])[i]);
-    }
+    // (daily.parquet omits empty days). gxs/gcols are the gap-aware arrays the charts AND the
+    // hover card read from — uPlot's cursor idx indexes into these. The wind station is a
+    // SEPARATE source on its own x-grid (spec 0013), so it gets its own gap-aware arrays; Air
+    // panels read those while sharing the same x-scale + crosshair sync as the buoy panels.
+    const { gxs, gcols } = gapAware(src);
+    const windSrc = windStation ? windDetail ?? windHistory : null;
+    const windSxs = windSrc?.t ?? [];
+    const wind = windSrc ? gapAware(windSrc) : { gxs: [] as number[], gcols: {} as Record<string, (number | null)[]> };
+    const windGxs = wind.gxs;
+    const windGcols = wind.gcols;
 
     const axisColor = cssVar('--text-3');
     const gridColor = cssVar('--hairline');
@@ -690,8 +914,15 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
     }
     setSummary(summaryRows);
 
-    PANELS.forEach((panel, idx) => {
-      const isLast = idx === PANELS.length - 1;
+    visibleFlat.forEach((panel, idx) => {
+      const isLast = idx === visibleFlat.length - 1;
+      // Air panels read the wind station's source + x-grid; Sea panels read the buoy's. Both
+      // share the x-scale + crosshair sync, so they line up at every zoom (spec 0013).
+      const air = panel.realm === 'air';
+      const pgxs = air ? windGxs : gxs;
+      const pgcols = air ? windGcols : gcols;
+      const psrc = air ? windSrc : src;
+      const psxs = air ? windSxs : sxs;
       const wrap = document.createElement('div');
       // z-10 keeps the panels (and headings) above the day-separator overlay (z-0).
       wrap.className = 'relative z-10 w-full overflow-hidden';
@@ -700,35 +931,97 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
       heading.className = `${panel.glued ? 'mt-0' : 'mt-[0.6rem]'} mb-[0.1rem] ml-[0.2rem] relative z-10 flex w-full items-center text-[0.74rem] uppercase tracking-[0.07em] text-faint`;
       const panelIcon = PANEL_ICON[panel.titleKey];
       const titleIcon = panelIcon ? iconSvg(panelIcon, { className: 'mr-1.5 shrink-0', color: `var(${panel.series[0].colorVar})` }) : '';
+      // Realm cue (spec 0013): a coloured left bar + a Mer/Air chip so a long stack always reads
+      // sea-vs-air at a glance. A glued child (spread) inherits its parent's — don't repeat it.
+      const realmColor = REALM_COLOR[panel.realm];
+      const realmBar = panel.glued
+        ? ''
+        : `<span aria-hidden="true" style="display:inline-block;width:3px;height:0.8rem;border-radius:2px;background:${realmColor};margin-right:0.5rem;flex:none"></span>`;
+      const realmTag = panel.glued
+        ? ''
+        : `<span class="ml-2 rounded-[0.3rem] px-1.5 py-[0.05rem] text-[0.6rem] font-normal normal-case tracking-[0.03em]" style="color:${realmColor};background:color-mix(in oklab, ${realmColor} 14%, transparent)">${air ? m.ts_tag_air() : m.ts_tag_sea()}</span>`;
       // Direction panel carries an inline colour legend (N/E/S/O) so the cyclical
-      // from-direction hue is self-explanatory without opening the glossary.
-      const legendHTML =
+      // from-direction hue is self-explanatory without opening the glossary. The legend + the
+      // per-panel controls share one right-aligned group.
+      const legendInner =
         panel.titleKey === 'cc_direction'
-          ? '<span class="ml-auto flex items-center gap-[0.55rem] text-[0.66rem]">' +
-            [0, 90, 180, 270]
+          ? [0, 90, 180, 270]
               .map(
                 (d) =>
                   `<span class="inline-flex items-center gap-[0.25rem]"><span class="inline-block h-[0.5rem] w-[0.5rem] rounded-full" style="background:${dirColor(d)}"></span>${dirLocale(d)}</span>`,
               )
-              .join('') +
-            '</span>'
+              .join('')
           : '';
-      heading.innerHTML = `${titleIcon}<span>${m[panel.titleKey]()}</span>${legendHTML}`;
+      heading.innerHTML = `${realmBar}${titleIcon}<span>${m[panel.titleKey]()}</span>${realmTag}<span class="ts-right ml-auto flex items-center gap-[0.55rem] text-[0.66rem]">${legendInner}</span>`;
+
+      // Per-unit controls (spec 0013): a hide "eye" + a drag handle. Glued children (spread) get
+      // none — they follow their parent. Wired imperatively since the panels live in this uPlot host.
+      if (!panel.glued) {
+        const right = heading.querySelector('.ts-right');
+        const eye = document.createElement('button');
+        eye.type = 'button';
+        eye.className = TS_CTL;
+        eye.setAttribute('aria-label', `${m.ts_hide()} · ${m[panel.titleKey]()}`);
+        eye.title = m.ts_hide();
+        eye.innerHTML = iconSvg('eye', { size: 15, color: 'currentColor' });
+        eye.addEventListener('click', () => hideUnit(panel.id));
+        right?.appendChild(eye);
+
+        const grip = document.createElement('button');
+        grip.type = 'button';
+        grip.className = `${TS_CTL} mr-1 cursor-grab`;
+        grip.draggable = true;
+        grip.setAttribute('aria-label', m.ts_reorder());
+        grip.title = m.ts_reorder();
+        grip.innerHTML = iconSvg('grip', { size: 16, color: 'currentColor' });
+        grip.addEventListener('dragstart', (e) => {
+          dragIdRef.current = panel.id;
+          if (e.dataTransfer) {
+            e.dataTransfer.setData('text/plain', panel.id);
+            e.dataTransfer.effectAllowed = 'move';
+          }
+        });
+        grip.addEventListener('dragend', () => {
+          dragIdRef.current = null;
+          host.querySelectorAll('.ts-drop').forEach((n) => n.classList.remove('ts-drop', 'ring-2', 'ring-accent'));
+        });
+        heading.insertBefore(grip, heading.firstChild);
+
+        // The heading is the drop target: dropping before/after its midpoint reorders the unit.
+        heading.dataset.unit = panel.id;
+        heading.addEventListener('dragover', (e) => {
+          if (!dragIdRef.current || dragIdRef.current === panel.id) return;
+          e.preventDefault();
+          heading.classList.add('ts-drop', 'ring-2', 'ring-accent');
+        });
+        heading.addEventListener('dragleave', () => heading.classList.remove('ts-drop', 'ring-2', 'ring-accent'));
+        heading.addEventListener('drop', (e) => {
+          e.preventDefault();
+          heading.classList.remove('ts-drop', 'ring-2', 'ring-accent');
+          const from = dragIdRef.current;
+          if (from && from !== panel.id) {
+            const r = heading.getBoundingClientRect();
+            moveUnit(from, panel.id, e.clientY > r.top + r.height / 2);
+          }
+        });
+      }
+
       host.appendChild(heading);
       host.appendChild(wrap);
 
       const inWindow = (key: string) => {
-        const col = src[key] as (number | null)[];
+        if (!psrc) return false;
+        const col = psrc[key] as (number | null)[];
         let n = 0;
-        for (let i = 0; i < sxs.length; i++) {
-          if (sxs[i] >= xmin && sxs[i] <= xmax && col[i] != null) n += 1;
+        for (let i = 0; i < psxs.length; i++) {
+          if (psxs[i] >= xmin && psxs[i] <= xmax && col[i] != null) n += 1;
           if (n >= 2) return true;
         }
         return false;
       };
       const hasData = panel.tide ? tideInWindow : panel.series.some((srs) => inWindow(srs.key));
 
-      const plotted = (key: string) => movingAvg(gcols[key], radius);
+      const plotted = (key: string) => movingAvg(pgcols[key] ?? [], radius);
 
       let chartData: uPlot.AlignedData;
       let series: uPlot.Series[];
@@ -749,20 +1042,21 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
         // scale) feeds uPlot's cursor index and pins the crosshair dot to the centred
         // row; the arrows themselves are painted in the draw hook. Rotation + colour carry
         // the direction, so the row needs no y-scale of its own.
-        const dirArr = gcols[panel.series[0].key];
-        chartData = [gxs, dirArr.map((v) => (v == null ? null : 0.5))];
+        const dirArr = pgcols[panel.series[0].key] ?? [];
+        chartData = [pgxs, dirArr.map((v) => (v == null ? null : 0.5))];
         series = [
           {},
           { label: panel.series[0].key, stroke: 'transparent', width: 0, points: { show: false }, paths: () => null, value: (_u, _v, _si, di) => (di == null || dirArr[di] == null ? '—' : `${Math.round(dirArr[di]!)}°`) },
         ];
       } else {
-        chartData = [gxs, ...panel.series.map((srs) => plotted(srs.key))];
+        chartData = [pgxs, ...panel.series.map((srs) => plotted(srs.key))];
         series = [
           {},
           ...panel.series.map((srs) => {
             const color = cssVar(srs.colorVar);
             const base: uPlot.Series = { label: srs.key, stroke: color, width: srs.width ?? 2, value: (_u, v) => (v == null ? '—' : v.toFixed(1)) };
             if (srs.fill) base.fill = color + '22';
+            if (srs.dash) base.dash = srs.dash;
             return base;
           }),
         ];
@@ -797,10 +1091,10 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
       };
 
       const hooks: uPlot.Hooks.Arrays = {
-        // The tide panel's x-data differs from the wave gxs, so its cursor idx would corrupt
-        // the shared (gxs-indexed) hover card. Leave its setCursor empty and let the x-synced
-        // wave panels drive the card; hovering the tide panel still moves every crosshair.
-        setCursor: panel.tide ? [] : [(u) => renderCard(u.cursor.idx)],
+        // The tide + Air panels sit on their own x-grid, so their cursor idx would corrupt the
+        // shared (buoy gxs-indexed) hover card. Leave their setCursor empty and let the x-synced
+        // buoy panels drive the card; hovering them still moves every crosshair.
+        setCursor: panel.tide || air ? [] : [(u) => renderCard(u.cursor.idx)],
         setScale: [
           (u, key) => {
             if (key !== 'x' || syncing) return;
@@ -813,8 +1107,8 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
         ],
       };
       if (panel.glyph) {
-        const dirArr = gcols[panel.series[0].key];
-        hooks.draw = [(u) => drawArrowGlyphs(u, gxs, dirArr, DPR)];
+        const dirArr = pgcols[panel.series[0].key] ?? [];
+        hooks.draw = [(u) => drawArrowGlyphs(u, pgxs, dirArr, DPR, air ? cssVar('--c-wind') : undefined)];
       }
       if (panel.tide && tideNarrow && tideEvents.length) {
         hooks.draw = [(u) => drawTideMarkers(u, tideEvents, tideColor, DPR)];
@@ -913,7 +1207,7 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
       plotsRef.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, detail, theme, locale, range.min, range.max, smooth, tz, tides]);
+  }, [data, detail, windHistory, windDetail, windStation, visibleFlat, theme, locale, range.min, range.max, smooth, tz, tides]);
 
   return (
     <section className="mt-6">
@@ -1045,6 +1339,36 @@ export default function TimeSeries({ campaign, data, tz, yearFiles, hourlyFiles,
           </span>
         </div>
         <div className="hover-stats grid grid-cols-3 gap-x-4 gap-y-[0.35rem] max-[560px]:grid-cols-2 max-[380px]:grid-cols-1" />
+      </div>
+      {/* Series manager (spec 0013): hidden panels sit here as chips (click to restore); each
+          visible panel has a drag handle to reorder + an eye to hide. Order + hidden persist. */}
+      <div className="mb-[0.7rem] flex flex-wrap items-center gap-2">
+        <span className="font-mono text-[0.66rem] uppercase tracking-[0.06em] text-faint">{m.ts_manage_hint()}</span>
+        {hiddenUnits.length > 0 && (
+          <>
+            <span className="mx-1 h-3 w-px bg-divider" aria-hidden="true" />
+            <span className="font-mono text-[0.66rem] uppercase tracking-[0.06em] text-faint">{m.ts_hidden()}:</span>
+            {hiddenUnits.map((id) => {
+              const p = panelById.get(id);
+              if (!p) return null;
+              const c = REALM_COLOR[p.realm];
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => showUnit(id)}
+                  aria-label={`${m.ts_show()} · ${m[p.titleKey]()}`}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 font-mono text-[0.72rem] text-muted transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  style={{ borderColor: `color-mix(in oklab, ${c} 40%, var(--hairline))` }}
+                >
+                  <span className="h-2 w-2 rounded-[2px]" style={{ background: c }} aria-hidden="true" />
+                  {m[p.titleKey]()}
+                  <span className="text-faint" aria-hidden="true">+</span>
+                </button>
+              );
+            })}
+          </>
+        )}
       </div>
       <div className="relative">
         <div ref={hostRef} className="charts relative rounded-2xl border border-line bg-surface-2 px-4 pb-4 pt-3" />
