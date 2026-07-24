@@ -23,6 +23,7 @@ import { useLocale, type MessageKey } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
 import { cn } from '@/lib/utils';
 import { compass, dirColor, fmtNumber, fmtDateTime, fmtAxisTick } from '../lib/format';
+import { useUnits, measureKind, measureSuffix, keySuffix, formatKeyValue, convertMeasure } from '../lib/units';
 import { loadParquetTier, loadWindParquetTier, type Columnar } from '../lib/parquet';
 import { reconstructCurve, extremaSeries, tideHeightAt, type TideEvent, type Tides } from '../lib/tides';
 import { iconSvg, type IconName } from './icons';
@@ -32,6 +33,9 @@ import DatePicker from './DatePicker';
 
 const SYNC_KEY = 'olatu-ts';
 const DAY = 86_400;
+const HOUR = 3_600;
+// Tightest window the presets / a drag-zoom may resolve to (sub-day is allowed now — spec 0013 rev).
+const MIN_SPAN = HOUR;
 
 const CHIP_BASE =
   'inline-flex shrink-0 items-center justify-center font-mono text-[0.78rem] rounded-[0.5rem] border px-[0.7rem] py-[0.32rem] cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-35 disabled:cursor-default disabled:pointer-events-none max-md:min-h-11';
@@ -85,8 +89,9 @@ function drawArrowGlyphs(u: uPlot, xs: number[], dir: (number | null)[], dpr: nu
     ctx.lineTo(-s * 0.2, s * 0.55);
     ctx.lineTo(-s * 0.66, s * 0.55);
     ctx.closePath();
-    // Swell arrows carry the cyclical from-direction hue; wind arrows use a fixed realm
-    // colour (amber) so the two direction rows never read as the same series (spec 0013).
+    // Both direction rows (swell + wind) carry the cyclical from-direction hue: direction is
+    // encoded by cardinal colour, realm by the panel's realm bar/tag (spec 0013 revision). The
+    // optional `color` override is kept for callers that want a flat colour.
     ctx.fillStyle = color ?? dirColor(d);
     ctx.fill();
     ctx.restore();
@@ -94,26 +99,39 @@ function drawArrowGlyphs(u: uPlot, xs: number[], dir: (number | null)[], dpr: nu
   ctx.restore();
 }
 
-/** Insert null break-points across real outages (gaps > 4× the median cadence) so a line
- *  never bridges a gap. Returns the gap-aware x + per-key columns the charts and hover card
- *  read from. Shared by the buoy and the wind-station sources (each has its own x-grid). */
+/** Insert null break-points across real outages so a line never bridges a gap. A "gap" is a
+ *  delta far larger than the LOCAL sampling cadence, tracked causally with an EWMA of the normal
+ *  deltas — NOT the global minimum. That distinction is the whole point: a source can MIX
+ *  cadences. The current-year wind file appends a 6-min live tail to an hourly history, so keying
+ *  the threshold off the global-min (6 min) flagged every hourly history step (3600 s ≫ 4×360 s)
+ *  as a gap and shattered the line into invisible dots — the reported "wind vanishes when I zoom
+ *  into an older window" (at 1Y the uniform hourly-*means* tier loads, so it looked fine; zoomed
+ *  in, the mixed-cadence year tier loaded). Because the coarse history always precedes the fine
+ *  live tail chronologically, a causal EWMA stays coarse through all of the history and only
+ *  sharpens in the tail, so neither regime is ever shattered — now or as the live feed grows.
+ *  Returns the gap-aware x + per-key columns the charts and hover card read from. Shared by the
+ *  buoy and wind-station sources (each has its own x-grid). */
+const GAP_FACTOR = 4; // a delta > 4× the local cadence is a real outage → break the line
+const GAP_EWMA_ALPHA = 0.15; // cadence tracker responsiveness (~adapts over a handful of samples)
 function gapAware(src: Columnar): { gxs: number[]; gcols: Record<string, (number | null)[]> } {
   const sxs = src.t;
-  let cadence = Infinity;
-  for (let i = 1; i < sxs.length; i++) {
-    const d = sxs[i] - sxs[i - 1];
-    if (d > 0 && d < cadence) cadence = d;
-  }
-  if (!Number.isFinite(cadence)) cadence = DAY;
-  const gapThreshold = 4 * cadence;
   const keys = Object.keys(src).filter((k) => k !== 't');
   const gxs: number[] = [];
   const gcols: Record<string, (number | null)[]> = {};
   for (const k of keys) gcols[k] = [];
+  let cadence = 0; // EWMA of normal (non-gap) deltas; seeded from the first positive delta
   for (let i = 0; i < sxs.length; i++) {
-    if (i > 0 && sxs[i] - sxs[i - 1] > gapThreshold) {
-      gxs.push(sxs[i - 1] + cadence);
-      for (const k of keys) gcols[k].push(null);
+    if (i > 0) {
+      const d = sxs[i] - sxs[i - 1];
+      if (cadence === 0 && d > 0) cadence = d; // seed → the first delta is never itself a gap
+      if (cadence > 0 && d > GAP_FACTOR * cadence) {
+        // A real outage: break the line with a null just after the last sample, and do NOT fold
+        // this (huge) delta into the cadence estimate — that would poison the tracker.
+        gxs.push(sxs[i - 1] + cadence);
+        for (const k of keys) gcols[k].push(null);
+      } else if (d > 0) {
+        cadence = GAP_EWMA_ALPHA * d + (1 - GAP_EWMA_ALPHA) * cadence; // track the local cadence
+      }
     }
     gxs.push(sxs[i]);
     for (const k of keys) gcols[k].push((src[k] as (number | null)[])[i]);
@@ -281,9 +299,13 @@ const AIR_PANELS: PanelDef[] = [
   { id: 'winddir', realm: 'air', titleKey: 'cc_wind_dir', series: [{ key: 'wind_direction_deg', colorVar: '--c-wind' }], glyph: true, emptyKey: 'cc_wind_unavailable' },
   { id: 'airtemp', realm: 'air', titleKey: 'cc_air_temp', series: [{ key: 'air_temperature_c', colorVar: '--c-wind', width: 2, fill: true }], emptyKey: 'cc_wind_unavailable' },
   { id: 'rain', realm: 'air', titleKey: 'cc_rain', series: [{ key: 'precipitation_mm', colorVar: '--c-period', width: 1.5, fill: true }], zeroBased: true, emptyKey: 'cc_wind_unavailable' },
+  // Humidity + pressure are NULLABLE (some stations drop them, per spec 0012): their own empty
+  // message ("not measured at this station") is honester than the generic wind-unavailable band.
+  { id: 'humidity', realm: 'air', titleKey: 'cc_humidity', series: [{ key: 'humidity_pct', colorVar: '--c-tide', width: 1.5 }], emptyKey: 'cc_hp_unavailable' },
+  { id: 'pressure', realm: 'air', titleKey: 'cc_pressure', series: [{ key: 'pressure_msl_hpa', colorVar: '--c-dir', width: 1.5 }], emptyKey: 'cc_hp_unavailable' },
 ];
 
-const WIND_DETAIL_COLUMNS = ['wind_speed_ms', 'wind_gust_ms', 'wind_direction_deg', 'air_temperature_c', 'precipitation_mm'];
+const WIND_DETAIL_COLUMNS = ['wind_speed_ms', 'wind_gust_ms', 'wind_direction_deg', 'air_temperature_c', 'precipitation_mm', 'humidity_pct', 'pressure_msl_hpa'];
 const REALM_COLOR: Record<'sea' | 'air', string> = { sea: 'var(--accent)', air: 'var(--c-wind)' };
 
 // Panel order + hidden set are remembered across sessions (spec 0013). Both are JSON arrays of
@@ -312,7 +334,11 @@ function persistIds(key: string, ids: string[]): void {
 const TS_CTL =
   'inline-flex h-6 w-6 items-center justify-center rounded-md border border-transparent text-faint transition-colors hover:border-line hover:bg-surface hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
 
+// `days` may be fractional for the sub-day presets (2h/6h/12h — spec 0013 rev). null = All.
 const PRESETS: { key: string; days: number | null }[] = [
+  { key: '2H', days: 2 / 24 },
+  { key: '6H', days: 6 / 24 },
+  { key: '12H', days: 12 / 24 },
   { key: '1D', days: 1 },
   { key: '2D', days: 2 },
   { key: '5D', days: 5 },
@@ -394,6 +420,29 @@ const CARD_METRICS: { key: string; labelKey: MessageKey; unit?: string; digits?:
   { key: 'sea_temperature_c', labelKey: 'cc_sea_temp', unit: '°C', digits: 1, icon: 'temp', colorVar: '--c-temp' },
 ];
 
+// The paired station's readout chips (Air realm) — surfaced beside the sea chips in the hover card
+// so "which temperature / direction is which" reads at a glance (spec 0013 rev). Kept to the core
+// four; the panels + on-plot bubbles carry rain / humidity / pressure.
+const AIR_CARD_METRICS: { key: string; labelKey: MessageKey; dir?: boolean; icon: IconName; colorVar: string }[] = [
+  { key: 'wind_speed_ms', labelKey: 'cc_wind', icon: 'wind', colorVar: '--c-wind' },
+  { key: 'wind_gust_ms', labelKey: 'cc_gust', icon: 'wind', colorVar: '--c-wind' },
+  { key: 'wind_direction_deg', labelKey: 'cc_wind_dir', dir: true, icon: 'wind', colorVar: '--c-dir' },
+  { key: 'air_temperature_c', labelKey: 'cc_air_temp', icon: 'temp', colorVar: '--c-wind' },
+];
+
+// Fixed display unit for the non-convertible keys (the convertible speed/temp/pressure keys get
+// their unit from keySuffix + the settings, spec 0014). Powers the per-panel heading unit tag +
+// the hover chips / cursor bubble.
+const FIXED_UNIT: Record<string, string> = {
+  significant_wave_height_m: 'm',
+  max_wave_height_m: 'm',
+  significant_period_s: 's',
+  peak_directional_spread_deg: '°',
+  precipitation_mm: 'mm',
+  humidity_pct: '%',
+  tide: 'm',
+};
+
 // Panel title → icon (the wave-height panel carries both Hs and Hmax, so its title
 // uses the wave-height glyph). Tinted with the panel's primary series colour.
 const PANEL_ICON: Partial<Record<MessageKey, IconName>> = {
@@ -407,6 +456,8 @@ const PANEL_ICON: Partial<Record<MessageKey, IconName>> = {
   cc_wind_dir: 'wind',
   cc_air_temp: 'temp',
   cc_rain: 'rain',
+  cc_humidity: 'humidity',
+  cc_pressure: 'pressure',
 };
 
 const DETAIL_COLUMNS = [
@@ -463,6 +514,7 @@ export default function TimeSeries({
 }) {
   const { theme } = useTheme();
   const { locale } = useLocale();
+  const { units } = useUnits();
   const hostRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   // Live uPlot instances + their base x-scale (used for immediate visual reset).
@@ -605,7 +657,15 @@ export default function TimeSeries({
   // `isZoom` marks a window committed by a drag/pinch gesture: it navigates (loads the
   // matching tier) but must NOT become the Reset target — that stays the last preset.
   const apply = (min: number, max: number, mo: string, isZoom = false) => {
-    const clamped = { min: Math.max(T0, Math.min(min, TN - DAY)), max: Math.min(TN, Math.max(max, T0 + DAY)) };
+    // Clamp into [T0, TN] and guarantee a minimum span (so min<max) — but only MIN_SPAN (1 h),
+    // NOT a whole day, so the 2h/6h/12h presets + fine drag-zooms keep their real width.
+    let lo = Math.max(T0, Math.min(min, max));
+    let hi = Math.min(TN, Math.max(min, max));
+    if (hi - lo < MIN_SPAN) {
+      if (hi >= TN) lo = Math.max(T0, TN - MIN_SPAN); // anchored to the latest reading
+      else hi = Math.min(TN, lo + MIN_SPAN);
+    }
+    const clamped = { min: lo, max: hi };
     setRange(clamped);
     setMode(mo);
     if (!isZoom) presetBaseRef.current = { ...clamped, mode: mo };
@@ -826,26 +886,51 @@ export default function TimeSeries({
 
     const timeEl = cardRef.current?.querySelector<HTMLElement>('.hover-time') ?? null;
     const statsEl = cardRef.current?.querySelector<HTMLElement>('.hover-stats') ?? null;
+    // Units-aware value string for a metric (spec 0014): direction → compass; a convertible
+    // measure (speed/temp/pressure) → converted value + its unit; else a fixed unit.
+    const fmtMetric = (cm: { key: string; dir?: boolean; pm?: boolean; unit?: string; digits?: number }, v: number): string => {
+      if (cm.dir) return `${compass(v, locale)} · ${Math.round(v)}°`;
+      const kind = measureKind(cm.key);
+      if (kind) return `${formatKeyValue(cm.key, v, units, locale)} ${measureSuffix(kind, units)}`;
+      return `${cm.pm ? '±' : ''}${fmtNumber(v, locale, cm.digits ?? 1)}${cm.unit ? ` ${cm.unit}` : ''}`;
+    };
+    // The station rides its own x-grid, so the buoy-indexed hover card looks up its nearest sample
+    // by TIME (windGxs is sorted ascending). Returns -1 when there is no wind series.
+    const windIdxAt = (t: number): number => {
+      if (windGxs.length === 0) return -1;
+      let lo = 0;
+      let hi = windGxs.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (windGxs[mid] < t) lo = mid + 1;
+        else hi = mid;
+      }
+      if (lo > 0 && Math.abs(windGxs[lo - 1] - t) < Math.abs(windGxs[lo] - t)) lo -= 1;
+      return lo;
+    };
+    const chip = (cm: { labelKey: MessageKey; icon: IconName; colorVar: string }, valueHtml: string): string => {
+      const icon = iconSvg(cm.icon, { className: 'shrink-0', color: `var(${cm.colorVar})` });
+      return `<span class="inline-flex items-center gap-[0.35rem]">${icon}<span class="text-[0.68rem] uppercase tracking-[0.05em] text-faint">${m[cm.labelKey]()}</span><span class="font-mono text-[0.84rem] text-muted">${valueHtml}</span></span>`;
+    };
     const chipsHTML = (idx: number) => {
       const chips: string[] = [];
       for (const cm of CARD_METRICS) {
         const v = gcols[cm.key]?.[idx];
-        if (v == null) continue;
-        const val = cm.dir
-          ? `${compass(v, locale)} · ${Math.round(v)}°`
-          : `${cm.pm ? '±' : ''}${fmtNumber(v, locale, cm.digits ?? 1)}${cm.unit ? ` ${cm.unit}` : ''}`;
-        const icon = iconSvg(cm.icon, { className: 'shrink-0', color: `var(${cm.colorVar})` });
-        chips.push(
-          `<span class="inline-flex items-center gap-[0.35rem]">${icon}<span class="text-[0.68rem] uppercase tracking-[0.05em] text-faint">${m[cm.labelKey]()}</span><span class="font-mono text-[0.84rem] text-muted">${val}</span></span>`,
-        );
+        if (v != null) chips.push(chip(cm, fmtMetric(cm, v)));
       }
       // Reconstructed water level at the hovered time (from the extrema, not in gcols).
       const th = tides ? tideHeightAt(tides.events, gxs[idx]) : null;
-      if (th != null) {
-        const icon = iconSvg('tide', { className: 'shrink-0', color: 'var(--c-tide)' });
-        chips.push(
-          `<span class="inline-flex items-center gap-[0.35rem]">${icon}<span class="text-[0.68rem] uppercase tracking-[0.05em] text-faint">${m.tide_level()}</span><span class="font-mono text-[0.84rem] text-muted">${fmtNumber(th, locale, 1)} m</span></span>`,
-        );
+      if (th != null) chips.push(chip({ labelKey: 'tide_level', icon: 'tide', colorVar: '--c-tide' }, `${fmtNumber(th, locale, 1)} m`));
+      // Air chips (spec 0013 rev): the station's readings at the hovered TIME. Only when a station
+      // is paired, so the card gains air values without ever pairing them to the buoy's index.
+      if (windStation && windGxs.length) {
+        const wi = windIdxAt(gxs[idx]);
+        if (wi >= 0) {
+          for (const cm of AIR_CARD_METRICS) {
+            const v = windGcols[cm.key]?.[wi];
+            if (v != null) chips.push(chip(cm, fmtMetric(cm, v)));
+          }
+        }
       }
       return chips.join('');
     };
@@ -886,7 +971,7 @@ export default function TimeSeries({
         if (v > hi) hi = v;
         latest = v;
       }
-      const fmt = (v: number) => (cm.dir ? `${compass(v, locale)} · ${Math.round(v)}°` : `${cm.pm ? '±' : ''}${fmtNumber(v, locale, cm.digits ?? 1)}${cm.unit ? ` ${cm.unit}` : ''}`);
+      const fmt = (v: number) => fmtMetric(cm, v);
       return {
         label: m[cm.labelKey](),
         latest: latest == null ? '—' : fmt(latest),
@@ -911,6 +996,33 @@ export default function TimeSeries({
         lo: Number.isFinite(lo) ? `${fmtNumber(lo, locale, 1)} m` : '—',
         hi: Number.isFinite(hi) ? `${fmtNumber(hi, locale, 1)} m` : '—',
       });
+    }
+    // Air (station) rows — latest/min/max per metric within the window, read from the station's
+    // own series (its own x-grid), so assistive tech gets the air data too (spec 0013 rev).
+    if (windStation && windSrc) {
+      const wxs = windSrc.t;
+      for (const cm of AIR_CARD_METRICS) {
+        const col = windSrc[cm.key] as (number | null)[] | undefined;
+        if (!col) continue;
+        let lo = Infinity;
+        let hi = -Infinity;
+        let latest: number | null = null;
+        for (let i = 0; i < wxs.length; i++) {
+          if (wxs[i] < xmin || wxs[i] > xmax) continue;
+          const v = col[i];
+          if (v == null) continue;
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+          latest = v;
+        }
+        if (latest == null) continue;
+        summaryRows.push({
+          label: m[cm.labelKey](),
+          latest: fmtMetric(cm, latest),
+          lo: Number.isFinite(lo) ? fmtMetric(cm, lo) : '—',
+          hi: Number.isFinite(hi) ? fmtMetric(cm, hi) : '—',
+        });
+      }
     }
     setSummary(summaryRows);
 
@@ -940,11 +1052,11 @@ export default function TimeSeries({
       const realmTag = panel.glued
         ? ''
         : `<span class="ml-2 rounded-[0.3rem] px-1.5 py-[0.05rem] text-[0.6rem] font-normal normal-case tracking-[0.03em]" style="color:${realmColor};background:color-mix(in oklab, ${realmColor} 14%, transparent)">${air ? m.ts_tag_air() : m.ts_tag_sea()}</span>`;
-      // Direction panel carries an inline colour legend (N/E/S/O) so the cyclical
-      // from-direction hue is self-explanatory without opening the glossary. The legend + the
-      // per-panel controls share one right-aligned group.
+      // Both direction panels (swell + wind) carry an inline colour legend (N/E/S/O) so the
+      // cyclical from-direction hue is self-explanatory without opening the glossary. The legend +
+      // the per-panel controls share one right-aligned group.
       const legendInner =
-        panel.titleKey === 'cc_direction'
+        panel.glyph
           ? [0, 90, 180, 270]
               .map(
                 (d) =>
@@ -952,7 +1064,12 @@ export default function TimeSeries({
               )
               .join('')
           : '';
-      heading.innerHTML = `${realmBar}${titleIcon}<span>${m[panel.titleKey]()}</span>${realmTag}<span class="ts-right ml-auto flex items-center gap-[0.55rem] text-[0.66rem]">${legendInner}</span>`;
+      // Unit tag beside the title (spec 0014): the display unit for a convertible measure, else the
+      // fixed unit; direction panels show none (their N/E/S/O legend carries the meaning).
+      const uKey = panel.series[0].key;
+      const uSuffix = keySuffix(uKey, units) ?? FIXED_UNIT[uKey] ?? '';
+      const unitTag = uSuffix ? `<span class="ml-1.5 font-mono text-[0.62rem] font-normal normal-case tracking-normal text-faint">${uSuffix}</span>` : '';
+      heading.innerHTML = `${realmBar}${titleIcon}<span>${m[panel.titleKey]()}</span>${unitTag}${realmTag}<span class="ts-right ml-auto flex items-center gap-[0.55rem] text-[0.66rem]">${legendInner}</span>`;
 
       // Per-unit controls (spec 0013): a hide "eye" + a drag handle. Glued children (spread) get
       // none — they follow their parent. Wired imperatively since the panels live in this uPlot host.
@@ -1021,7 +1138,13 @@ export default function TimeSeries({
       };
       const hasData = panel.tide ? tideInWindow : panel.series.some((srs) => inWindow(srs.key));
 
-      const plotted = (key: string) => movingAvg(pgcols[key] ?? [], radius);
+      // Convert the plotted values to the chosen display unit (spec 0014); the °C→°F offset is
+      // affine so it commutes with the moving-average smoothing above. Non-measures pass through.
+      const plotted = (key: string) => {
+        const arr = movingAvg(pgcols[key] ?? [], radius);
+        const kind = measureKind(key);
+        return kind ? arr.map((v) => (v == null ? null : convertMeasure(kind, v, units))) : arr;
+      };
 
       let chartData: uPlot.AlignedData;
       let series: uPlot.Series[];
@@ -1090,11 +1213,47 @@ export default function TimeSeries({
         values: (_u, splits, _ai, _space, incr) => splits.map((sp) => fmtAxisTick(sp * 1000, locale, tz, incr)),
       };
 
+      // On-plot cursor value: a small pill riding the crosshair that shows THIS panel's value as you
+      // move along x — the readout "direct sur le plot" (spec 0013 rev). The element is created after
+      // the plot (appended to u.over) and referenced here through the mutable holder.
+      const cursorVal: { el: HTMLElement | null } = { el: null };
+      const bubbleText = (idx: number): string => {
+        if (panel.tide) {
+          const h = tideCurve.h[idx];
+          return h == null ? '' : `${fmtNumber(h, locale, 1)} m`;
+        }
+        const k = panel.series[0].key;
+        const v = pgcols[k]?.[idx];
+        if (v == null) return '';
+        if (panel.glyph) return `${compass(v, locale)} · ${Math.round(v)}°`;
+        const kind = measureKind(k);
+        if (kind) return `${formatKeyValue(k, v, units, locale)} ${measureSuffix(kind, units)}`;
+        const suf = FIXED_UNIT[k];
+        return `${fmtNumber(v, locale, 1)}${suf ? ` ${suf}` : ''}`;
+      };
+
       const hooks: uPlot.Hooks.Arrays = {
         // The tide + Air panels sit on their own x-grid, so their cursor idx would corrupt the
-        // shared (buoy gxs-indexed) hover card. Leave their setCursor empty and let the x-synced
-        // buoy panels drive the card; hovering them still moves every crosshair.
-        setCursor: panel.tide || air ? [] : [(u) => renderCard(u.cursor.idx)],
+        // shared (buoy gxs-indexed) hover card, so only the buoy panels drive the card — but EVERY
+        // panel updates its own on-plot bubble, and hovering any panel still moves every crosshair.
+        setCursor: [
+          (u) => {
+            const el = cursorVal.el;
+            if (el) {
+              const idx = u.cursor.idx;
+              const left = u.cursor.left;
+              const txt = idx == null || left == null || left < 0 ? '' : bubbleText(idx);
+              if (txt) {
+                el.textContent = txt;
+                el.style.left = `${left}px`;
+                el.style.opacity = '1';
+              } else {
+                el.style.opacity = '0';
+              }
+            }
+            if (!(panel.tide || air)) renderCard(u.cursor.idx);
+          },
+        ],
         setScale: [
           (u, key) => {
             if (key !== 'x' || syncing) return;
@@ -1108,7 +1267,7 @@ export default function TimeSeries({
       };
       if (panel.glyph) {
         const dirArr = pgcols[panel.series[0].key] ?? [];
-        hooks.draw = [(u) => drawArrowGlyphs(u, pgxs, dirArr, DPR, air ? cssVar('--c-wind') : undefined)];
+        hooks.draw = [(u) => drawArrowGlyphs(u, pgxs, dirArr, DPR)];
       }
       if (panel.tide && tideNarrow && tideEvents.length) {
         hooks.draw = [(u) => drawTideMarkers(u, tideEvents, tideColor, DPR)];
@@ -1159,6 +1318,15 @@ export default function TimeSeries({
       u.root.setAttribute('aria-label', m[panel.titleKey]());
       plots.push(u);
 
+      // The on-plot value bubble (see setCursor above): appended into the cursor layer so its left
+      // offset lines up with the crosshair; hidden until the cursor enters the plot.
+      const bubble = document.createElement('div');
+      const bColor = cssVar(panel.series[0].colorVar);
+      bubble.setAttribute('aria-hidden', 'true');
+      bubble.style.cssText = `position:absolute;top:2px;transform:translateX(-50%);pointer-events:none;opacity:0;transition:opacity .08s ease;white-space:nowrap;z-index:6;padding:2px 6px;border-radius:6px;font:600 0.66rem/1 var(--font-mono);background:color-mix(in oklab, var(--surface) 86%, transparent);color:${bColor};border:1px solid color-mix(in oklab, ${bColor} 42%, var(--hairline));`;
+      u.over.appendChild(bubble);
+      cursorVal.el = bubble;
+
       if (panel.emptyKey && !hasData) {
         const overlay = document.createElement('div');
         overlay.className = 'chart-empty';
@@ -1207,7 +1375,7 @@ export default function TimeSeries({
       plotsRef.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, detail, windHistory, windDetail, windStation, visibleFlat, theme, locale, range.min, range.max, smooth, tz, tides]);
+  }, [data, detail, windHistory, windDetail, windStation, visibleFlat, theme, locale, units, range.min, range.max, smooth, tz, tides]);
 
   return (
     <section className="mt-6">

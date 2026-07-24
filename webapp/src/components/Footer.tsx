@@ -1,12 +1,12 @@
 import { useLocale } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
-import { GitHubMark, HuggingFaceMark, BuoyMark } from './brands';
-import { TideIcon } from './icons';
+import { GitHubMark, BuoyMark } from './brands';
+import { TideIcon, WindIcon } from './icons';
 import { routeHref } from '@/lib/route';
 
 const REPO_URL = 'https://github.com/hadim/olatu';
-const HF_URL = 'https://huggingface.co/buckets/hadim/olatu';
 const CANDHIS_URL = 'https://candhis.cerema.fr';
+const WIND_URL = 'https://meteo.data.gouv.fr';
 const TIDE_URL = 'https://api-maree.fr';
 const LINK = 'inline-flex items-center gap-1.5 text-muted no-underline transition-colors hover:text-accent';
 
@@ -46,14 +46,14 @@ export default function Footer() {
           {m.footer_report_bug()}
         </a>
         <Sep />
-        <a className={LINK} href={HF_URL} target="_blank" rel="noopener noreferrer">
-          <HuggingFaceMark size={16} />
-          <span>{m.footer_dataset()}</span>
-        </a>
-        <Sep />
         <a className={LINK} href={CANDHIS_URL} target="_blank" rel="noopener noreferrer">
           <BuoyMark size={16} />
           <span>{m.footer_data_by()} Cerema / CANDHIS</span>
+        </a>
+        <Sep />
+        <a className={LINK} href={WIND_URL} target="_blank" rel="noopener noreferrer" title="Météo-France · Licence Ouverte 2.0 (Etalab)">
+          <WindIcon size={15} />
+          <span>Météo-France</span>
         </a>
         <Sep />
         <a className={LINK} href={TIDE_URL} target="_blank" rel="noopener noreferrer" title={m.tide_source()}>

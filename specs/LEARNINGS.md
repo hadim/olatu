@@ -9,6 +9,32 @@ Format per entry: **date — title** · what we found · why it matters · resol
 
 ---
 
+## 2026-07-25 — a mixed-cadence series shatters a line chart when the gap threshold keys off the global-min
+
+**Finding.** "At the 1-year window I see the wind data, but when I zoom into a few days I see
+nothing." The wind line (and air-temp, humidity, pressure — anything drawn as a *line*) broke into
+invisible isolated dots on the fine tier, while the wind-**direction** arrows and the tide curve were
+fine. Root cause was the chart's `gapAware` (webapp `TimeSeries.tsx`) computing its "break the line
+across an outage" threshold as **4 × the global-minimum delta**. The current-year wind file appends a
+**6-min live tail to an hourly history** (spec 0012), so the global min collapsed to ~360 s and the
+threshold to ~24 min — and *every* hourly history step (3600 s) got flagged as a gap and null-broken.
+At 1Y the uniform hourly-**means** tier loads (no fast tail), which is why it looked fine there; the
+fine per-year tier is where the mixed cadence bites. Direction survived because glyphs are drawn
+per-point (no line to break); the buoy never hit it (uniform 30-min cadence).
+
+**Why it matters.** The comment *said* "median cadence" but the code used the **minimum** — fine while
+every series was single-cadence, quietly wrong the moment one wasn't. It reads as a data outage
+(nothing there) when the data is complete. Column projection / parquet were all correct; only the
+render heuristic was wrong, so it survived typecheck, build, and a casual look at recent windows.
+
+**Resolution.** Estimate the cadence **causally with an EWMA of the normal (non-gap) deltas**, not the
+global min: `cadence ← 0.15·d + 0.85·cadence`, skip folding a flagged gap into it, break when
+`d > 4·cadence`. Because the coarse history always **precedes** the fine live tail chronologically, a
+causal EWMA stays coarse through all of the history and only sharpens in the tail — so neither regime
+is ever shattered, and it stays correct as the live feed grows past the history in volume. Verified by
+sampling the canvas' non-transparent pixels before/after across old + recent windows. Refs:
+`webapp/src/components/TimeSeries.tsx` (`gapAware`), [spec 0013 §6](2026-07-24-0013-wind-webapp-ux.md).
+
 ## 2026-07-24 — Météo-France DPObs: a swallowed 429 silently drops data, and its units aren't the bulk files'
 
 **Finding.** Two gotchas surfaced building the wind layer (spec 0012). **(1) Rate limit.** The

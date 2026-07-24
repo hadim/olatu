@@ -210,5 +210,13 @@
   "ts_reorder": "Drag to reorder",
   "ts_hidden": "Hidden",
   "ts_none_hidden": "none",
-  "ts_manage_hint": "drag to reorder · eye to hide"
+  "ts_manage_hint": "drag to reorder · eye to hide",
+  "cc_hp_unavailable": "Not measured at this station",
+  "settings_title": "Settings",
+  "settings_close": "Close",
+  "settings_units_hint": "Choose the display units. Your choice is remembered on this device.",
+  "settings_speed": "Wind speed",
+  "settings_temp": "Temperature",
+  "settings_pressure": "Pressure",
+  "settings_reset": "Reset to defaults"
 }

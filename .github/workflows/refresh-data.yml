@@ -1,9 +1,12 @@
-name: Refresh data (CANDHIS → HF bucket)
+name: Refresh data (buoys · tides · wind → HF bucket)
 
-# Every 30 min, for EACH buoy: pull the realtime accumulator from the HF bucket, scrape
-# the live CANDHIS feed, rebuild the tiers, and upload them back to buckets/hadim/olatu.
+# Every 30 min, for EACH buoy, refresh ALL three data sources and upload them back to
+# buckets/hadim/olatu:
+#   • buoys — pull the realtime accumulator, scrape the live CANDHIS feed, rebuild tiers
+#   • tides — refresh the nearest port's extrema from api-maree.fr        (spec 0008)
+#   • wind  — scrape the nearest station's 6-min feed from Météo-France + rebuild (specs 0012/0013)
 # The webapp reads those tiers at runtime, so this NEVER rebuilds or redeploys the site —
-# it is a tiny Python-only job. See specs/0004 §6 and 0005 §4.
+# it is a tiny Python-only job. See specs/0004 §6, 0005 §4, 0008, 0012.
 #
 # Auth is keyless via OIDC Trusted Publishers (no HF_TOKEN secret): the trusted publisher
 # is configured on the bucket hadim/olatu → Settings → Trusted Publishers with claims

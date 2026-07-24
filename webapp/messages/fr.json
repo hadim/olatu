@@ -210,5 +210,13 @@
   "ts_reorder": "Glisser pour réordonner",
   "ts_hidden": "Masqués",
   "ts_none_hidden": "aucun",
-  "ts_manage_hint": "glisser pour réordonner · œil pour masquer"
+  "ts_manage_hint": "glisser pour réordonner · œil pour masquer",
+  "cc_hp_unavailable": "Non mesuré à cette station",
+  "settings_title": "Réglages",
+  "settings_close": "Fermer",
+  "settings_units_hint": "Choisissez les unités d’affichage. Votre choix est mémorisé sur cet appareil.",
+  "settings_speed": "Vitesse du vent",
+  "settings_temp": "Température",
+  "settings_pressure": "Pression",
+  "settings_reset": "Réinitialiser"
 }

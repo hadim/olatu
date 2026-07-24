@@ -1,5 +1,7 @@
-"""End-to-end data refresh: pull → scrape → build → upload, with the HF bucket as
-the single source of truth.
+"""End-to-end data refresh: pull → scrape → tides → wind → build → upload, with the HF
+bucket as the single source of truth. Each run refreshes all three sources per buoy — the
+CANDHIS buoy feed, the nearest port's tides (api-maree.fr), and the nearest station's wind
+(Météo-France) — not just the buoy (specs 0008, 0012).
 
 The data no longer lives in git. It lives in the Hugging Face **bucket**
 `hadim/olatu`, nested under a `buoys/` root per campaign (spec 0009 — symmetric with the

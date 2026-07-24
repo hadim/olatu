@@ -14,6 +14,7 @@ import { useTheme } from '../lib/theme';
 import { useLocale } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
 import { BUOYS, buoyInfo } from '../lib/buoys';
+import { STATIONS } from '../lib/stations';
 
 function rasterStyle(theme: string): unknown {
   const base = theme === 'dark' ? 'dark_all' : 'light_all';
@@ -99,6 +100,22 @@ export default function BuoyLocator({
       }
       // initial active state
       for (const b of BUOYS) markers.current[b.campaign_id]?.classList.toggle('locator-marker--active', b.campaign_id === selected);
+
+      // Wind/air stations (spec 0013 rev): amber reference markers so you can see where each buoy's
+      // paired station sits on land relative to the offshore buoy. Non-interactive — the station
+      // picker lives in the station bar; here they're purely for spatial context.
+      for (const s of STATIONS) {
+        const el = document.createElement('div');
+        el.className = 'locator-station';
+        el.title = s.label; // static registry value (stations.ts), not user input
+        const dot = document.createElement('span');
+        dot.className = 'locator-station-dot';
+        const name = document.createElement('span');
+        name.className = 'locator-station-name';
+        name.textContent = s.label;
+        el.append(dot, name);
+        created.push(new maplibre.Marker({ element: el, anchor: 'bottom' }).setLngLat([s.lon, s.lat]).addTo(map));
+      }
     })();
     return () => {
       cancelled = true;

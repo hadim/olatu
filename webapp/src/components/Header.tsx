@@ -4,6 +4,7 @@ import { useTheme } from '../lib/theme';
 import { Button } from '@/components/ui/button';
 import { Logo } from './brands';
 import Glossary from './Glossary';
+import Settings from './Settings';
 
 // Clicking the logo/title returns to the app root (a full reload — this is a single-page
 // app, so "home" = a clean load of the default/persisted buoy). It's a real <a> so
@@ -70,6 +71,8 @@ export default function Header() {
             ))}
           </select>
         </label>
+
+        <Settings />
 
         <Button variant="outline" size="icon" onClick={toggle} aria-label={m.nav_theme()} title={m.nav_theme()}>
           {theme === 'dark' ? <SunIcon /> : <MoonIcon />}

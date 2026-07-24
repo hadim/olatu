@@ -161,16 +161,31 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   is two realm **zones** joined by the **offshore/onshore** bridge (`lib/wind.ts` — station
   `wind_direction_deg` × buoy `peak_direction_deg`, swell-relative approx). Station timeseries share
   the buoy's x-axis with per-panel **hide/reorder** (persisted `olatu.charts.order|hidden`). Keep the
-  temp/direction disambiguation carried by **zone + glyph + colour**, never colour alone.
+  temp/direction disambiguation carried by **zone + glyph + colour**. **§6 revision (2026-07-25):**
+  direction is now a **cardinal colour-code** (N teal·E blue·S gold·W pink) on **both** realms — so
+  realm is carried by zone/bar/tag/values, *not* the direction hue; the hover readout also lists the
+  **Air** values (looked up by time on the station grid) + an on-plot **cursor bubble** per panel;
+  humidity/pressure panels added; the offshore/onshore verdict is a softened banner **above** the zones;
+  wind stations show as amber markers on the map; Météo-France is credited and the HF link was dropped.
+- **Units (spec 0014)** are **display-only**: the stored tiers stay canonical (wind **m/s**, temp
+  **°C**, pressure **hPa**). Convert at the **last moment** via `lib/units` (`useUnits` +
+  `convertMeasure`/`formatKeyValue`/`keySuffix`, keyed by **column name**) — Current Conditions, chart
+  panels + heading unit tags, hover readout. Default wind = **km/h**; the choice persists in
+  `olatu.units`. Never mutate the stored data to change units; the °C→°F map is affine so it commutes
+  with the chart smoothing.
+- **Chart gap-breaks:** `TimeSeries.gapAware` must estimate the sampling cadence **causally (an EWMA of
+  the normal deltas)**, never the global-minimum delta — a **mixed-cadence** source (the current-year
+  wind file = a 6-min live tail on an hourly history) otherwise flags every hourly step as a gap and
+  shatters the line into invisible dots. See the 2026-07-25 LEARNINGS entry.
 
 ## Status
 
 Shipped and live at **olatu.io** — foundation → PWA → analytics/legal → wind ingest → wind in the
-webapp (specs 0001–0013). The full feature-by-feature history is in
+webapp → units/settings + wind-UX polish (specs 0001–0014). The full feature-by-feature history is in
 **[docs/HISTORY.md](docs/HISTORY.md)**; the spec index + statuses are in [specs/README.md](specs/README.md).
 
 **Open owner TODO:** add the **`API_MAREE_KEY`** (tides) and **`METEOFRANCE_API_KEY`** (6-min
 live wind) GitHub secrets so both refresh in CI — the hourly wind history is keyless and already
-seeded to the bucket (2010→). **Next per roadmap:** a combined air+sea temperature chart panel + a
-map buoy↔station pairing line (spec 0013 follow-ups), side-by-side buoy comparison, per-locale
-glossary JSON.
+seeded to the bucket (2010→). **Next per roadmap:** a combined air+sea temperature chart panel + the
+map buoy↔station pairing **line** (station markers already shipped, spec 0013 §6), side-by-side buoy
+comparison, per-locale glossary JSON.

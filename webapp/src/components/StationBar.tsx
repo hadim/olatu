@@ -16,7 +16,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { BUOYS, buoyInfo } from '../lib/buoys';
 import { stationsForBuoy } from '../lib/stations';
-import { HuggingFaceMark, BuoyMark } from './brands';
+import { BuoyMark } from './brands';
 import { StationIcon } from './icons';
 
 interface StationPickerProps {
@@ -110,7 +110,7 @@ function StationPicker({ campaign, selected, defaultStation, onSelect, compact =
 
 const BuoyLocator = lazy(() => import('./BuoyLocator'));
 
-const HF_DATA = 'https://huggingface.co/buckets/hadim/olatu';
+const METEO_FRANCE = 'https://meteo.data.gouv.fr';
 const CANDHIS = 'https://candhis.cerema.fr';
 // Same look as the footer source links (see Footer.tsx) so the whole app's attribution
 // reads as one coherent system (spec 0007).
@@ -252,9 +252,9 @@ export default function StationBar({
                   <span>{m.data_live()}</span>
                 </a>
                 <span className="text-divider" aria-hidden="true">·</span>
-                <a href={HF_DATA} target="_blank" rel="noopener noreferrer" className={SOURCE_LINK}>
-                  <HuggingFaceMark size={15} />
-                  <span>{m.data_dataset()}</span>
+                <a href={METEO_FRANCE} target="_blank" rel="noopener noreferrer" className={SOURCE_LINK} title="Météo-France · Licence Ouverte 2.0 (Etalab)">
+                  <StationIcon size={15} style={{ color: 'var(--c-wind)' }} />
+                  <span>Météo-France</span>
                 </a>
               </p>
             </div>

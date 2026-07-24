@@ -210,5 +210,13 @@
   "ts_reorder": "Arrastra para reordenar",
   "ts_hidden": "Ocultos",
   "ts_none_hidden": "ninguno",
-  "ts_manage_hint": "arrastra para reordenar · ojo para ocultar"
+  "ts_manage_hint": "arrastra para reordenar · ojo para ocultar",
+  "cc_hp_unavailable": "No medido en esta estación",
+  "settings_title": "Ajustes",
+  "settings_close": "Cerrar",
+  "settings_units_hint": "Elige las unidades de visualización. Tu elección se recuerda en este dispositivo.",
+  "settings_speed": "Velocidad del viento",
+  "settings_temp": "Temperatura",
+  "settings_pressure": "Presión",
+  "settings_reset": "Restablecer"
 }

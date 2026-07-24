@@ -5,6 +5,7 @@ import { lastValue, latestTimestamp, type Manifest, type Series, type WindData }
 import { compass, dirColor, fmtNumber, fmtClock, freshness, relativeAgo, type Freshness } from '../lib/format';
 import { shoreRelation, shoreColorVar } from '../lib/wind';
 import { stationInfo } from '../lib/stations';
+import { useUnits, formatKeyValue, keySuffix } from '../lib/units';
 import { useNow } from '../lib/useNow';
 import {
   WaveHeightIcon, MaxWaveIcon, PeriodIcon, DirectionIcon, TempIcon,
@@ -41,8 +42,11 @@ function CompassDial({
         <circle cx="60" cy="60" r="56" className="fill-none stroke-line [stroke-width:2]" />
         {['N', 'E', 'S', 'W'].map((c, i) => {
           const a = (i * 90 - 90) * (Math.PI / 180);
+          // Cardinals carry the cyclical direction colour code (N teal · E blue · S gold · W pink),
+          // identical on the swell and wind dials — direction is encoded by hue, realm by the zone
+          // (spec 0013 revision). So wind direction reads "which way" at a glance, like the swell.
           return (
-            <text key={c} x={60 + Math.cos(a) * 51} y={60 + Math.sin(a) * 51 + 3.5} className="fill-faint font-mono text-[9px]" textAnchor="middle">
+            <text key={c} x={60 + Math.cos(a) * 51} y={60 + Math.sin(a) * 51 + 3.5} className="font-mono text-[9px] font-semibold" textAnchor="middle" style={{ fill: dirColor(i * 90) }}>
               {locale === 'en' ? c : c === 'W' ? 'O' : c}
             </text>
           );
@@ -148,7 +152,7 @@ function ShoreBridge({ swellDeg, windDeg, locale }: { swellDeg: number | null; w
   const shore = shoreRelation(windDeg, swellDeg);
   const label = shore === 'offshore' ? m.cc_offshore() : shore === 'onshore' ? m.cc_onshore() : m.cc_cross_shore();
   return (
-    <div className="my-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-dashed border-divider bg-surface-2 px-3.5 py-2">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-dashed border-divider bg-surface-2 px-3.5 py-2">
       <span className="inline-flex items-center gap-1.5 font-mono text-[0.74rem] text-muted">
         <MiniArrow deg={swellDeg} color="var(--accent)" />
         {m.cc_swell()} {swellDeg != null && compass(swellDeg, locale)}
@@ -159,9 +163,18 @@ function ShoreBridge({ swellDeg, windDeg, locale }: { swellDeg: number | null; w
         {m.cc_wind()} {windDeg != null && compass(windDeg, locale)}
       </span>
       {shore ? (
-        <span className="ml-auto inline-flex items-center gap-1 rounded-full px-3 py-[0.35rem] font-display text-[0.9rem] font-bold" style={{ background: `var(${shoreColorVar(shore)})`, color: '#08201a' }}>
+        // Softened verdict: a tinted pill with the shore colour as text + border, not a loud
+        // solid fill — onshore's red in particular read as an alarm at full strength (spec 0013 rev).
+        <span
+          className="ml-auto inline-flex items-center gap-1 rounded-full border px-3 py-[0.3rem] font-display text-[0.88rem] font-bold"
+          style={{
+            color: `var(${shoreColorVar(shore)})`,
+            background: `color-mix(in oklab, var(${shoreColorVar(shore)}) 14%, var(--surface))`,
+            borderColor: `color-mix(in oklab, var(${shoreColorVar(shore)}) 42%, var(--hairline))`,
+          }}
+        >
           {label}
-          <InfoPopover title={m.cc_shore()} body={m.def_offshore()} triggerClassName="text-[#08201a] opacity-70 hover:opacity-100" />
+          <InfoPopover title={m.cc_shore()} body={m.def_offshore()} triggerClassName="opacity-60 hover:opacity-100" />
         </span>
       ) : (
         <span className="ml-auto font-mono text-[0.74rem] text-faint">{m.cc_shore()} —</span>
@@ -174,6 +187,7 @@ export default function CurrentConditions({
   latest, manifest, tides, wind,
 }: { latest: Series; manifest: Manifest; tides: Tides | null; wind: WindData | null }) {
   const { locale } = useLocale();
+  const { units } = useUnits();
   const tz = manifest.timezone;
   const now = useNow(30_000);
 
@@ -197,6 +211,9 @@ export default function CurrentConditions({
   const pressure = wl ? lastValue(wl, 'pressure_msl_hpa') : null;
 
   const num = (v: { value: number } | null, digits = 1) => (v ? fmtNumber(v.value, locale, digits) : '—');
+  // Units-aware value for the convertible measures (speed · temperature · pressure) — spec 0014.
+  // The matching unit suffix comes from keySuffix(key, units).
+  const fmtU = (v: { value: number } | null, key: string) => (v ? formatKeyValue(key, v.value, units, locale) : '—');
 
   const stampMs = latestTimestamp(latest);
   const fresh = stampMs != null ? freshness(now - stampMs) : 'stale';
@@ -216,6 +233,10 @@ export default function CurrentConditions({
         </span>
         <StalenessBadge fresh={fresh} stampMs={stampMs} tz={tz} now={now} />
       </div>
+
+      {/* ---- offshore/onshore verdict (only with a paired station) — a conditions banner up top,
+             not wedged between the two zones (spec 0013 revision) ---- */}
+      {wind && <ShoreBridge swellDeg={dir?.value ?? null} windDeg={windDir?.value ?? null} locale={locale} />}
 
       {/* ---- MER (buoy) zone ---- */}
       <div className={`rounded-xl border p-3.5 ${ZONE.sea}`}>
@@ -256,14 +277,11 @@ export default function CurrentConditions({
             <div className="grid w-full grid-cols-3 gap-[1.2rem] [&>*+*]:border-l [&>*+*]:border-line [&>*+*]:pl-[1.2rem] max-[720px]:text-center max-[420px]:grid-cols-1 max-[420px]:[&>*+*]:border-l-0 max-[420px]:[&>*+*]:pl-0">
               <Gauge label={m.cc_max_wave()} value={num(hmax)} unit="m" defKey="def_max_wave" icon={<MaxWaveIcon className={LABEL_ICON} style={{ color: 'var(--c-max)' }} />} />
               <Gauge label={m.cc_period()} value={num(period)} unit="s" defKey="def_period" icon={<PeriodIcon className={LABEL_ICON} style={{ color: 'var(--c-period)' }} />} />
-              <Gauge label={m.cc_sea_temp()} value={num(seaTemp)} unit="°C" defKey="def_sea_temp" accent="var(--accent)" icon={<TempIcon className={LABEL_ICON} style={{ color: 'var(--accent)' }} />} />
+              <Gauge label={m.cc_sea_temp()} value={fmtU(seaTemp, 'sea_temperature_c')} unit={keySuffix('sea_temperature_c', units) ?? undefined} defKey="def_sea_temp" accent="var(--accent)" icon={<TempIcon className={LABEL_ICON} style={{ color: 'var(--accent)' }} />} />
             </div>
           </div>
         </div>
       </div>
-
-      {/* ---- offshore/onshore bridge ---- */}
-      <ShoreBridge swellDeg={dir?.value ?? null} windDeg={windDir?.value ?? null} locale={locale} />
 
       {/* ---- AIR (station) zone ---- */}
       {wind ? (
@@ -274,7 +292,7 @@ export default function CurrentConditions({
           </ZoneHeader>
           <div className="grid grid-cols-[minmax(150px,0.8fr)_1.5fr] items-center gap-x-6 gap-y-5 max-[720px]:grid-cols-1 max-[720px]:justify-items-center">
             <div className="flex flex-col items-center gap-1.5">
-              <CompassDial deg={windDir?.value ?? null} spread={null} second={gustDir?.value ?? null} color="var(--c-wind)" locale={locale} />
+              <CompassDial deg={windDir?.value ?? null} spread={null} second={gustDir?.value ?? null} locale={locale} />
               <div className="flex flex-col items-center gap-[0.1rem] text-center">
                 <span className="inline-flex items-center text-[0.82rem] text-muted">
                   <WindIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)' }} />
@@ -287,14 +305,14 @@ export default function CurrentConditions({
             </div>
             <div className="flex flex-col gap-3.5 border-l border-line pl-6 max-[720px]:w-full max-[720px]:items-center max-[720px]:border-l-0 max-[720px]:pl-0">
               <div className="grid w-full grid-cols-4 gap-[1rem] [&>*+*]:border-l [&>*+*]:border-line [&>*+*]:pl-[1rem] max-[720px]:text-center max-[520px]:grid-cols-2 max-[520px]:gap-y-4 max-[520px]:[&>*]:border-l-0 max-[520px]:[&>*]:pl-0">
-                <Gauge label={m.cc_wind()} value={num(windSpeed)} unit="m/s" defKey="def_wind" accent="var(--c-wind)" icon={<WindIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)' }} />} />
-                <Gauge label={m.cc_gust()} value={num(gust)} unit="m/s" defKey="def_gust" icon={<WindIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)', opacity: 0.7 }} />} />
-                <Gauge label={m.cc_air_temp()} value={num(airTemp)} unit="°C" defKey="def_air_temp" accent="var(--c-wind)" icon={<TempIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)' }} />} />
+                <Gauge label={m.cc_wind()} value={fmtU(windSpeed, 'wind_speed_ms')} unit={keySuffix('wind_speed_ms', units) ?? undefined} defKey="def_wind" accent="var(--c-wind)" icon={<WindIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)' }} />} />
+                <Gauge label={m.cc_gust()} value={fmtU(gust, 'wind_gust_ms')} unit={keySuffix('wind_gust_ms', units) ?? undefined} defKey="def_gust" icon={<WindIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)', opacity: 0.7 }} />} />
+                <Gauge label={m.cc_air_temp()} value={fmtU(airTemp, 'air_temperature_c')} unit={keySuffix('air_temperature_c', units) ?? undefined} defKey="def_air_temp" accent="var(--c-wind)" icon={<TempIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)' }} />} />
                 <Gauge label={m.cc_rain()} value={num(rain)} unit="mm" defKey="def_rain" icon={<RainIcon className={LABEL_ICON} style={{ color: 'var(--c-period)' }} />} />
               </div>
               <div className="grid w-full max-w-[22rem] grid-cols-2 gap-[1rem] text-[0.9rem] opacity-80 [&>*+*]:border-l [&>*+*]:border-line [&>*+*]:pl-[1rem]">
                 <Gauge label={m.cc_humidity()} value={humidity ? fmtNumber(humidity.value, locale, 0) : '—'} unit={humidity ? '%' : undefined} defKey="def_humidity" icon={<HumidityIcon className={LABEL_ICON} style={{ color: 'var(--c-tide)' }} />} />
-                <Gauge label={m.cc_pressure()} value={pressure ? fmtNumber(pressure.value, locale, 0) : '—'} unit={pressure ? 'hPa' : undefined} defKey="def_pressure" icon={<PressureIcon className={LABEL_ICON} style={{ color: 'var(--text-3)' }} />} />
+                <Gauge label={m.cc_pressure()} value={fmtU(pressure, 'pressure_msl_hpa')} unit={pressure ? keySuffix('pressure_msl_hpa', units) ?? undefined : undefined} defKey="def_pressure" icon={<PressureIcon className={LABEL_ICON} style={{ color: 'var(--c-dir)' }} />} />
               </div>
             </div>
           </div>

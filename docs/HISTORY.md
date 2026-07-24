@@ -9,6 +9,34 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-07-25 — Wind UX polish + a units/settings modal (specs 0013 §6, 0014)
+
+An owner-feedback pass on the wind surfaces, plus a real new capability — **display units**.
+
+- **Fixed the "wind vanishes when I zoom into an older window" bug.** The chart's `gapAware` keyed its
+  line-break threshold off the **global-minimum** cadence; the current-year wind file mixes a 6-min
+  live tail with an hourly history, so every hourly step got flagged as a gap and the line shattered
+  into invisible dots on the fine tier (the hourly-means tier at 1Y hid it). Now the cadence is a
+  **causal EWMA of the normal deltas** — coarse history precedes the fine tail, so neither shatters.
+  See [LEARNINGS](../specs/LEARNINGS.md).
+- **Units & settings (spec 0014):** a header gear opens a small modal to choose **wind speed**
+  (m/s · **km/h default** · kn), **temperature** (°C · °F, shared sea+air) and **pressure** (hPa · inHg
+  · mmHg). `lib/units.tsx` (context + pure conversions keyed by column name) applies the choice
+  everywhere — Current Conditions, every chart panel + heading unit tag, the hover readout — and
+  persists it (`olatu.units`). Conversion happens at the last moment; the affine °C→°F commutes with
+  the chart smoothing.
+- **Direction is now a colour code on both realms:** the cyclical N teal · E blue · S gold · W pink hue
+  applies to swell **and** wind direction (arrows, CC dial needle + coloured cardinals, a shared
+  N/E/S/O legend on both direction panels). Realm stays carried by zone/bar/tag/values.
+- **Hover readout gains the Air side** (wind, gust, wind direction, air temp — looked up by time on the
+  station grid, so the two temperatures / directions are unmistakable) **plus an on-plot value bubble**
+  on every panel that tracks the cursor.
+- **Two more Air panels:** humidity + pressure (nullable, honest "not measured at this station").
+- **Offshore/onshore verdict** moved to a banner **above** the two zones and **softened** (tinted pill,
+  not a solid red block). **Sub-day presets** 2H · 6H · 12H (the range clamp relaxed to a 1-hour floor).
+  **Wind stations on the map** (amber square markers). **Attribution:** Météo-France credited, the
+  **Hugging Face open-data link removed**. The refresh workflow + docstring renamed (buoys · tides · wind).
+
 ## 2026-07-24 — Wind in the webapp: the Mer/Air realm system (spec 0013)
 
 Surfaces the wind data (spec 0012) in the app around one visual axis: every datum belongs to a

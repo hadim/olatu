@@ -264,3 +264,38 @@
 .locator-marker:not(.locator-marker--active):not(:hover) .locator-name {
   display: none;
 }
+
+/* Wind/air stations on the locator map (spec 0013 rev): amber (Air realm) reference markers,
+   deliberately distinct from the teal buoy markers so a land station never reads as an offshore
+   buoy. A square, rotated dot vs. the buoy's round one reinforces the difference for colour-blind
+   viewers. Names reveal on hover (the buoys are the primary, clickable actors). */
+.locator-station {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.14rem 0.45rem 0.14rem 0.34rem;
+  background: color-mix(in oklab, var(--surface) 88%, transparent);
+  border: 1px solid color-mix(in oklab, var(--c-wind) 45%, var(--divider));
+  border-radius: 999px;
+  font: inherit;
+  color: var(--text-2);
+  white-space: nowrap;
+  box-shadow: 0 2px 8px -4px rgba(0, 0, 0, 0.5);
+}
+.locator-station-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--c-wind);
+  flex: none;
+  transform: rotate(45deg);
+}
+.locator-station-name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.72rem;
+  color: var(--c-wind);
+}
+.locator-station:not(:hover) .locator-station-name {
+  display: none;
+}
