@@ -38,8 +38,10 @@ from .schema import (
     SENTINEL_MIN,
     TIDE_SOURCE,
     UNITS,
+    WIND_SOURCE,
     buoy,
     resolve_tide_port,
+    resolve_wind_station,
     variable_source,
 )
 
@@ -310,9 +312,26 @@ def build(src: Path, out: Path, campaign: str = CAMPAIGN_ID) -> None:
         if port is not None
         else None
     )
+    # Wind reference: this buoy's nearest curated station (specs/0012 §2.5), or None when none
+    # is within range -> the webapp shows the wind empty-state. The series lives in the shared
+    # tier wind/<station>/data/wind.parquet (written by ingest/wind.py); the webapp reads this
+    # block for the station id + distance + attribution (mirror of the tide block above).
+    station = resolve_wind_station(campaign)
+    wind_block = (
+        {
+            "station": station["id"],
+            "num_poste": station["num_poste"],
+            "label": station["label"],
+            "distance_km": station["distance_km"],
+            "source": WIND_SOURCE,
+        }
+        if station is not None
+        else None
+    )
     manifest = {
         "buoy": meta,
         "tide": tide_block,
+        "wind": wind_block,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "timezone": meta["timezone"],
         "span": {

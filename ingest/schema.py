@@ -161,6 +161,129 @@ def resolve_tide_port(campaign: str = CAMPAIGN_ID) -> dict | None:
     }
 
 
+# ------------------------------------------------------------------------- wind / stations
+#
+# Wind (vent) comes per-STATION from Météo-France open data (Licence Ouverte 2.0), shared
+# across buoys like tides -- a wind observation is a property of a station (place), not a buoy
+# (specs/0012 §2.2). This is the curated set: each buoy resolves to its nearest station
+# (resolve_wind_station); beyond WIND_MAX_KM it has no wind -> the webapp shows the empty-state.
+# lat/lon/altitude are copied from the hourly climatological files (NUM_POSTE identity). `dept`
+# selects which departmental bulk file to fetch. Capbreton (40065002, coastal 11 m, ~16.8 km
+# from Anglet) is a deliberate future swap for Anglet if Biarritz-airport reads poorly.
+WIND_STATIONS = {
+    "socoa": {
+        "num_poste": "64189001",
+        "label": "Socoa (Saint-Jean-de-Luz)",
+        "dept": "64",
+        "lat": 43.3945,
+        "lon": -1.6865,
+        "altitude_m": 21,
+    },
+    "biarritz-pays-basque": {
+        "num_poste": "64024001",
+        "label": "Biarritz-Pays-Basque",
+        "dept": "64",
+        "lat": 43.469333,
+        "lon": -1.534333,
+        "altitude_m": 71,
+    },
+    "cap-ferret": {
+        "num_poste": "33236002",
+        "label": "Cap-Ferret",
+        "dept": "33",
+        "lat": 44.6305,
+        "lon": -1.251667,
+        "altitude_m": 8,
+    },
+}
+
+# A buoy farther than this from every curated station has no meaningful wind reference ->
+# wind empty-state. 25 km comfortably covers our buoys (max is Cap Ferret at ~15.6 km) while
+# still excluding far-inland stations.
+WIND_MAX_KM = 25.0
+
+# Licence Ouverte attribution, required by Météo-France. Travels into each buoy's manifest
+# wind block (build.py) so the webapp can surface it (specs/0012 §2.5).
+WIND_SOURCE = {
+    "provider": "Météo-France",
+    "dataset": "Données climatologiques de base — horaires",
+    "license": "Licence Ouverte 2.0 (Etalab)",
+    "credit": (
+        "Données Météo-France — Données climatologiques de base horaires "
+        "(Licence Ouverte 2.0)."
+    ),
+    "url": "https://meteo.data.gouv.fr",
+}
+
+
+def resolve_wind_station(campaign: str = CAMPAIGN_ID) -> dict | None:
+    """Nearest curated wind station to a buoy, or None if none is within WIND_MAX_KM.
+
+    Returns `{id, num_poste, label, dept, lat, lon, altitude_m, distance_km}` -- the per-buoy
+    wind reference used to fetch (ingest) and to fill the manifest wind block (build). Mirror
+    of resolve_tide_port: a buoy too far from every station gets None -> the webapp shows the
+    wind empty-state ("vent indisponible").
+    """
+    b = BUOYS[campaign]
+    best_id, best_km = None, math.inf
+    for sid, s in WIND_STATIONS.items():
+        km = _haversine_km(b["lat"], b["lon"], s["lat"], s["lon"])
+        if km < best_km:
+            best_id, best_km = sid, km
+    if best_id is None or best_km > WIND_MAX_KM:
+        return None
+    s = WIND_STATIONS[best_id]
+    return {
+        "id": best_id,
+        "num_poste": s["num_poste"],
+        "label": s["label"],
+        "dept": s["dept"],
+        "lat": s["lat"],
+        "lon": s["lon"],
+        "altitude_m": s["altitude_m"],
+        "distance_km": round(best_km, 1),
+    }
+
+
+# Météo-France hourly climatological column -> canonical wind name. `AAAAMMJJHH` (UTC) is
+# handled separately. FXI/DXI are the max INSTANTANEOUS gust + its direction (the true
+# "rafale"); FF/DD are the 10-min mean wind + direction. humidity/pressure are NULLABLE --
+# not measured at Cap-Ferret (first-class missing state, like sea temp). See specs/0012 §2.3.
+WIND_HOURLY_MAP = {
+    "FF": "wind_speed_ms",
+    "DD": "wind_direction_deg",
+    "FXI": "wind_gust_ms",
+    "DXI": "wind_gust_direction_deg",
+    "T": "air_temperature_c",
+    "RR1": "precipitation_mm",
+    "U": "humidity_pct",
+    "PMER": "pressure_msl_hpa",
+}
+
+# Units, keyed by canonical wind name. Kept as the source emits them (m/s, deg, degC, mm, %,
+# hPa); the webapp converts for display (e.g. knots/km/h) later.
+WIND_UNITS = {
+    "wind_speed_ms": "m/s",
+    "wind_direction_deg": "deg",
+    "wind_gust_ms": "m/s",
+    "wind_gust_direction_deg": "deg",
+    "air_temperature_c": "degC",
+    "precipitation_mm": "mm",
+    "humidity_pct": "%",
+    "pressure_msl_hpa": "hPa",
+}
+
+# The wind vars surfaced prominently (banner + default chart) once the webapp lands.
+WIND_HEADLINE = ["wind_speed_ms", "wind_direction_deg", "wind_gust_ms"]
+
+# Circular compass vars (0 deg == 360 deg): circular mean when aggregating, never arithmetic
+# -- the wind analog of DIRECTION_VARS.
+WIND_DIRECTION_VARS = ["wind_direction_deg", "wind_gust_direction_deg"]
+
+# Canonical column order in the wind Parquet tier (datetime first, then the 8 variables).
+WIND_CANONICAL_ORDER = ["datetime_utc"] + list(WIND_UNITS.keys())
+
+
 # Archive CSV column -> canonical name. `DateHeure` is handled separately.
 # The 43 columns that are 100% empty for 06403 (QUALITE, NBSYS, *_S1..S4) are simply
 # absent from this map, so they are dropped at ingest.

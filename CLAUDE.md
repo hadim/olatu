@@ -42,6 +42,7 @@ ingest/        Python (polars). NOT an installable package. All steps take --cam
   schema.py    per-buoy identity (BUOYS) + column mapping/units/sentinel + TIDE_PORTS registry & resolve_tide_port (nearest port)
   scrape.py    fetch the CANDHIS realtime HTML table -> per-year reel CSV (coalesce-merge)
   tides.py     fetch api-maree.fr water levels -> high/low extrema -> tides/<port>/data/tides.parquet (spec 0008; needs API_MAREE_KEY)
+  wind.py      Météo-France wind per station -> buoy-style tiered dataset wind/<station>/ (spec 0012; one-shot hourly history keyless + forward 6-min live needs METEOFRANCE_API_KEY)
   build.py     CSV -> tiered Parquet/JSON (archive-preferred coalesce)
   update.py    pull → scrape → tides → build → upload to the HF bucket (OIDC in CI) + daily reel snapshot; Typer CLI (-c repeatable)
   ui.py        shared Rich console + helpers (banner/section/step/detail/summary_table); buoys=cyan, tides=blue; CI-safe plain (spec 0009)
@@ -65,6 +66,11 @@ repo 2026-06-30 — buckets are mutable/overwrite-in-place, and a *public* bucke
 - **Tides** are a separate, port-keyed root (spec 0008): `tides/<port>/raw/extrema.csv`
   accumulator + `tides/<port>/data/tides.parquet` tier, shared across buoys (each buoy's
   manifest `tide` block names its nearest port).
+- **Wind** is a separate, station-keyed root (spec 0012), each station a **buoy-style tiered
+  dataset** (so it plots on the same axes as a buoy): `wind/<station>/raw/<station>_hist.csv`
+  (one-shot hourly history) + `<station>_<YEAR>_live.csv` (forward-growing 6-min) → `data/`
+  manifest/latest/recent JSON + year/hourly/daily parquet, built by `wind.build_station` (mirrors
+  `build.py`). Shared across buoys (each buoy's manifest `wind` **pointer** names its station).
 - The webapp fetches `…/buckets/hadim/olatu/resolve/buoys/<campaign>/data/…` (and
   `…/resolve/tides/<port>/data/…`) — public, CORS, range, **no `main` revision**. The **local**
   working mirror stays flat at `hfdata/<campaign>/{raw,data}`; only the bucket nests under
@@ -79,6 +85,8 @@ pixi run migrate copy                # one-shot: copy bucket <campaign>/ -> buoy
 pixi run migrate delete --yes        # after the deployed site reads buoys/, drop the old root prefixes
 pixi run scrape                      # lower-level: grow the local reel from the live feed (hfdata/06403/raw)
 pixi run ingest                      # lower-level: build tiers from local raw (hfdata/06403/{raw,data})
+pixi run wind --all --seed           # one-time: seed every station's wind history (2010→) to the bucket (spec 0012; keyless)
+pixi run wind --live --all           # refresh the 6-min live wind layer (needs METEOFRANCE_API_KEY)
 pixi run check                       # ruff format + lint
 pixi run webapp                      # frontend dev server (reads data from HF; VITE_DATA_BASE_URL to override)
 pixi run webapp-build                # static build for GitHub Pages
@@ -133,13 +141,25 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   in metres (**no coefficient**). Predictions cover ~±30 days → older windows empty-state (like
   temp). Missing key/port is non-fatal (tide step skips). Valid site ids: 06403
   `saint-jean-de-luz`, 06402 `boucau-bayonne-biarritz`, 03302 `cap-ferret`.
+- **Wind (vent, spec 0012)** comes from **Météo-France**, keyed by **station**
+  (`schema.WIND_STATIONS` + `resolve_wind_station`: each buoy → nearest station ≤
+  `WIND_MAX_KM=25`, else no wind). Two layers: **hourly history** from the open bulk files
+  (meteo.data.gouv.fr, Licence Ouverte, **no key**, 2010→) and **6-min live** from the DPObs API
+  (**`METEOFRANCE_API_KEY`, ingest-only, `apikey` header, 100 req/min**). ⚠️ The DPObs 6-min
+  feed's **units differ** from the bulk files — `t` Kelvin, `pmer` Pascal, gust is `raf10` —
+  convert on ingest; and **don't swallow its 429s** (retry — see LEARNINGS). humidity/pressure
+  are **nullable** (some stations drop them). Station ≠ offshore — the UI must name the station +
+  distance, never "wind at the buoy". Non-fatal; `update()` scrapes the 6-min feed + rebuilds
+  tiers every run, while the **hourly history is a one-shot seed** (`pixi run wind --seed`), never
+  re-fetched — forward growth is 6-min only.
 
 ## Status
 
-Shipped and live at **olatu.io** — foundation → PWA → analytics/legal (specs 0001–0011). The full
-feature-by-feature history is in **[docs/HISTORY.md](docs/HISTORY.md)**; the spec index +
-statuses are in [specs/README.md](specs/README.md).
+Shipped and live at **olatu.io** — foundation → PWA → analytics/legal → wind ingest (specs
+0001–0012). The full feature-by-feature history is in **[docs/HISTORY.md](docs/HISTORY.md)**; the
+spec index + statuses are in [specs/README.md](specs/README.md).
 
-**Open owner TODO:** create the api-maree.fr account + add the `API_MAREE_KEY` GitHub secret so
-tides refresh in CI (site ids already validated). **Next per roadmap:** side-by-side buoy
-comparison, and the per-locale glossary JSON + CI key-parity check.
+**Open owner TODO:** add the **`API_MAREE_KEY`** (tides) and **`METEOFRANCE_API_KEY`** (6-min
+live wind) GitHub secrets so both refresh in CI — the hourly wind history is keyless and already
+seeded to the bucket (2010→). **Next per roadmap:** surface wind in the webapp (offshore/onshore
+vs swell — spec 0012 Phase 3), side-by-side buoy comparison, per-locale glossary JSON.

@@ -55,12 +55,16 @@ jobs:
       # exchange shared across campaigns (avoids the per-buoy 429s). update.py refreshes
       # each buoy independently and exits non-zero if any failed (fail-fast off).
       #
-      # API_MAREE_KEY (repo secret) feeds the tide refresh (ingest/tides.py, spec 0008). It
-      # is ingest-only — the derived per-port tides.parquet is uploaded to the bucket (under
-      # tides/<port>/), the key never ships to the webapp. If the secret is unset, the tide
-      # step logs + skips (non-fatal). Each buoy resolves to its nearest port; the 3 buoys
-      # map to 3 distinct ports, so this single run refreshes all three with no collision.
-      - name: Refresh every buoy (pull → scrape → tides → build → upload to HF)
+      # Ingest-only secrets, both non-fatal if unset (the step logs + skips) and NEVER shipped
+      # to the webapp — only derived tiers are uploaded to the bucket:
+      #   API_MAREE_KEY        tide refresh (ingest/tides.py, spec 0008) -> tides/<port>/
+      #   METEOFRANCE_API_KEY  6-min live wind (ingest/wind.py DPObs, spec 0012) -> wind/<station>/
+      # The hourly wind history needs no key (open Météo-France bulk files) and refreshes at
+      # most ~once/day (gated in update._hourly_wind_due). Each buoy resolves to its nearest
+      # port/station; the 3 buoys map to 3 distinct ones, so one run refreshes all with no
+      # collision.
+      - name: Refresh every buoy (pull → scrape → tides → wind → build → upload to HF)
         env:
           API_MAREE_KEY: ${{ secrets.API_MAREE_KEY }}
+          METEOFRANCE_API_KEY: ${{ secrets.METEOFRANCE_API_KEY }}
         run: pixi run -e data update -c 06403 -c 06402 -c 03302

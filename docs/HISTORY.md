@@ -9,6 +9,36 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-07-24 — Wind (vent) per buoy from Météo-France (spec 0012, ingest only)
+
+New data source: **wind from the nearest coastal Météo-France station**, keyed per-station and
+shared across buoys like tides/ports (`schema.resolve_wind_station`, `WIND_MAX_KM=25`). Resolves
+06403→**Socoa** (1.6 km), 06402→**Biarritz-Pays-Basque** (9.5 km), 03302→**Cap-Ferret** (15.6 km).
+New `ingest/wind.py`; canonical 8-var schema (wind speed/dir, gust + dir, air temp, rain, humidity,
+pressure — the last two nullable where a station drops them). Each buoy manifest gains a `wind`
+**pointer** block (station id, distance, Licence Ouverte attribution). **Not yet in the webapp.**
+
+Each station is **one unified series structured exactly like a buoy campaign** so the webapp can
+later plot a station beside a buoy on the same time axis at any zoom (`build_station` mirrors
+`ingest/build.py`): `wind/<station>/data/{manifest,latest,recent}.json` +
+`year/<station>_<YEAR>.parquet` (native) + `hourly/…parquet` (hourly means) + `daily.parquet`.
+Two feeds fused, one schema:
+
+- **One-shot hourly history, keyless** — the open bulk CSVs on meteo.data.gouv.fr
+  (`donnees-climatologiques-de-base-horaires`), URLs resolved from the data.gouv API (survives the
+  `latest-`/`previous-` filename churn), decompressed + station-filtered with polars →
+  `raw/<station>_hist.csv` (immutable, like a buoy `*_arch.csv`). Seeded all 3 stations **2010→now
+  (~145k rows each)**. `pixi run wind --all --seed`.
+- **Forward-growing 6-min live, `METEOFRANCE_API_KEY`** — DPObs v2 (`/station/infrahoraire-6m`,
+  `apikey` header, 100 req/min), one call per 6-min grid point → `raw/<station>_<YEAR>_live.csv`
+  (like a `*_reel.csv`). **Units differ from the bulk files** — `t` Kelvin (→°C), `pmer` Pascal
+  (→hPa), gust `raf10`; 429s retried, not swallowed. From the seed onward the record grows *only*
+  from this feed (the history is never re-fetched).
+
+Folded into `update()` next to the tide step: scrape 6-min → append → rebuild tiers every run (the
+`data/` dir is rewritten from scratch so past-year parquets stay byte-stable and `sync_bucket`
+skips them). `METEOFRANCE_API_KEY` in `refresh-data.yml`. All non-fatal. `.env.template` added.
+
 ## 2026-07-19 — Denser station bar + remembered smoothing (UX polish)
 
 Two quality-of-life refinements to existing features, both persisted like the other prefs:

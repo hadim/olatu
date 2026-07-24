@@ -24,6 +24,11 @@ migrate = "python -m ingest.migrate_layout"
 scrape = "python -m ingest.scrape --src hfdata/06403/raw"
 #   build the tiers from the local raw CSVs
 ingest = "python -m ingest.build --src hfdata/06403/raw --out hfdata/06403/data"
+# Wind (spec 0012): Météo-France -> one buoy-style tiered dataset per station (wind/<station>/).
+#   pixi run wind --all --seed         # one-shot: seed hourly history (2010→) + 6-min backfill -> bucket
+#   pixi run wind --campaign 06403     # refresh: scrape the 6-min feed + rebuild tiers (needs METEOFRANCE_API_KEY)
+#   pixi run wind --station socoa --no-upload   # local-only build (no HF upload)
+wind = "python -m ingest.wind"
 
 # --- Webapp (frontend) ---
 webapp-install = { cmd = "npm install", cwd = "webapp" }

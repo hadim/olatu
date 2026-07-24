@@ -9,6 +9,29 @@ Format per entry: **date — title** · what we found · why it matters · resol
 
 ---
 
+## 2026-07-24 — Météo-France DPObs: a swallowed 429 silently drops data, and its units aren't the bulk files'
+
+**Finding.** Two gotchas surfaced building the wind layer (spec 0012). **(1) Rate limit.** The
+DPObs 6-min endpoint serves one observation per `(station, date)` call, so backfilling a window
+means N calls; the account caps at **100 req/min**. Seeding 3 stations × 60 points = 180 rapid
+calls, and the first cut treated *any* non-200 as "no data" (`return None`) — so the 429s from
+the burst were **silently swallowed**: Socoa (first) got 60 points, Biarritz 43, Cap-Ferret
+(last) **0**, and an all-null station looked like "no 6-min data here" when it was pure
+throttling (Cap-Ferret returns 29/30 when asked calmly). **(2) Units.** The DPObs 6-min CSV is
+**not** in the same units as the hourly bulk files: `t` is **Kelvin** (297.55 → 24.4 °C), `pmer`
+/`pres` are **Pascals** (101260 → 1012.6 hPa), and the gust is `raf10`/`ddraf10` (10-min max),
+not the hourly `FXI`. Taking them at face value would show 297° "air temperature".
+
+**Why it matters.** A silently-swallowed 429 is the quiet-failure trap the 2026-07-13 entry
+warns about, one API up: no error, just missing rows that read as a real data gap. And mixing a
+Kelvin/Pascal live feed into a °C/hPa schema corrupts the tier without any parse error.
+
+**Resolution.** `_dpobs_row` now **retries 429/5xx with backoff** (honours `Retry-After`) and
+only maps 200→rows / 204→None / 401-403→raise; a 0.1 s pace between calls keeps bursts clear of
+the cap. `_canon6` converts K→°C and Pa→hPa on the way in. Auth is the **`apikey` header** (the
+swagger says OAuth2 implicit, but the portal accepts the application key directly). Refs:
+`ingest/wind.py`, [spec 0012](2026-07-24-0012-wind.md) §2.1/§2.3.
+
 ## 2026-07-13 — an HF Xet outage hung the refresh; a hang with no stack is the real bug
 
 **Finding.** The `*/30` refresh failed, then **hung for 20+ min** (CI and locally). It looked

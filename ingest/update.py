@@ -50,7 +50,8 @@ from . import build as build_mod
 from . import scrape as scrape_mod
 from . import tides as tides_mod
 from . import ui
-from .schema import CAMPAIGN_ID, buoy, resolve_tide_port
+from . import wind as wind_mod
+from .schema import CAMPAIGN_ID, buoy, resolve_tide_port, resolve_wind_station
 
 DEFAULT_REPO = "hadim/olatu"  # HF bucket id
 HF_AUD = "https://huggingface.co"
@@ -196,6 +197,11 @@ def _data_dir(work: Path, campaign: str) -> Path:
 def _tides_root(work: Path) -> Path:
     """Shared, port-keyed tide root: hfdata/tides/<port>/{raw,data} (specs/0008 §8.2)."""
     return work / "tides"
+
+
+def _wind_root(work: Path) -> Path:
+    """Shared, station-keyed wind root: hfdata/wind/<station>/{raw,data} (specs/0012 §2.4)."""
+    return work / "wind"
 
 
 def _buoy_prefix(campaign: str) -> str:
@@ -372,6 +378,7 @@ def update(
     do_pull: bool = True,
     do_scrape: bool = True,
     do_tides: bool = True,
+    do_wind: bool = True,
     do_upload: bool = True,
     seed_src: Path | None = None,
     token=_RESOLVE_TOKEN,
@@ -386,6 +393,9 @@ def update(
     # Resolve this buoy's nearest tide port once (shared, port-keyed storage — specs/0008
     # §8.2). None → the buoy has no port within range → build writes tide: null.
     tide_port = resolve_tide_port(campaign) if do_tides else None
+    # Resolve this buoy's nearest wind station (shared, station-keyed storage -- specs/0012
+    # §2.4). None -> the buoy has no station within range -> the wind step is skipped.
+    wind_station = resolve_wind_station(campaign) if do_wind else None
     result: dict = {
         "campaign": campaign,
         "name": meta["name"],
@@ -393,6 +403,7 @@ def update(
         "through": "—",
         "uploaded": do_upload,
         "tide": None,
+        "wind": None,
     }
 
     # Each buoy is its own titled section; buoy steps read cyan, the tide step reads blue,
@@ -449,6 +460,46 @@ def update(
                 "status": "no port in range",
             }
 
+        # --- wind (distinct magenta step): scrape the 6-min feed → append → rebuild tiers ---
+        # The hourly history is a one-shot seed (`pixi run wind --seed`); from then on the record
+        # grows only from the 6-min live feed, so the cron just scrapes + rebuilds — no bulk
+        # re-download. Non-fatal like the tide step. (specs/0012 §3)
+        if do_wind and wind_station is not None:
+            sid = wind_station["id"]
+            ui.step(ui.ICON_WIND, f"wind · {sid}", style=ui.WIND)
+            wroot = _wind_root(work)
+            key = os.environ.get(wind_mod.ENV_KEY)
+            try:
+                if do_pull:
+                    wind_mod.pull_wind(wroot, sid, repo, token)
+                if key:
+                    n_live = wind_mod.scrape_live(
+                        wroot, sid, key, minutes=wind_mod.LIVE_LOOKBACK_MIN
+                    )
+                    status = f"live +{n_live}"
+                else:
+                    ui.detail(
+                        f"no {wind_mod.ENV_KEY} → 6-min live skipped", style=ui.WIND
+                    )
+                    status = "no key"
+                wind_mod.build_station(wroot, sid)
+            except (wind_mod.WindError, RuntimeError) as e:
+                ui.warn(f"wind failed ({e}) → keep existing")
+                status = "failed"
+            result["wind"] = {
+                "station": sid,
+                "distance": wind_station["distance_km"],
+                "status": status,
+            }
+        elif do_wind:
+            ui.step(ui.ICON_WIND, "wind", style=ui.WIND)
+            ui.detail(f"{campaign} has no station within range → skip", style=ui.WIND)
+            result["wind"] = {
+                "station": None,
+                "distance": None,
+                "status": "no station in range",
+            }
+
         # --- build the tiered Parquet/JSON the webapp reads ---
         ui.step(ui.ICON_BUILD, "build")
         build_mod.build(raw, data, campaign)
@@ -481,6 +532,15 @@ def update(
                     repo,
                     token,
                 )
+            if do_wind and wind_station is not None:
+                _net(
+                    f"upload wind {wind_station['id']}",
+                    wind_mod.upload_wind,
+                    _wind_root(work),
+                    wind_station["id"],
+                    repo,
+                    token,
+                )
             _net(f"snapshot {campaign}", snapshot_reel, work, campaign, repo, token)
 
     # Summary facts, read back from the freshly-written manifest (decoupled from build()).
@@ -495,7 +555,7 @@ def update(
 
 
 def _summaries(results: list[dict]) -> None:
-    """Two end-of-run tables, buoys and tides kept separate (spec 0009)."""
+    """Buoy, tide and wind end-of-run tables, kept visually separate (specs 0009/0012)."""
     ui.summary_table(
         "Buoys",
         ["campaign", "buoy", "rows", "through", "uploaded"],
@@ -528,6 +588,23 @@ def _summaries(results: list[dict]) -> None:
         ],
         style=ui.TIDE,
     )
+    ui.summary_table(
+        "Wind",
+        ["station", "buoy", "distance", "status"],
+        [
+            [
+                r["wind"]["station"] or "—",
+                r["name"],
+                f"{r['wind']['distance']} km"
+                if r["wind"]["distance"] is not None
+                else "—",
+                r["wind"]["status"],
+            ]
+            for r in results
+            if r["wind"]
+        ],
+        style=ui.WIND,
+    )
 
 
 def main(
@@ -554,6 +631,10 @@ def main(
     no_tides: Annotated[
         bool, typer.Option("--no-tides", help="Skip the tide refresh (api-maree.fr).")
     ] = False,
+    no_wind: Annotated[
+        bool,
+        typer.Option("--no-wind", help="Skip the wind refresh (Météo-France)."),
+    ] = False,
     no_upload: Annotated[
         bool, typer.Option("--no-upload", help="Build locally without uploading.")
     ] = False,
@@ -565,11 +646,13 @@ def main(
         ),
     ] = None,
 ) -> None:
-    """Refresh Olatu data: pull → scrape → tides → build → upload to the HF bucket."""
+    """Refresh Olatu data: pull → scrape → tides → wind → build → upload to the HF bucket."""
     campaigns = campaign or [CAMPAIGN_ID]
     do_pull, do_upload = not no_pull, not no_upload
 
-    ui.banner(f"pull → scrape → tides → build → upload   ·   {', '.join(campaigns)}")
+    ui.banner(
+        f"pull → scrape → tides → wind → build → upload   ·   {', '.join(campaigns)}"
+    )
 
     # Resolve the HF token ONCE and share it across campaigns: every buoy is a path in
     # the same bucket, so one OIDC exchange authorizes them all (the every-30-min cron
@@ -593,9 +676,11 @@ def main(
         else "local hf login"
     )
     tide_key = "set" if os.environ.get(tides_mod.ENV_KEY) else "MISSING"
+    wind_key = "set" if os.environ.get(wind_mod.ENV_KEY) else "MISSING"
     ui.detail(
         f"bucket {repo} · huggingface_hub {hf.__version__} · auth {auth} · "
-        f"{tides_mod.ENV_KEY} {tide_key} · net timeout {NET_TIMEOUT_S:.0f}s"
+        f"{tides_mod.ENV_KEY} {tide_key} · {wind_mod.ENV_KEY} {wind_key} · "
+        f"net timeout {NET_TIMEOUT_S:.0f}s"
     )
 
     # Refresh each buoy independently: one buoy's failure (e.g. its CANDHIS feed is
@@ -612,6 +697,7 @@ def main(
                     do_pull=do_pull,
                     do_scrape=not no_scrape,
                     do_tides=not no_tides,
+                    do_wind=not no_wind,
                     do_upload=do_upload,
                     seed_src=seed_src,
                     token=token,

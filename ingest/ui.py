@@ -37,9 +37,11 @@ def _line(msg: str, style: str) -> None:
     console.print(Text(msg, style=style), soft_wrap=True)
 
 
-# Palette — buoys read cyan, tides read blue, so the two kinds of work never blur together.
+# Palette — buoys read cyan, tides read blue, wind reads magenta, so the kinds of work
+# never blur together.
 BUOY = "cyan"
 TIDE = "blue"
+WIND = "magenta"
 _OK = "green"
 _WARN = "yellow"
 _ERR = "red"
@@ -49,6 +51,7 @@ _DIM = "grey50"
 ICON_REFRESH = "🌊"
 ICON_BUOY = "🛟"
 ICON_TIDE = "🌙"
+ICON_WIND = "💨"
 ICON_PULL = "↓"
 ICON_SCRAPE = "⟳"
 ICON_BUILD = "⚙"
