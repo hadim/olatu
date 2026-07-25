@@ -266,7 +266,7 @@ def refresh_port(
     win_start, win_end = int(start.timestamp()), int(end.timestamp())
     new_df = pl.DataFrame(
         {
-            "t": [int(round(e["t"])) for e in new_events],
+            "t": [round(e["t"]) for e in new_events],
             "h": [e["h"] for e in new_events],
             "k": [e["k"] for e in new_events],
         },
