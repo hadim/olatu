@@ -297,7 +297,7 @@ const AIR_PANELS: PanelDef[] = [
     emptyKey: 'cc_wind_unavailable',
   },
   { id: 'winddir', realm: 'air', titleKey: 'cc_wind_dir', series: [{ key: 'wind_direction_deg', colorVar: '--c-wind' }], glyph: true, emptyKey: 'cc_wind_unavailable' },
-  { id: 'airtemp', realm: 'air', titleKey: 'cc_air_temp', series: [{ key: 'air_temperature_c', colorVar: '--c-wind', width: 2, fill: true }], emptyKey: 'cc_wind_unavailable' },
+  { id: 'airtemp', realm: 'air', titleKey: 'cc_air_temp', series: [{ key: 'air_temperature_c', colorVar: '--c-airtemp', width: 2, fill: true }], emptyKey: 'cc_wind_unavailable' },
   { id: 'rain', realm: 'air', titleKey: 'cc_rain', series: [{ key: 'precipitation_mm', colorVar: '--c-period', width: 1.5, fill: true }], zeroBased: true, emptyKey: 'cc_wind_unavailable' },
   // Humidity + pressure are NULLABLE (some stations drop them, per spec 0012): their own empty
   // message ("not measured at this station") is honester than the generic wind-unavailable band.
@@ -427,7 +427,7 @@ const AIR_CARD_METRICS: { key: string; labelKey: MessageKey; dir?: boolean; icon
   { key: 'wind_speed_ms', labelKey: 'cc_wind', icon: 'wind', colorVar: '--c-wind' },
   { key: 'wind_gust_ms', labelKey: 'cc_gust', icon: 'wind', colorVar: '--c-wind' },
   { key: 'wind_direction_deg', labelKey: 'cc_wind_dir', dir: true, icon: 'wind', colorVar: '--c-dir' },
-  { key: 'air_temperature_c', labelKey: 'cc_air_temp', icon: 'temp', colorVar: '--c-wind' },
+  { key: 'air_temperature_c', labelKey: 'cc_air_temp', icon: 'temp', colorVar: '--c-airtemp' },
 ];
 
 // Fixed display unit for the non-convertible keys (the convertible speed/temp/pressure keys get
@@ -574,7 +574,9 @@ export default function TimeSeries({
     return [...stored.filter((id) => unitIds.includes(id)), ...unitIds.filter((id) => !stored.includes(id))];
   });
   const [hidden, setHidden] = useState<string[]>(() => storedIds(CHARTS_HIDDEN_STORE));
-  const dragIdRef = useRef<string | null>(null);
+  // A reorder rebuilds the whole stack, so the focused grip is destroyed: remember which unit to
+  // re-focus afterwards, else keyboard reordering loses focus after a single arrow press.
+  const focusGripRef = useRef<string | null>(null);
 
   // Keep `order` complete when the available panels change (e.g. the wind station resolves): append
   // any missing unit id, preserving the stored order for the rest.
@@ -814,6 +816,11 @@ export default function TimeSeries({
     const src = detail ?? data;
     const sxs = src.t;
     if (!host || sxs.length === 0) return;
+    // The stack collapses to nothing while it is rebuilt, the document shrinks, and the browser
+    // clamps the scroll to the top — a reorder/hide would yank you back up the page. The teardown
+    // pins the old height on the host (see the cleanup below, which runs BEFORE this); here we
+    // only have to hold it until the panels are back. `prevScroll` covers what still slips through.
+    const prevScroll = window.scrollY;
     host.innerHTML = '';
 
     // Day separators live on ONE overlay spanning the whole stack (behind the panels, via
@@ -910,7 +917,7 @@ export default function TimeSeries({
     };
     const chip = (cm: { labelKey: MessageKey; icon: IconName; colorVar: string }, valueHtml: string): string => {
       const icon = iconSvg(cm.icon, { className: 'shrink-0', color: `var(${cm.colorVar})` });
-      return `<span class="inline-flex items-center gap-[0.35rem]">${icon}<span class="text-[0.68rem] uppercase tracking-[0.05em] text-faint">${m[cm.labelKey]()}</span><span class="font-mono text-[0.84rem] text-muted">${valueHtml}</span></span>`;
+      return `<span class="inline-flex items-center gap-[0.35rem]">${icon}<span class="text-[0.72rem] uppercase tracking-[0.05em] text-faint">${m[cm.labelKey]()}</span><span class="font-mono text-[0.98rem] text-fg">${valueHtml}</span></span>`;
     };
     const chipsHTML = (idx: number) => {
       const chips: string[] = [];
@@ -1026,6 +1033,124 @@ export default function TimeSeries({
     }
     setSummary(summaryRows);
 
+    // ---- Reorder (spec 0013) --------------------------------------------------------------
+    // One block per visible unit, in stack order — a glued child (spread) shares its parent's box,
+    // so the pair drags as one. Filled by the render loop below.
+    const blocks: { id: string; els: HTMLElement[] }[] = [];
+    const gripEls = new Map<string, HTMLElement>();
+    let unitBox: HTMLDivElement | null = null;
+    let cancelDrag = () => {};
+
+    const blockEdges = (b: { els: HTMLElement[] }) => ({
+      top: b.els[0].getBoundingClientRect().top,
+      bottom: b.els[b.els.length - 1].getBoundingClientRect().bottom,
+    });
+
+    // Pointer-based drag: the HTML5 drag-and-drop it replaces was inert on touch and offered only
+    // the thin heading strip as a drop target. Here the drag band down the left of each panel is
+    // the handle, the dragged unit dims in place, a chip rides the pointer, an accent line marks
+    // the landing slot, and the page auto-scrolls near the viewport edges. Escape cancels.
+    const beginDrag = (id: string, ev: PointerEvent) => {
+      const from = blocks.findIndex((b) => b.id === id);
+      if (from < 0) return;
+      const def = panelById.get(id);
+      const startX = ev.clientX;
+      const startY = ev.clientY;
+      let x = startX;
+      let y = startY;
+      let armed = false;
+      let target = from;
+      let speed = 0;
+      let raf = 0;
+
+      const line = document.createElement('div');
+      line.setAttribute('aria-hidden', 'true');
+      line.style.cssText = 'position:absolute;left:1rem;right:1rem;height:2px;border-radius:2px;background:var(--accent);box-shadow:0 0 0 4px color-mix(in oklab, var(--accent) 18%, transparent);z-index:40;pointer-events:none;';
+      const chipColor = def ? REALM_COLOR[def.realm] : 'var(--accent)';
+      const chip = document.createElement('div');
+      chip.setAttribute('aria-hidden', 'true');
+      chip.textContent = def ? m[def.titleKey]() : '';
+      chip.style.cssText = `position:fixed;z-index:60;pointer-events:none;transform:translate(-50%,-170%);padding:3px 9px;border-radius:999px;font:600 0.72rem/1.2 var(--font-mono);white-space:nowrap;color:${chipColor};background:color-mix(in oklab, var(--surface) 92%, transparent);border:1px solid color-mix(in oklab, ${chipColor} 45%, var(--hairline));box-shadow:0 8px 20px -8px rgba(0,0,0,0.6);`;
+
+      // Landing slot = the first block whose midpoint sits below the pointer (else the end).
+      const place = () => {
+        const n = blocks.length;
+        let idx = n;
+        for (let i = 0; i < n; i++) {
+          const e = blockEdges(blocks[i]);
+          if (y < (e.top + e.bottom) / 2) {
+            idx = i;
+            break;
+          }
+        }
+        target = idx;
+        const at = idx < n ? blockEdges(blocks[idx]).top - 4 : blockEdges(blocks[n - 1]).bottom + 2;
+        line.style.top = `${at - host.getBoundingClientRect().top}px`;
+        chip.style.left = `${x}px`;
+        chip.style.top = `${y}px`;
+      };
+
+      const tick = () => {
+        if (speed) {
+          window.scrollBy(0, speed);
+          place();
+        }
+        raf = requestAnimationFrame(tick);
+      };
+
+      const arm = () => {
+        armed = true;
+        for (const el of blocks[from].els) el.style.opacity = '0.35';
+        host.appendChild(line);
+        document.body.appendChild(chip);
+        document.body.style.userSelect = 'none';
+        raf = requestAnimationFrame(tick);
+      };
+
+      const move = (e: PointerEvent) => {
+        x = e.clientX;
+        y = e.clientY;
+        // A few pixels of slack so a plain click on the band doesn't flash the drag chrome.
+        if (!armed) {
+          if (Math.abs(y - startY) < 4 && Math.abs(x - startX) < 4) return;
+          arm();
+        }
+        e.preventDefault(); // touch: keep the page from scrolling under the drag
+        const margin = 90;
+        speed = y < margin ? -Math.ceil((margin - y) / 6) : y > window.innerHeight - margin ? Math.ceil((y - (window.innerHeight - margin)) / 6) : 0;
+        place();
+      };
+
+      const end = (commit: boolean) => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', abort);
+        window.removeEventListener('keydown', esc);
+        cancelDrag = () => {};
+        cancelAnimationFrame(raf);
+        document.body.style.userSelect = '';
+        line.remove();
+        chip.remove();
+        for (const el of blocks[from].els) el.style.opacity = '';
+        // `from` and `from + 1` are both the slot it already occupies — neither is a move.
+        if (commit && armed && target !== from && target !== from + 1) {
+          if (target >= blocks.length) moveUnit(id, blocks[blocks.length - 1].id, true);
+          else moveUnit(id, blocks[target].id, false);
+        }
+      };
+      const up = () => end(true);
+      const abort = () => end(false);
+      const esc = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') end(false);
+      };
+
+      window.addEventListener('pointermove', move, { passive: false });
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', abort);
+      window.addEventListener('keydown', esc);
+      cancelDrag = abort;
+    };
+
     visibleFlat.forEach((panel, idx) => {
       const isLast = idx === visibleFlat.length - 1;
       // Air panels read the wind station's source + x-grid; Sea panels read the buoy's. Both
@@ -1086,45 +1211,53 @@ export default function TimeSeries({
 
         const grip = document.createElement('button');
         grip.type = 'button';
-        grip.className = `${TS_CTL} mr-1 cursor-grab`;
-        grip.draggable = true;
-        grip.setAttribute('aria-label', m.ts_reorder());
+        // touch-none: the grip owns the gesture, so dragging it never scrolls the page instead.
+        grip.className = `${TS_CTL} mr-1 cursor-grab touch-none active:cursor-grabbing`;
+        grip.setAttribute('aria-label', `${m.ts_reorder()} · ${m[panel.titleKey]()}`);
         grip.title = m.ts_reorder();
         grip.innerHTML = iconSvg('grip', { size: 16, color: 'currentColor' });
-        grip.addEventListener('dragstart', (e) => {
-          dragIdRef.current = panel.id;
-          if (e.dataTransfer) {
-            e.dataTransfer.setData('text/plain', panel.id);
-            e.dataTransfer.effectAllowed = 'move';
-          }
+        grip.addEventListener('pointerdown', (e) => {
+          if (e.button > 0) return;
+          e.preventDefault(); // ...which also suppresses the default focus, so do it by hand
+          grip.focus({ preventScroll: true });
+          beginDrag(panel.id, e);
         });
-        grip.addEventListener('dragend', () => {
-          dragIdRef.current = null;
-          host.querySelectorAll('.ts-drop').forEach((n) => n.classList.remove('ts-drop', 'ring-2', 'ring-accent'));
+        // Keyboard equivalent — and the reliable way out when a drag feels fiddly.
+        grip.addEventListener('keydown', (e) => {
+          if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+          e.preventDefault();
+          const i = blocks.findIndex((b) => b.id === panel.id);
+          const j = e.key === 'ArrowUp' ? i - 1 : i + 1;
+          if (i < 0 || j < 0 || j >= blocks.length) return;
+          focusGripRef.current = panel.id;
+          moveUnit(panel.id, blocks[j].id, e.key === 'ArrowDown');
         });
+        gripEls.set(panel.id, grip);
         heading.insertBefore(grip, heading.firstChild);
-
-        // The heading is the drop target: dropping before/after its midpoint reorders the unit.
-        heading.dataset.unit = panel.id;
-        heading.addEventListener('dragover', (e) => {
-          if (!dragIdRef.current || dragIdRef.current === panel.id) return;
-          e.preventDefault();
-          heading.classList.add('ts-drop', 'ring-2', 'ring-accent');
-        });
-        heading.addEventListener('dragleave', () => heading.classList.remove('ts-drop', 'ring-2', 'ring-accent'));
-        heading.addEventListener('drop', (e) => {
-          e.preventDefault();
-          heading.classList.remove('ts-drop', 'ring-2', 'ring-accent');
-          const from = dragIdRef.current;
-          if (from && from !== panel.id) {
-            const r = heading.getBoundingClientRect();
-            moveUnit(from, panel.id, e.clientY > r.top + r.height / 2);
-          }
-        });
       }
 
-      host.appendChild(heading);
-      host.appendChild(wrap);
+      // Each unit lives in its own positioned box so its drag band can span the full height of the
+      // panel in the host's left gutter; a glued child (spread) joins its parent's box, so the pair
+      // drags — and dims — as one. The band is the generous target the small grip never was.
+      if (!panel.glued) {
+        unitBox = document.createElement('div');
+        unitBox.className = 'relative';
+        const band = document.createElement('div');
+        band.className = 'ts-band';
+        band.setAttribute('aria-hidden', 'true'); // the heading grip is the accessible control
+        band.title = m.ts_reorder();
+        band.style.setProperty('--band', REALM_COLOR[panel.realm]);
+        band.addEventListener('pointerdown', (e) => {
+          if (e.button > 0) return;
+          e.preventDefault();
+          beginDrag(panel.id, e);
+        });
+        unitBox.appendChild(band);
+        host.appendChild(unitBox);
+        blocks.push({ id: panel.id, els: [unitBox] });
+      }
+      (unitBox ?? host).appendChild(heading);
+      (unitBox ?? host).appendChild(wrap);
 
       const inWindow = (key: string) => {
         if (!psrc) return false;
@@ -1323,7 +1456,7 @@ export default function TimeSeries({
       const bubble = document.createElement('div');
       const bColor = cssVar(panel.series[0].colorVar);
       bubble.setAttribute('aria-hidden', 'true');
-      bubble.style.cssText = `position:absolute;top:2px;transform:translateX(-50%);pointer-events:none;opacity:0;transition:opacity .08s ease;white-space:nowrap;z-index:6;padding:2px 6px;border-radius:6px;font:600 0.66rem/1 var(--font-mono);background:color-mix(in oklab, var(--surface) 86%, transparent);color:${bColor};border:1px solid color-mix(in oklab, ${bColor} 42%, var(--hairline));`;
+      bubble.style.cssText = `position:absolute;top:2px;transform:translateX(-50%);pointer-events:none;opacity:0;transition:opacity .08s ease;white-space:nowrap;z-index:6;padding:3px 7px;border-radius:6px;font:600 0.82rem/1 var(--font-mono);background:color-mix(in oklab, var(--surface) 86%, transparent);color:${bColor};border:1px solid color-mix(in oklab, ${bColor} 42%, var(--hairline));`;
       u.over.appendChild(bubble);
       cursorVal.el = bubble;
 
@@ -1337,6 +1470,17 @@ export default function TimeSeries({
     });
 
     plotsRef.current = plots;
+    // Release the pin only once the rebuilt stack has been laid out — the panels are still
+    // collapsed this tick, so clearing it here would expose a short document and the scroll would
+    // clamp (a scrollTo issued against that stale layout is clamped too, which is why we wait).
+    const releaseHeight = requestAnimationFrame(() => {
+      host.style.minHeight = '';
+      if (window.scrollY !== prevScroll) window.scrollTo(window.scrollX, prevScroll);
+    });
+    if (focusGripRef.current) {
+      gripEls.get(focusGripRef.current)?.focus({ preventScroll: true });
+      focusGripRef.current = null;
+    }
     baseScaleRef.current = { min: xmin - xpad, max: xmax + xpad };
     if (plots[0]) renderDayOverlay(plots[0]);
 
@@ -1367,6 +1511,11 @@ export default function TimeSeries({
     ro.observe(host);
 
     return () => {
+      cancelDrag(); // a drag in flight would outlive the elements it dims
+      // Destroying the plots empties the host: hold its height so the page doesn't shrink under
+      // the reader (the rebuild that follows releases the pin). See the top of this effect.
+      cancelAnimationFrame(releaseHeight);
+      host.style.minHeight = `${host.offsetHeight}px`;
       cancelAnimationFrame(raf);
       host.removeEventListener('mouseup', commitGesture);
       host.removeEventListener('touchend', commitGesture);
@@ -1501,7 +1650,7 @@ export default function TimeSeries({
           value changing width (1,3 → 10,3 m) can't reflow the row and make it flicker. */}
       <div className="hover-card mb-[0.7rem] flex flex-col gap-[0.4rem] rounded-[0.7rem] border border-line bg-surface px-[0.85rem] py-[0.5rem]" ref={cardRef} aria-hidden="true">
         <div className="flex items-baseline justify-between gap-x-4">
-          <span className="hover-time font-mono text-[0.82rem] text-fg" />
+          <span className="hover-time font-mono text-[0.92rem] text-fg" />
           <span className="shrink-0 cursor-help whitespace-nowrap font-mono text-[0.7rem] text-faint" title={m.time_buoy_local()}>
             ◷ {tz}
           </span>

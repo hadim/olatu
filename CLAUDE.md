@@ -173,6 +173,15 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   panels + heading unit tags, hover readout. Default wind = **km/h**; the choice persists in
   `olatu.units`. Never mutate the stored data to change units; the °C→°F map is affine so it commutes
   with the chart smoothing.
+- **Rebuilding the chart stack must not move the page.** `TimeSeries`'s render effect destroys every
+  uPlot and re-appends the panels, so the host collapses and the browser clamps the scroll to the top.
+  The cleanup **pins `host.style.minHeight`** before `destroy()`, and the rebuild releases it in a
+  **`requestAnimationFrame`** (the panels aren't laid out in the same tick — releasing synchronously,
+  or calling `scrollTo` there, is clamped away). Keep both halves if you touch that effect.
+  See the 2026-07-25 LEARNINGS entry.
+- **Reorder is Pointer Events, never HTML5 drag-and-drop** (spec 0013 §7) — `draggable` does nothing on
+  touch. The handle is the per-panel `.ts-band` in the host's left gutter; the heading grip stays the
+  accessible control (label + ↑/↓, re-focused after the rebuild via `focusGripRef`).
 - **Chart gap-breaks:** `TimeSeries.gapAware` must estimate the sampling cadence **causally (an EWMA of
   the normal deltas)**, never the global-minimum delta — a **mixed-cadence** source (the current-year
   wind file = a 6-min live tail on an hourly history) otherwise flags every hourly step as a gap and

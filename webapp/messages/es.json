@@ -207,7 +207,7 @@
   "ts_air_sea_temp": "Temperatura aire y mar",
   "ts_hide": "Ocultar",
   "ts_show": "Mostrar",
-  "ts_reorder": "Arrastra para reordenar",
+  "ts_reorder": "Arrastra, o pulsa \u2191 \u2193, para reordenar",
   "ts_hidden": "Ocultos",
   "ts_none_hidden": "ninguno",
   "ts_manage_hint": "arrastra para reordenar · ojo para ocultar",

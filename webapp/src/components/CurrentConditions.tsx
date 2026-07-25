@@ -307,7 +307,7 @@ export default function CurrentConditions({
               <div className="grid w-full grid-cols-4 gap-[1rem] [&>*+*]:border-l [&>*+*]:border-line [&>*+*]:pl-[1rem] max-[720px]:text-center max-[520px]:grid-cols-2 max-[520px]:gap-y-4 max-[520px]:[&>*]:border-l-0 max-[520px]:[&>*]:pl-0">
                 <Gauge label={m.cc_wind()} value={fmtU(windSpeed, 'wind_speed_ms')} unit={keySuffix('wind_speed_ms', units) ?? undefined} defKey="def_wind" accent="var(--c-wind)" icon={<WindIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)' }} />} />
                 <Gauge label={m.cc_gust()} value={fmtU(gust, 'wind_gust_ms')} unit={keySuffix('wind_gust_ms', units) ?? undefined} defKey="def_gust" icon={<WindIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)', opacity: 0.7 }} />} />
-                <Gauge label={m.cc_air_temp()} value={fmtU(airTemp, 'air_temperature_c')} unit={keySuffix('air_temperature_c', units) ?? undefined} defKey="def_air_temp" accent="var(--c-wind)" icon={<TempIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)' }} />} />
+                <Gauge label={m.cc_air_temp()} value={fmtU(airTemp, 'air_temperature_c')} unit={keySuffix('air_temperature_c', units) ?? undefined} defKey="def_air_temp" accent="var(--c-airtemp)" icon={<TempIcon className={LABEL_ICON} style={{ color: 'var(--c-airtemp)' }} />} />
                 <Gauge label={m.cc_rain()} value={num(rain)} unit="mm" defKey="def_rain" icon={<RainIcon className={LABEL_ICON} style={{ color: 'var(--c-period)' }} />} />
               </div>
               <div className="grid w-full max-w-[22rem] grid-cols-2 gap-[1rem] text-[0.9rem] opacity-80 [&>*+*]:border-l [&>*+*]:border-line [&>*+*]:pl-[1rem]">

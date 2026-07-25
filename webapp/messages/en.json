@@ -207,7 +207,7 @@
   "ts_air_sea_temp": "Air & sea temperature",
   "ts_hide": "Hide",
   "ts_show": "Show",
-  "ts_reorder": "Drag to reorder",
+  "ts_reorder": "Drag, or press \u2191 \u2193, to reorder",
   "ts_hidden": "Hidden",
   "ts_none_hidden": "none",
   "ts_manage_hint": "drag to reorder · eye to hide",

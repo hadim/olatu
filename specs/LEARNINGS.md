@@ -9,6 +9,29 @@ Format per entry: **date — title** · what we found · why it matters · resol
 
 ---
 
+## 2026-07-25 — rebuilding a canvas stack scrolls the page to the top, and restoring the offset too early is clamped away
+
+**Finding.** Reordering or hiding a chart panel yanked the page back near the top. The `TimeSeries`
+render effect rebuilds the whole stack (`host.innerHTML = ''` + a fresh uPlot per panel), so for an
+instant the host is ~0 px tall, the document shrinks by its full height, and the browser **clamps** the
+scroll offset to the new maximum. Two further traps hid the fix: (1) the collapse happens in the effect's
+**cleanup** (`uPlot.destroy()` removes each canvas), which React runs *before* the new effect body — so
+measuring the height at the top of the body is already too late; (2) after the rebuild the panels are
+**not yet laid out** (offsetHeight was 427 px where the stack is 1600 px), so both clearing a height pin
+and issuing `window.scrollTo(prevScroll)` in that same tick land against the short layout — the scrollTo
+is silently clamped and does nothing.
+
+**Why it matters.** It made an otherwise-working reorder feel broken, and it hunts like a scroll-anchoring
+or focus bug: `overflow-anchor: none` changes nothing, `focus({preventScroll: true})` is not the cause,
+and instrumenting `scrollTo`/`scrollIntoView`/`scrollTop` shows **no** call doing the damage — the browser
+clamp leaves no trace. The give-away is reading `document.scrollHeight` *at the moment of the restore*.
+
+**Resolution.** Pin the height in the **cleanup**, before the plots are destroyed
+(`host.style.minHeight = host.offsetHeight + 'px'`), and release it in a **`requestAnimationFrame`** at the
+end of the rebuild, restoring `prevScroll` there if it still moved. Same pattern for any imperative
+canvas/DOM stack rebuilt inside an effect. Refs: `webapp/src/components/TimeSeries.tsx`,
+[spec 0013 §7](2026-07-24-0013-wind-webapp-ux.md).
+
 ## 2026-07-25 — a mixed-cadence series shatters a line chart when the gap threshold keys off the global-min
 
 **Finding.** "At the 1-year window I see the wind data, but when I zoom into a few days I see

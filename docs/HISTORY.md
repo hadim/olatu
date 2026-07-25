@@ -9,6 +9,27 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-07-25 — Panel reorder rebuilt on pointer events, and a readable readout (spec 0013 §7)
+
+A second owner pass on the chart stack's hide/reorder affordance.
+
+- **Reorder no longer scrolls you back to the top.** Rebuilding the stack destroys every uPlot, so the
+  document briefly shrank and the browser clamped the scroll. The teardown now pins the host's height and
+  the rebuild releases it **one frame later** — releasing it synchronously re-exposes a not-yet-laid-out
+  (collapsed) stack, and a `scrollTo` against that stale layout is clamped away too.
+  See [LEARNINGS](../specs/LEARNINGS.md).
+- **Drag & drop rewritten on Pointer Events.** The HTML5 `draggable` version was **inert on touch** and
+  only accepted the thin heading strip as a drop target. Now: mouse/pen/finger alike, the whole stack is
+  the target, the dragged unit dims in place, a chip rides the pointer, an accent line marks the landing
+  slot, the page auto-scrolls near the viewport edges, and `Escape` cancels.
+- **A drag band per panel** — a full-height grab target in the chart host's left gutter (inside its
+  padding, so no plot width is lost): a hairline at rest, firmer on stack hover, solid under the pointer.
+  The heading grip stays as the accessible control and now moves a panel with **↑ / ↓**, keeping focus.
+- **Air temperature gets its own rose** `--c-airtemp` — it was amber like the wind/gust series it sits
+  next to. Realm is carried by zone/bar/tag, so the series hue is free (as for rain/humidity/pressure).
+- **Bigger hover values:** readout values 0.84 → 0.98 rem in the foreground colour, its timestamp
+  0.82 → 0.92 rem, on-plot cursor bubble 0.66 → 0.82 rem.
+
 ## 2026-07-25 — Wind UX polish + a units/settings modal (specs 0013 §6, 0014)
 
 An owner-feedback pass on the wind surfaces, plus a real new capability — **display units**.

@@ -207,7 +207,7 @@
   "ts_air_sea_temp": "Température air & mer",
   "ts_hide": "Masquer",
   "ts_show": "Afficher",
-  "ts_reorder": "Glisser pour réordonner",
+  "ts_reorder": "Glisser, ou \u2191 \u2193, pour réordonner",
   "ts_hidden": "Masqués",
   "ts_none_hidden": "aucun",
   "ts_manage_hint": "glisser pour réordonner · œil pour masquer",

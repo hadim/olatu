@@ -36,6 +36,7 @@
   --c-temp: #ff8a5b;
   --c-tide: #5b8ff5; /* tide/marée — a deeper indigo-blue, distinct from the sky-blue period */
   --c-wind: #f4b740; /* wind/vent — Air realm (spec 0013): warm amber vs the cool sea palette */
+  --c-airtemp: #ff6f91; /* air temp — plotted next to the wind, amber read as "more wind" */
   color-scheme: dark;
 }
 
@@ -61,6 +62,7 @@
   --c-temp: #e85c2b;
   --c-tide: #2f6fd0; /* tide/marée */
   --c-wind: #a06600; /* wind/vent — Air realm (spec 0013): darkened amber for AA on light */
+  --c-airtemp: #c42a56; /* air temp — see the dark theme */
   color-scheme: light;
 }
 
@@ -93,6 +95,7 @@
   --color-temp: var(--c-temp);
   --color-tide: var(--c-tide);
   --color-wind: var(--c-wind);
+  --color-airtemp: var(--c-airtemp);
 }
 
 /* ---- base ---- */
@@ -193,6 +196,50 @@
 }
 .u-cursor-pt {
   border: none !important;
+}
+
+/* Per-panel drag band (spec 0013): a full-height grab target in the chart host's left gutter, so
+   reordering never depends on hitting the small heading grip. Barely a hairline at rest; it firms
+   up while the pointer is anywhere over the stack, and again under the pointer itself. `--band`
+   carries the panel's realm colour (set in JS). */
+.ts-band {
+  position: absolute;
+  left: -1rem; /* into the host's px-4 padding — the band never steals plot width */
+  top: 0;
+  bottom: 0;
+  width: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none; /* the band owns the gesture: dragging it must not scroll the page */
+}
+.ts-band::before {
+  content: '';
+  width: 2px;
+  height: calc(100% - 0.6rem);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--band, var(--divider)) 20%, transparent);
+  transition:
+    width 0.14s ease,
+    background-color 0.14s ease;
+}
+.charts:hover .ts-band::before {
+  width: 3px;
+  background: color-mix(in oklab, var(--band, var(--divider)) 40%, transparent);
+}
+.ts-band:hover::before,
+.ts-band:active::before {
+  width: 5px;
+  background: var(--band, var(--divider));
+}
+.ts-band:active {
+  cursor: grabbing;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ts-band::before {
+    transition: none;
+  }
 }
 
 /* "No data for this window" hatched band over a chart panel (created in JS; `bottom`
