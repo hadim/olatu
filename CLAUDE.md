@@ -173,6 +173,10 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   panels + heading unit tags, hover readout. Default wind = **km/h**; the choice persists in
   `olatu.units`. Never mutate the stored data to change units; the °C→°F map is affine so it commutes
   with the chart smoothing.
+- **Never run `npm audit fix --force` in `webapp/`.** The remaining advisories all sit under
+  `@vite-pwa/assets-generator` (whose latest still pins `sharp ^0.33.5`), so `--force` "fixes" them by
+  **downgrading `vite-plugin-pwa` 1.3 -> 0.18.2**. They're patched instead via `overrides` in
+  `package.json` (`sharp`, `brace-expansion`) — keep those; drop one only when upstream bumps.
 - **Rebuilding the chart stack must not move the page.** `TimeSeries`'s render effect destroys every
   uPlot and re-appends the panels, so the host collapses and the browser clamps the scroll to the top.
   The cleanup **pins `host.style.minHeight`** before `destroy()`, and the rebuild releases it in a
