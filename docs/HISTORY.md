@@ -28,7 +28,14 @@ A second owner pass on the chart stack's hide/reorder affordance.
 - **Air temperature gets its own rose** `--c-airtemp` — it was amber like the wind/gust series it sits
   next to. Realm is carried by zone/bar/tag, so the series hue is free (as for rain/humidity/pressure).
 - **Bigger hover values:** readout values 0.84 → 0.98 rem in the foreground colour, its timestamp
-  0.82 → 0.92 rem, on-plot cursor bubble 0.66 → 0.82 rem.
+  0.82 → 0.92 rem, on-plot cursor bubble 0.66 → 0.82 rem — plus **one timestamp riding the pointer**
+  (snapped to the same grid index the readout reports), since the card scrolls out of view on a long stack.
+- **The band is now the only reorder control** — the heading grip became redundant and went, semantics and
+  all (`role=button`, ↑/↓, focus ring); band hover emphasis is **per panel**, not stack-wide.
+- **Rain/spread stop clipping their zero:** the scale opens a sliver below 0 (axis filter hides the
+  negative splits), so a dry-day flat line sits clear of the bottom edge with its `0` label intact.
+- **Dependencies to latest**, including two majors — **maplibre-gl 6** (map, markers and controls verified
+  in a browser) and **TypeScript 7** (which removed `baseUrl`; `paths` is now relative).
 
 ## 2026-07-25 — Wind UX polish + a units/settings modal (specs 0013 §6, 0014)
 

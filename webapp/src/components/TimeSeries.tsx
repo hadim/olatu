@@ -574,9 +574,9 @@ export default function TimeSeries({
     return [...stored.filter((id) => unitIds.includes(id)), ...unitIds.filter((id) => !stored.includes(id))];
   });
   const [hidden, setHidden] = useState<string[]>(() => storedIds(CHARTS_HIDDEN_STORE));
-  // A reorder rebuilds the whole stack, so the focused grip is destroyed: remember which unit to
-  // re-focus afterwards, else keyboard reordering loses focus after a single arrow press.
-  const focusGripRef = useRef<string | null>(null);
+  // A reorder rebuilds the whole stack, so the focused drag band is destroyed: remember which unit
+  // to re-focus afterwards, else keyboard reordering loses focus after a single arrow press.
+  const focusBandRef = useRef<string | null>(null);
 
   // Keep `order` complete when the available panels change (e.g. the wind station resolves): append
   // any missing unit id, preserving the stored order for the rest.
@@ -1037,7 +1037,7 @@ export default function TimeSeries({
     // One block per visible unit, in stack order — a glued child (spread) shares its parent's box,
     // so the pair drags as one. Filled by the render loop below.
     const blocks: { id: string; els: HTMLElement[] }[] = [];
-    const gripEls = new Map<string, HTMLElement>();
+    const bandEls = new Map<string, HTMLElement>();
     let unitBox: HTMLDivElement | null = null;
     let cancelDrag = () => {};
 
@@ -1209,49 +1209,40 @@ export default function TimeSeries({
         eye.addEventListener('click', () => hideUnit(panel.id));
         right?.appendChild(eye);
 
-        const grip = document.createElement('button');
-        grip.type = 'button';
-        // touch-none: the grip owns the gesture, so dragging it never scrolls the page instead.
-        grip.className = `${TS_CTL} mr-1 cursor-grab touch-none active:cursor-grabbing`;
-        grip.setAttribute('aria-label', `${m.ts_reorder()} · ${m[panel.titleKey]()}`);
-        grip.title = m.ts_reorder();
-        grip.innerHTML = iconSvg('grip', { size: 16, color: 'currentColor' });
-        grip.addEventListener('pointerdown', (e) => {
+      }
+
+      // Each unit lives in its own positioned box so its drag band can span the full height of the
+      // panel in the host's left gutter; a glued child (spread) joins its parent's box, so the pair
+      // drags — and dims — as one. The band is the ONLY reorder control: a generous pointer target
+      // that is also the keyboard one (focusable, ↑/↓ moves the unit), which is why the heading
+      // carried a separate grip button only in the first cut.
+      if (!panel.glued) {
+        unitBox = document.createElement('div');
+        unitBox.className = 'ts-unit relative';
+        const band = document.createElement('div');
+        band.className = 'ts-band';
+        band.tabIndex = 0;
+        band.setAttribute('role', 'button');
+        band.setAttribute('aria-label', `${m.ts_reorder()} · ${m[panel.titleKey]()}`);
+        band.title = m.ts_reorder();
+        band.style.setProperty('--band', REALM_COLOR[panel.realm]);
+        band.addEventListener('pointerdown', (e) => {
           if (e.button > 0) return;
           e.preventDefault(); // ...which also suppresses the default focus, so do it by hand
-          grip.focus({ preventScroll: true });
+          band.focus({ preventScroll: true });
           beginDrag(panel.id, e);
         });
         // Keyboard equivalent — and the reliable way out when a drag feels fiddly.
-        grip.addEventListener('keydown', (e) => {
+        band.addEventListener('keydown', (e) => {
           if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
           e.preventDefault();
           const i = blocks.findIndex((b) => b.id === panel.id);
           const j = e.key === 'ArrowUp' ? i - 1 : i + 1;
           if (i < 0 || j < 0 || j >= blocks.length) return;
-          focusGripRef.current = panel.id;
+          focusBandRef.current = panel.id;
           moveUnit(panel.id, blocks[j].id, e.key === 'ArrowDown');
         });
-        gripEls.set(panel.id, grip);
-        heading.insertBefore(grip, heading.firstChild);
-      }
-
-      // Each unit lives in its own positioned box so its drag band can span the full height of the
-      // panel in the host's left gutter; a glued child (spread) joins its parent's box, so the pair
-      // drags — and dims — as one. The band is the generous target the small grip never was.
-      if (!panel.glued) {
-        unitBox = document.createElement('div');
-        unitBox.className = 'relative';
-        const band = document.createElement('div');
-        band.className = 'ts-band';
-        band.setAttribute('aria-hidden', 'true'); // the heading grip is the accessible control
-        band.title = m.ts_reorder();
-        band.style.setProperty('--band', REALM_COLOR[panel.realm]);
-        band.addEventListener('pointerdown', (e) => {
-          if (e.button > 0) return;
-          e.preventDefault();
-          beginDrag(panel.id, e);
-        });
+        bandEls.set(panel.id, band);
         unitBox.appendChild(band);
         host.appendChild(unitBox);
         blocks.push({ id: panel.id, els: [unitBox] });
@@ -1333,6 +1324,9 @@ export default function TimeSeries({
         yAxis.values = () => [];
         yAxis.grid = { show: false };
         yAxis.ticks = { show: false };
+      } else if (panel.zeroBased) {
+        // Hide the sub-zero splits the range's bottom sliver introduces (see the scale below).
+        yAxis.filter = (_u, splits) => splits.map((v) => (v < 0 ? null : v));
       }
 
       const xAxis: uPlot.Axis = {
@@ -1420,7 +1414,15 @@ export default function TimeSeries({
           y: panel.glyph
             ? { range: (): [number, number] => [0, 1] } // arrows sit at 0.5 (centre); axis unused
             : panel.zeroBased
-              ? { range: (_u: uPlot, _dMin: number, dMax: number): [number, number] => [0, Math.max(dMax || 0, 1) * 1.12] }
+              ? {
+                  // Anchored at 0, but with a sliver of scale BELOW it: with the floor exactly on the
+                  // plot's bottom edge a flat 0 line (rain: dry) is drawn half-clipped into the axis and
+                  // the "0" tick label loses its lower half. The axis filter hides the negative splits.
+                  range: (_u: uPlot, _dMin: number, dMax: number): [number, number] => {
+                    const top = Math.max(dMax || 0, 1) * 1.12;
+                    return [-top * 0.08, top];
+                  },
+                }
               : { range: (_u, dMin, dMax) => padY(dMin, dMax, 0.12) },
         },
         // Place ticks on the buoy's timezone boundaries for every visitor (not the
@@ -1469,6 +1471,44 @@ export default function TimeSeries({
       }
     });
 
+    const timeTag = document.createElement('div');
+    timeTag.setAttribute('aria-hidden', 'true');
+    timeTag.style.cssText =
+      'position:absolute;z-index:50;pointer-events:none;opacity:0;transition:opacity .08s ease;white-space:nowrap;transform:translate(-50%,0);padding:2px 7px;border-radius:6px;font:500 0.74rem/1.25 var(--font-mono);color:var(--text-2);background:color-mix(in oklab, var(--surface) 92%, transparent);border:1px solid var(--hairline);';
+    host.appendChild(timeTag);
+    const moveTimeTag = (e: PointerEvent) => {
+      const u0 = plots[0];
+      if (!u0) return;
+      // Every panel shares one x-scale and one width, so plot 0 converts the pointer to a time.
+      const pr = u0.over.getBoundingClientRect();
+      const px = e.clientX - pr.left;
+      if (px < 0 || px > pr.width) {
+        timeTag.style.opacity = '0';
+        return;
+      }
+      // Snap to the buoy grid, the same index the readout card and the value bubbles report — a
+      // free-running pixel time would read 06:54 beside a card saying 07:00.
+      const t = u0.posToVal(px, 'x');
+      let lo = 0;
+      let hi = gxs.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (gxs[mid] < t) lo = mid + 1;
+        else hi = mid;
+      }
+      if (lo > 0 && Math.abs(gxs[lo - 1] - t) < Math.abs(gxs[lo] - t)) lo -= 1;
+      const hr = host.getBoundingClientRect();
+      timeTag.textContent = fmtDateTime((gxs.length ? gxs[lo] : t) * 1000, locale, tz);
+      timeTag.style.left = `${e.clientX - hr.left}px`;
+      timeTag.style.top = `${e.clientY - hr.top + 16}px`;
+      timeTag.style.opacity = '1';
+    };
+    const hideTimeTag = () => {
+      timeTag.style.opacity = '0';
+    };
+    host.addEventListener('pointermove', moveTimeTag);
+    host.addEventListener('pointerleave', hideTimeTag);
+
     plotsRef.current = plots;
     // Release the pin only once the rebuilt stack has been laid out — the panels are still
     // collapsed this tick, so clearing it here would expose a short document and the scroll would
@@ -1477,9 +1517,9 @@ export default function TimeSeries({
       host.style.minHeight = '';
       if (window.scrollY !== prevScroll) window.scrollTo(window.scrollX, prevScroll);
     });
-    if (focusGripRef.current) {
-      gripEls.get(focusGripRef.current)?.focus({ preventScroll: true });
-      focusGripRef.current = null;
+    if (focusBandRef.current) {
+      bandEls.get(focusBandRef.current)?.focus({ preventScroll: true });
+      focusBandRef.current = null;
     }
     baseScaleRef.current = { min: xmin - xpad, max: xmax + xpad };
     if (plots[0]) renderDayOverlay(plots[0]);
@@ -1517,6 +1557,8 @@ export default function TimeSeries({
       cancelAnimationFrame(releaseHeight);
       host.style.minHeight = `${host.offsetHeight}px`;
       cancelAnimationFrame(raf);
+      host.removeEventListener('pointermove', moveTimeTag);
+      host.removeEventListener('pointerleave', hideTimeTag);
       host.removeEventListener('mouseup', commitGesture);
       host.removeEventListener('touchend', commitGesture);
       ro.disconnect();

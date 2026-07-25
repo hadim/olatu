@@ -184,8 +184,9 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   or calling `scrollTo` there, is clamped away). Keep both halves if you touch that effect.
   See the 2026-07-25 LEARNINGS entry.
 - **Reorder is Pointer Events, never HTML5 drag-and-drop** (spec 0013 §7) — `draggable` does nothing on
-  touch. The handle is the per-panel `.ts-band` in the host's left gutter; the heading grip stays the
-  accessible control (label + ↑/↓, re-focused after the rebuild via `focusGripRef`).
+  touch. The one control is the per-panel **`.ts-band`** in the host's left gutter: pointer drag *and*
+  the accessible/keyboard control (`role=button`, `tabindex`, ↑/↓, re-focused after the rebuild via
+  `focusBandRef`). Only the hovered `.ts-unit` lights its band — don't light the whole stack.
 - **Chart gap-breaks:** `TimeSeries.gapAware` must estimate the sampling cadence **causally (an EWMA of
   the normal deltas)**, never the global-minimum delta — a **mixed-cadence** source (the current-year
   wind file = a 6-min live tail on an hourly history) otherwise flags every hourly step as a gap and

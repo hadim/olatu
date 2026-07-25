@@ -224,9 +224,11 @@
     width 0.14s ease,
     background-color 0.14s ease;
 }
-.charts:hover .ts-band::before {
+/* Only the panel you are actually over lights up — lighting the whole stack at once made the
+   affordance shout, and said nothing about which panel you were about to grab. */
+.ts-unit:hover .ts-band::before {
   width: 3px;
-  background: color-mix(in oklab, var(--band, var(--divider)) 40%, transparent);
+  background: color-mix(in oklab, var(--band, var(--divider)) 45%, transparent);
 }
 .ts-band:hover::before,
 .ts-band:active::before {
@@ -235,6 +237,17 @@
 }
 .ts-band:active {
   cursor: grabbing;
+}
+/* The band is the reorder control for the keyboard too (role=button, tabindex, arrow keys), so it
+   needs a real focus ring — it is otherwise a 2 px hairline. */
+.ts-band:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+.ts-band:focus-visible::before {
+  width: 5px;
+  background: var(--band, var(--divider));
 }
 @media (prefers-reduced-motion: reduce) {
   .ts-band::before {

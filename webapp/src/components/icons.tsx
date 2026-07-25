@@ -38,7 +38,6 @@ export const ICON_PATHS = {
   /** Visibility toggle — an eye (used to hide a chart panel). */
   eye: '<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/>',
   /** Drag handle — six dots (rendered as round line-caps). */
-  grip: '<path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01"/>',
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;
@@ -76,7 +75,6 @@ export const RainIcon = (p: IconProps) => <Icon {...p} name="rain" />;
 export const HumidityIcon = (p: IconProps) => <Icon {...p} name="humidity" />;
 export const PressureIcon = (p: IconProps) => <Icon {...p} name="pressure" />;
 export const EyeIcon = (p: IconProps) => <Icon {...p} name="eye" />;
-export const GripIcon = (p: IconProps) => <Icon {...p} name="grip" />;
 
 /** Raw `<svg>` markup for DOM/innerHTML contexts (the uPlot panel titles + hover card). */
 export function iconSvg(name: IconName, opts: { size?: number; color?: string; className?: string } = {}): string {
