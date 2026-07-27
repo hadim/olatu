@@ -145,9 +145,18 @@ validates before writing and **aborts (nonzero exit, keep last-good file)** on:
 - a `DD/MM` ↔ `MM/DD` locale flip (month > 12);
 - timestamps not unique / not on the `:00`/`:30` grid (interior gaps are allowed —
   real outages exist and must never be interpolated);
-- fewer than ~40 rows, or the newest row > 3 h in the future (clock/tz fault);
+- the newest row > 3 h in the future (clock/tz fault);
 - more than 20 % of rows out of plausible physical range (the `999.999` sentinel is
   left intact for `build.py` to null — not pre-stripped here).
+
+> **§5 update 2026-07-27 — no minimum row count.** The list above originally aborted on
+> "fewer than ~40 rows". That is *not* a fault signal: the table is a rolling ~48 h window,
+> so a buoy that stops transmitting legitimately publishes a handful of rows or none, and we
+> cannot do anything about upstream silence. It is also not unsafe — the merge is an additive
+> coalesce guarded by the never-shrink invariant below, so a short scrape cannot truncate the
+> accumulator. A *format* break is caught by the structural checks (one table, 8 columns,
+> 8 cells/row, `TU` header, date format, `:00`/`:30` grid, plausible ranges), none of which a
+> row count adds to. An **empty** table is now a logged no-op, not an error.
 
 **Never-shrink invariant:** before the atomic replace, the merged result must cover the
 existing file's time span and have ≥ as many rows, else abort. Writes are atomic

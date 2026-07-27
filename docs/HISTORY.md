@@ -9,6 +9,25 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-07-27 — The scraper stops failing on a quiet buoy (spec 0004 §5)
+
+The refresh cron had been red on every run since 09:16 UTC, always the same line:
+`✗ 03302: only 11 rows scraped (< 40); refusing to write`.
+
+- **Cause was upstream, not ours.** Cap Ferret went silent 2026-07-25 13:30 → 2026-07-27 08:30 UTC.
+  CANDHIS serves a rolling ~48 h window, so that window straddled the outage and held 11 rows where
+  ~97 is normal — tripping `scrape.MIN_ROWS = 40`. Saint-Jean-de-Luz and Anglet refreshed fine
+  throughout; only the overall exit code was red.
+- **`MIN_ROWS` removed.** A row count cannot tell "the page is broken" from "the buoy is quiet", and
+  only the first is actionable. It guarded nothing either: the merge is an additive coalesce under the
+  never-shrink invariant, so a short scrape can't truncate the accumulator, and format breaks are caught
+  by the structural checks. Meanwhile it *lost* data — the fresh rows were scraped and discarded on
+  every run.
+- **An empty table is now a no-op**, not an error: `validate_rows([])` returns an empty typed frame and
+  `scrape()` warns and returns. Also removes a latent `ZeroDivisionError` in the plausible-range ratio.
+- Verified end-to-end against the live 03302 feed: 1386 → 1392 rows merged, format breaks and junk pages
+  still abort. See [LEARNINGS](../specs/LEARNINGS.md).
+
 ## 2026-07-25 — Panel reorder rebuilt on pointer events, and a readable readout (spec 0013 §7)
 
 A second owner pass on the chart stack's hide/reorder affordance.

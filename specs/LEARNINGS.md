@@ -9,6 +9,32 @@ Format per entry: **date — title** · what we found · why it matters · resol
 
 ---
 
+## 2026-07-27 — a minimum row count turns an upstream buoy outage into a red cron, and guards nothing
+
+**Finding.** The refresh cron went red every 30 min with
+`✗ 03302: only 11 rows scraped (< 40); refusing to write`. Nothing was broken on our side: Cap Ferret
+stopped transmitting on 2026-07-25 13:30 UTC and resumed on 2026-07-27 08:30 UTC. Since CANDHIS serves a
+rolling **~48 h window**, that window straddled the outage and legitimately held 11 rows instead of ~97,
+which tripped `scrape.MIN_ROWS = 40`. The tell is in the *last green* run: it scraped 96 rows spanning
+`07-23 13:30 → 07-25 13:30` with a `newest timestamp did not advance` warning — the window was still
+entirely pre-outage. The moment the buoy resumed, the window slid onto the gap and the count collapsed.
+
+**Why it matters.** Three costs, none of them offset by a benefit. (1) The failure is **self-inflicted and
+recurring**: nothing recovers it but the buoy transmitting for 20 h straight, so the cron stays red for
+most of a day and real failures hide in the noise. (2) It **discards good data** — each run scraped the
+handful of fresh rows and threw them away rather than merging them. (3) The guard was **redundant**: the
+merge is an additive coalesce with a never-shrink invariant, so a short scrape *cannot* truncate the
+accumulator, and every genuine format break is already caught by the structural checks (one table,
+8 columns, 8 cells/row, `TU` header, `DD/MM` locale flip, `:00`/`:30` grid, 20 % plausible-range rule).
+A row count adds no signal those miss — it only conflates "the page is broken" with "the sea gave us
+nothing", and only the first is ours to act on.
+
+**Resolution.** Dropped `MIN_ROWS` entirely; an empty table returns an empty typed frame and `scrape()`
+logs a warning and no-ops instead of raising (also removes a latent `ZeroDivisionError` in the
+plausible-range ratio). General rule for this pipeline: **validate the shape of the response, never the
+volume of the data** — volume is upstream reality. Refs: `ingest/scrape.py`,
+[spec 0004 §5](2026-06-27-0004-realtime-scraper.md).
+
 ## 2026-07-25 — rebuilding a canvas stack scrolls the page to the top, and restoring the offset too early is clamped away
 
 **Finding.** Reordering or hiding a chart panel yanked the page back near the top. The `TimeSeries`

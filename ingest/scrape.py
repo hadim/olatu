@@ -59,7 +59,9 @@ VALUE_COLS = list(REEL_MAP)  # ["H1/3","Hmax","Th1/3","DirPic","EtalPic","TempMe
 CSV_HEADER = [DATE_COL] + VALUE_COLS
 
 # --- validation thresholds (a bad scrape must abort, never overwrite a good file) ---
-MIN_ROWS = 40  # expect ~97 (48 h @ 30 min); far fewer => suspect, refuse to write
+# Deliberately *no* minimum row count: the table is a rolling ~48 h window, so a buoy
+# that stopped transmitting legitimately shows a handful of rows (or none) and that is
+# upstream reality, not a fault. See validate_rows().
 MAX_BAD_FRACTION = 0.20  # > this share of rows out of plausible range => format break
 # plausible physical ranges; the 999.999 sentinel is allowed (build.py nulls it).
 PLAUSIBLE = {
@@ -226,10 +228,22 @@ def _is_implausible(col: str, v: float | None) -> bool:
 
 
 def validate_rows(rows: list[dict]) -> pl.DataFrame:
-    """Turn parsed rows into a typed frame, asserting the scrape is trustworthy."""
-    if len(rows) < MIN_ROWS:
-        raise ScrapeError(
-            f"only {len(rows)} rows scraped (< {MIN_ROWS}); refusing to write"
+    """Turn parsed rows into a typed frame, asserting the scrape is trustworthy.
+
+    A *short* table is not an error. CANDHIS serves a rolling ~48 h window, so a buoy
+    that went silent shows only the rows around its outage — we take what is published
+    and can do nothing about the rest. Nor is it unsafe: the merge is an additive
+    coalesce guarded by `_assert_never_shrinks`, so a short scrape cannot truncate the
+    accumulator. Only a *format* break may abort, and that is what the checks below
+    (plus `parse_realtime_table`) catch.
+    """
+    if not rows:  # buoy silent across the whole window; caller skips the merge
+        return pl.DataFrame(
+            schema={
+                DATE_COL: pl.Utf8,
+                **{c: pl.Float64 for c in VALUE_COLS},
+                DT: pl.Datetime,
+            }
         )
 
     df = pl.DataFrame(
@@ -374,6 +388,9 @@ def scrape(src: Path, campaign_id: str = CAMPAIGN_ID) -> dict[int, int]:
     url = realtime_url(campaign_id)
     ui.detail(f"fetching {url}")
     scraped = validate_rows(parse_realtime_table(fetch_html(url)))
+    if not scraped.height:
+        ui.warn(f"{campaign_id}: realtime table is empty; nothing to merge")
+        return {}
     ui.detail(
         f"scraped {scraped.height} valid rows  span {scraped[DT].min()} → {scraped[DT].max()}"
     )
