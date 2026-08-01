@@ -21,23 +21,41 @@ export function fmtNumber(value: number, locale: Locale, digits = 1): string {
   }).format(value);
 }
 
-export function fmtClock(ms: number, locale: Locale, timeZone: string): string {
+/** Clock-format preference (spec 0014 §6): follow the locale, or force 24 h / 12 h. */
+export type ClockPref = 'auto' | 'h12' | 'h24';
+
+/** The `Intl` options fragment carrying the clock preference. `hourCycle: 'h23'` (not
+ *  `hour12: false`, which yields a "24:00" midnight in some locales) forces 24 h. */
+export const hourOpts = (clock: ClockPref = 'auto'): Intl.DateTimeFormatOptions =>
+  clock === 'h12' ? { hour12: true } : clock === 'h24' ? { hourCycle: 'h23' } : {};
+
+export function fmtClock(ms: number, locale: Locale, timeZone: string, clock: ClockPref = 'auto'): string {
   return new Intl.DateTimeFormat(locale, {
     hour: '2-digit',
     minute: '2-digit',
     day: '2-digit',
     month: 'short',
     timeZone,
+    ...hourOpts(clock),
   }).format(new Date(ms));
 }
 
 /** Time-of-day only (HH:MM) in the buoy's zone — for tide extrema labels. */
-export function fmtTimeOfDay(ms: number, locale: Locale, timeZone: string): string {
-  return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', timeZone }).format(new Date(ms));
+export function fmtTimeOfDay(ms: number, locale: Locale, timeZone: string, clock: ClockPref = 'auto'): string {
+  return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', timeZone, ...hourOpts(clock) }).format(new Date(ms));
+}
+
+/** Compact "2 h 08" / "14 min" countdown to a tide extremum — the exact clock time next
+ *  to it carries the precise info, so this stays deliberately coarse. */
+export function fmtCountdown(ms: number): string {
+  const totalMin = Math.max(0, Math.round(ms / 60_000));
+  const h = Math.floor(totalMin / 60);
+  const min = totalMin % 60;
+  return h > 0 ? `${h} h ${String(min).padStart(2, '0')}` : `${min} min`;
 }
 
 /** Full date + time for the chart hover card, e.g. "12 Jan 2024, 14:30". */
-export function fmtDateTime(ms: number, locale: Locale, timeZone: string): string {
+export function fmtDateTime(ms: number, locale: Locale, timeZone: string, clock: ClockPref = 'auto'): string {
   return new Intl.DateTimeFormat(locale, {
     day: 'numeric',
     month: 'short',
@@ -45,6 +63,7 @@ export function fmtDateTime(ms: number, locale: Locale, timeZone: string): strin
     hour: '2-digit',
     minute: '2-digit',
     timeZone,
+    ...hourOpts(clock),
   }).format(new Date(ms));
 }
 
@@ -52,18 +71,22 @@ export function fmtDateTime(ms: number, locale: Locale, timeZone: string): strin
  *  On sub-day windows the ticks are hours, but a bare "08:00 16:00 00:00…" loses the
  *  day/month — so ticks that land on local midnight show the date instead, anchoring
  *  each day (spec 0003: year-aware ticks, extended down to intra-day context). */
-export function fmtAxisTick(ms: number, locale: Locale, timeZone: string, incrSec: number): string {
+export function fmtAxisTick(ms: number, locale: Locale, timeZone: string, incrSec: number, clock: ClockPref = 'auto'): string {
   const DAY = 86_400;
   let opts: Intl.DateTimeFormatOptions;
   if (incrSec >= DAY * 300) opts = { year: 'numeric', timeZone };
   else if (incrSec >= DAY * 27) opts = { month: 'short', year: '2-digit', timeZone };
   else if (incrSec >= DAY) opts = { day: 'numeric', month: 'short', timeZone };
   else {
-    // Intra-day tick: show the date at the day boundary, the clock otherwise.
+    // Intra-day tick: show the date at the day boundary, the clock otherwise. The midnight
+    // test stays on a fixed h23 formatter — it detects the boundary, it doesn't display it.
     const p = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone }).formatToParts(new Date(ms));
     const hh = p.find((x) => x.type === 'hour')?.value;
     const mm = p.find((x) => x.type === 'minute')?.value;
-    opts = hh === '00' && mm === '00' ? { day: 'numeric', month: 'short', timeZone } : { hour: '2-digit', minute: '2-digit', timeZone };
+    opts =
+      hh === '00' && mm === '00'
+        ? { day: 'numeric', month: 'short', timeZone }
+        : { hour: '2-digit', minute: '2-digit', timeZone, ...hourOpts(clock) };
   }
   return new Intl.DateTimeFormat(locale, opts).format(new Date(ms));
 }

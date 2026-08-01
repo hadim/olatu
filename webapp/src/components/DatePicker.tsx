@@ -9,6 +9,8 @@ import { useLocale } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { monthCells, monthLabel, weekdayNarrow } from '@/lib/calendar';
+import { CalendarIcon } from './icons';
 
 const DAY = 86_400;
 const dayIndex = (sec: number) => Math.floor(sec / DAY);
@@ -23,21 +25,6 @@ interface Props {
   tn: number; // latest selectable instant
   dayHs: Map<number, number>; // UTC day-index → daily significant wave height
   onChange: (min: number, max: number) => void;
-}
-
-interface Cell {
-  day: number;
-  di: number;
-}
-
-function monthCells(year: number, month: number): (Cell | null)[] {
-  const first = new Date(Date.UTC(year, month, 1));
-  const lead = (first.getUTCDay() + 6) % 7; // Monday-first
-  const days = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-  const cells: (Cell | null)[] = [];
-  for (let i = 0; i < lead; i++) cells.push(null);
-  for (let d = 1; d <= days; d++) cells.push({ day: d, di: dayIndex(Date.UTC(year, month, d) / 1000) });
-  return cells;
 }
 
 export default function DatePicker({ min, max, t0, tn, dayHs, onChange }: Props) {
@@ -87,15 +74,10 @@ export default function DatePicker({ min, max, t0, tn, dayHs, onChange }: Props)
     onChange(dayStart(a), dayStart(b) + DAY - 1);
   };
 
-  const monthLabel = (y: number, mo: number) =>
-    new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(y, mo, 1)));
   const rangeLabel = (sec: number) =>
     new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(sec * 1000));
 
-  const weekdays = useMemo(() => {
-    const fmt = new Intl.DateTimeFormat(locale, { weekday: 'narrow', timeZone: 'UTC' });
-    return Array.from({ length: 7 }, (_, i) => fmt.format(new Date(Date.UTC(2024, 0, 1 + i)))); // 2024-01-01 = Monday
-  }, [locale]);
+  const weekdays = useMemo(() => weekdayNarrow(locale), [locale]);
 
   // Bounds for the prev/next chevrons: the left pane never goes before t0's month, and
   // the right pane (view.m + 1) never goes past tn's month.
@@ -112,7 +94,7 @@ export default function DatePicker({ min, max, t0, tn, dayHs, onChange }: Props)
     const yy = y + Math.floor(mo / 12);
     return (
       <div key={`${yy}-${mm}`}>
-        <div className="mb-[0.4rem] text-center font-display text-[0.86rem] font-semibold capitalize">{monthLabel(yy, mm)}</div>
+        <div className="mb-[0.4rem] text-center font-display text-[0.86rem] font-semibold capitalize">{monthLabel(yy, mm, locale)}</div>
         <div className="grid grid-cols-[repeat(7,1.85rem)] gap-px">
           {weekdays.map((w, i) => (
             <span key={`w${i}`} className="pb-[0.2rem] text-center font-mono text-[0.62rem] text-faint">
@@ -179,10 +161,7 @@ export default function DatePicker({ min, max, t0, tn, dayHs, onChange }: Props)
           type="button"
           className="inline-flex cursor-pointer items-center gap-[0.4rem] rounded-[0.45rem] border border-line bg-surface px-[0.55rem] py-[0.3rem] font-mono text-[0.78rem] text-fg hover:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
         >
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true" className="shrink-0 text-faint">
-            <rect x="3" y="4" width="18" height="17" rx="2" />
-            <path d="M3 9h18M8 2v4M16 2v4" />
-          </svg>
+          <CalendarIcon className="shrink-0 text-faint" />
           <span>
             {rangeLabel(min)} – {rangeLabel(max)}
           </span>

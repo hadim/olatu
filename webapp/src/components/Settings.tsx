@@ -1,6 +1,7 @@
-// Settings modal (spec 0014): pick display units for speed, temperature and pressure. A small
-// gear in the header opens a centered Dialog (Radix → focus-trap + Esc + scroll-lock). The choice
-// persists (olatu.units, via useUnits) and reflows every value on the page live.
+// Settings modal (spec 0014, + §6): pick display units for speed, temperature and pressure, and
+// the clock format (24 h / 12 h / locale default). A small gear in the header opens a centered
+// Dialog (Radix → focus-trap + Esc + scroll-lock). The choice persists (olatu.units, via
+// useUnits) and reflows every value — and every clock — on the page live.
 
 import { m } from '@/paraglide/messages';
 import { useLocale } from '@/lib/i18n';
@@ -90,6 +91,12 @@ export default function Settings() {
             value={units.pressure}
             options={[['hpa', 'hPa'], ['inhg', 'inHg'], ['mmhg', 'mmHg']] as const}
             onChange={(v) => setUnit('pressure', v)}
+          />
+          <UnitRow
+            label={m.settings_clock()}
+            value={units.clock}
+            options={[['auto', m.settings_clock_auto()], ['h24', '24 h'], ['h12', '12 h']] as const}
+            onChange={(v) => setUnit('clock', v)}
           />
           <button
             type="button"

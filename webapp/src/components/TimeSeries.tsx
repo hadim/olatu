@@ -960,7 +960,7 @@ export default function TimeSeries({
         resetCard();
         return;
       }
-      if (timeEl) timeEl.textContent = fmtDateTime(gxs[idx] * 1000, locale, tz);
+      if (timeEl) timeEl.textContent = fmtDateTime(gxs[idx] * 1000, locale, tz, units.clock);
       if (statsEl) statsEl.innerHTML = chipsHTML(idx);
     };
     resetCard();
@@ -1337,7 +1337,7 @@ export default function TimeSeries({
         font: '12px IBM Plex Mono, monospace',
         show: isLast,
         size: isLast ? 38 : 8,
-        values: (_u, splits, _ai, _space, incr) => splits.map((sp) => fmtAxisTick(sp * 1000, locale, tz, incr)),
+        values: (_u, splits, _ai, _space, incr) => splits.map((sp) => fmtAxisTick(sp * 1000, locale, tz, incr, units.clock)),
       };
 
       // On-plot cursor value: a small pill riding the crosshair that shows THIS panel's value as you
@@ -1498,7 +1498,7 @@ export default function TimeSeries({
       }
       if (lo > 0 && Math.abs(gxs[lo - 1] - t) < Math.abs(gxs[lo] - t)) lo -= 1;
       const hr = host.getBoundingClientRect();
-      timeTag.textContent = fmtDateTime((gxs.length ? gxs[lo] : t) * 1000, locale, tz);
+      timeTag.textContent = fmtDateTime((gxs.length ? gxs[lo] : t) * 1000, locale, tz, units.clock);
       timeTag.style.left = `${e.clientX - hr.left}px`;
       timeTag.style.top = `${e.clientY - hr.top + 16}px`;
       timeTag.style.opacity = '1';

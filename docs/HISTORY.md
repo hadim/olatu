@@ -9,6 +9,27 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-08-01 — A tide calendar, and a 24 h/12 h clock switch (specs 0008 §10, 0014 §6)
+
+Two owner requests, both pure front-end — no ingest, no new data.
+
+- **Tide calendar.** A small calendar button next to the live phase word in the banner opens a
+  day-by-day view of the *same* extrema the strip already holds: a Monday-first month grid where
+  each day carries a **marnage bar** (so the spring↔neap beat of the month reads at a glance),
+  beside the selected day's tides (`▲/▼ · kind · time · height`), with the next tide highlighted
+  and counting down. Navigation is **bounded by the data** — days outside the accumulator are
+  disabled and a footer states the covered window, so "no predictions past 22 Aug" reads as a fact,
+  not a bug.
+- **Days are grouped in the buoy's zone, not UTC** (`zonedDayIndex`): a 23:40 UTC high tide is a
+  next-day tide in Europe/Paris, and grouping on UTC days would file it under the wrong date.
+- **Month-grid helpers were extracted** to `lib/calendar.ts` — the chart-range `DatePicker` had its
+  own copy of `monthCells`/weekday labels; both now share one (and one `calendar` icon).
+- **Clock format is now a setting** (Auto · 24 h · 12 h), a fourth field of the existing `Units`
+  store under the same `olatu.units` key, so it needed no migration and reflows every time on the
+  page at once — strip, sun, calendar, staleness badge, chart axis + hover. 24 h is
+  `hourCycle: 'h23'`, **not** `hour12: false` (which renders midnight as `24:00` in some locales);
+  the axis's midnight *probe* stays on a fixed h23 formatter, since it detects rather than displays.
+
 ## 2026-07-27 — The scraper stops failing on a quiet buoy (spec 0004 §5)
 
 The refresh cron had been red on every run since 09:16 UTC, always the same line:

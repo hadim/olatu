@@ -114,6 +114,9 @@
   "tide_next": "Prochaine",
   "tide_now": "Maintenant",
   "tide_marnage": "Marnage",
+  "tide_calendar": "Calendrier des marées",
+  "tide_today": "Aujourd'hui",
+  "tide_coverage": "Prédictions du",
   "tide_level": "Hauteur d'eau",
   "sun_title": "Soleil",
   "sun_sunrise": "Lever du soleil",
@@ -214,9 +217,11 @@
   "cc_hp_unavailable": "Non mesuré à cette station",
   "settings_title": "Réglages",
   "settings_close": "Fermer",
-  "settings_units_hint": "Choisissez les unités d’affichage. Votre choix est mémorisé sur cet appareil.",
+  "settings_units_hint": "Choisissez les unités d’affichage et le format de l’heure. Votre choix est mémorisé sur cet appareil.",
   "settings_speed": "Vitesse du vent",
   "settings_temp": "Température",
   "settings_pressure": "Pression",
+  "settings_clock": "Format de l'heure",
+  "settings_clock_auto": "Auto",
   "settings_reset": "Réinitialiser"
 }

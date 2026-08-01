@@ -60,3 +60,32 @@ drives **both** sea temp (Mer) and air temp (Air), so the two are always in the 
 - **`TimeSeries.tsx`** — convert plotted values, heading unit tags, units-aware hover chips + cursor
   bubble + a11y summary.
 - **`messages/{en,fr,es}.json`** — `settings_*` + `cc_hp_unavailable`.
+
+## 6. Revision 2026-08-01 — clock format (24 h / 12 h)
+
+Owner request: *"dans les paramètres ça serait bien de pouvoir choisir entre format 12 h ou 24 h."*
+
+Until now the clock followed the **UI locale**: FR/ES render 24 h, EN renders `01:04 PM`. That is
+a reasonable default and a poor lock-in — a French speaker reading the English UI got am/pm with
+no way out, and tide times are the one thing on this page people read at a glance.
+
+1. **The clock rides in the existing preference store**, not a new one. It is the same kind of
+   choice — display-only, persisted, applied everywhere at once — shown in the same modal, so it
+   is a fourth field of `Units` (`clock: 'auto' | 'h12' | 'h24'`) under the same `olatu.units`
+   key. A stored object without the field simply falls back to `auto`, so no migration.
+2. **`auto` is the default** = whatever the locale does. Nobody who never opens the settings sees
+   a change.
+3. **The conversion lives in `Intl`, not in a factor table.** `lib/format` gains `ClockPref` +
+   `hourOpts(clock)`, and every time formatter (`fmtTimeOfDay`, `fmtClock`, `fmtDateTime`,
+   `fmtAxisTick`) takes the preference as a trailing, defaulted argument. 24 h is
+   **`hourCycle: 'h23'`**, *not* `hour12: false` — the latter renders midnight as `24:00` in some
+   locales.
+4. **The axis's midnight test stays on a fixed `h23` formatter.** `fmtAxisTick` shows the date
+   instead of the clock at a day boundary; that probe *detects* the boundary and never displays,
+   so the user's preference must not reach it.
+
+Applied at: the tide strip (prev/next + sun), the tide calendar, the staleness badge, and the
+chart axis + hover readout + cursor bubble. **Touch list:** `lib/format.ts`, `lib/units.tsx`,
+`components/Settings.tsx` (a `Clock` row: Auto · 24 h · 12 h), `TideStrip`, `TideCalendar`,
+`CurrentConditions`, `TimeSeries`, `messages/{en,fr,es}.json` (`settings_clock`,
+`settings_clock_auto`, reworded `settings_units_hint`).

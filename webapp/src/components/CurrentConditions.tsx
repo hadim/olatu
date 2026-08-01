@@ -134,8 +134,9 @@ const STATUS_DOT: Record<Freshness, string> = {
 
 function StalenessBadge({ fresh, stampMs, tz, now }: { fresh: Freshness; stampMs: number | null; tz: string; now: number }) {
   const { locale } = useLocale();
+  const { units } = useUnits();
   const ago = stampMs != null ? relativeAgo(stampMs, locale, now) : null;
-  const clock = stampMs != null ? fmtClock(stampMs, locale, tz) : null;
+  const clock = stampMs != null ? fmtClock(stampMs, locale, tz, units.clock) : null;
   const help = m[`cc_${fresh}_help` as MessageKey]();
   const body = stampMs != null ? `${help} · ${m.cc_updated()} ${clock}` : help;
   return (

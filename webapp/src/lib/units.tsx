@@ -1,12 +1,16 @@
-// Display units for the physical quantities Olatu shows (spec 0014). The data is stored in one
-// canonical unit per quantity (wind m/s · temperature °C · pressure hPa) and converted at the
+// Display preferences for what Olatu shows (spec 0014, + §6 clock format). The data is stored in
+// one canonical unit per quantity (wind m/s · temperature °C · pressure hPa) and converted at the
 // last moment for display; the choice persists in `olatu.units` and is applied EVERYWHERE the
 // value appears — Current Conditions, the chart panels + axes, the hover readout. Direction (°),
 // wave height (m), period (s), rain (mm) and humidity (%) have no alternative unit worth
 // offering, so they stay canonical and pass through untouched.
+//
+// The **clock format** (24 h / 12 h / locale default) rides in the same store: it is the same
+// kind of display-only, persisted choice, shown in the same settings modal — the conversion just
+// happens inside `Intl` (see `hourOpts` in lib/format) instead of in a factor table.
 
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
-import { fmtNumber } from './format';
+import { fmtNumber, type ClockPref } from './format';
 import type { Locale } from './i18n';
 
 export type SpeedUnit = 'kmh' | 'ms' | 'kn';
@@ -17,11 +21,13 @@ export interface Units {
   speed: SpeedUnit;
   temp: TempUnit;
   pressure: PressureUnit;
+  clock: ClockPref;
 }
 
 // km/h is the default wind unit (owner preference — the most legible for this coast); °C + hPa
-// are the regional defaults.
-export const DEFAULT_UNITS: Units = { speed: 'kmh', temp: 'c', pressure: 'hpa' };
+// are the regional defaults. The clock defaults to `auto` = whatever the UI locale does (FR/ES
+// 24 h, EN am/pm), so nothing changes for anyone who never opens the settings.
+export const DEFAULT_UNITS: Units = { speed: 'kmh', temp: 'c', pressure: 'hpa', clock: 'auto' };
 
 export type MeasureKind = 'speed' | 'temp' | 'pressure';
 
@@ -96,6 +102,7 @@ const STORAGE_KEY = 'olatu.units';
 const isSpeed = (v: unknown): v is SpeedUnit => v === 'kmh' || v === 'ms' || v === 'kn';
 const isTemp = (v: unknown): v is TempUnit => v === 'c' || v === 'f';
 const isPressure = (v: unknown): v is PressureUnit => v === 'hpa' || v === 'inhg' || v === 'mmhg';
+const isClock = (v: unknown): v is ClockPref => v === 'auto' || v === 'h12' || v === 'h24';
 
 function loadUnits(): Units {
   try {
@@ -104,6 +111,7 @@ function loadUnits(): Units {
       speed: isSpeed(raw.speed) ? raw.speed : DEFAULT_UNITS.speed,
       temp: isTemp(raw.temp) ? raw.temp : DEFAULT_UNITS.temp,
       pressure: isPressure(raw.pressure) ? raw.pressure : DEFAULT_UNITS.pressure,
+      clock: isClock(raw.clock) ? raw.clock : DEFAULT_UNITS.clock,
     };
   } catch {
     return DEFAULT_UNITS;

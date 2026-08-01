@@ -114,6 +114,9 @@
   "tide_next": "Next",
   "tide_now": "Now",
   "tide_marnage": "Range",
+  "tide_calendar": "Tide calendar",
+  "tide_today": "Today",
+  "tide_coverage": "Predictions cover",
   "tide_level": "Water level",
   "sun_title": "Sun",
   "sun_sunrise": "Sunrise",
@@ -214,9 +217,11 @@
   "cc_hp_unavailable": "Not measured at this station",
   "settings_title": "Settings",
   "settings_close": "Close",
-  "settings_units_hint": "Choose the display units. Your choice is remembered on this device.",
+  "settings_units_hint": "Choose the display units and clock format. Your choice is remembered on this device.",
   "settings_speed": "Wind speed",
   "settings_temp": "Temperature",
   "settings_pressure": "Pressure",
+  "settings_clock": "Clock",
+  "settings_clock_auto": "Auto",
   "settings_reset": "Reset to defaults"
 }

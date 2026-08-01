@@ -140,7 +140,10 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   else no tide). Runtime `webapp/src/lib/tides.ts` reconstructs the raised-cosine curve; marnage
   in metres (**no coefficient**). Predictions cover ~±30 days → older windows empty-state (like
   temp). Missing key/port is non-fatal (tide step skips). Valid site ids: 06403
-  `saint-jean-de-luz`, 06402 `boucau-bayonne-biarritz`, 03302 `cap-ferret`.
+  `saint-jean-de-luz`, 06402 `boucau-bayonne-biarritz`, 03302 `cap-ferret`. The **tide calendar**
+  (spec 0008 §10, button beside the phase word) is pure UI over the already-loaded extrema — group
+  days with `zonedDayIndex`/`groupTidesByDay` (the **buoy's zone**, never UTC: a 23:40 UTC tide is a
+  next-day tide in Paris) and take the selectable bounds from the data, never from a ±N-day rule.
 - **Wind (vent, spec 0012)** comes from **Météo-France**, keyed by **station**
   (`schema.WIND_STATIONS` + `resolve_wind_station`: each buoy → nearest station ≤
   `WIND_MAX_KM=25`, else no wind). Two layers: **hourly history** from the open bulk files
@@ -172,7 +175,9 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   `convertMeasure`/`formatKeyValue`/`keySuffix`, keyed by **column name**) — Current Conditions, chart
   panels + heading unit tags, hover readout. Default wind = **km/h**; the choice persists in
   `olatu.units`. Never mutate the stored data to change units; the °C→°F map is affine so it commutes
-  with the chart smoothing.
+  with the chart smoothing. The **clock format** (Auto · 24 h · 12 h, spec 0014 §6) is a field of the
+  same store: pass `units.clock` to `fmtTimeOfDay`/`fmtClock`/`fmtDateTime`/`fmtAxisTick` at every new
+  call site. 24 h is `hourCycle: 'h23'`, **not** `hour12: false` (that renders midnight `24:00`).
 - **Never run `npm audit fix --force` in `webapp/`.** The remaining advisories all sit under
   `@vite-pwa/assets-generator` (whose latest still pins `sharp ^0.33.5`), so `--force` "fixes" them by
   **downgrading `vite-plugin-pwa` 1.3 -> 0.18.2**. They're patched instead via `overrides` in

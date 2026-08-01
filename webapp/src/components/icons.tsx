@@ -37,6 +37,8 @@ export const ICON_PATHS = {
   pressure: '<circle cx="12" cy="12" r="9"/><path d="M12 12l4-2.5"/><path d="M12 4v1.6M20 12h-1.6"/>',
   /** Visibility toggle — an eye (used to hide a chart panel). */
   eye: '<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/>',
+  /** Calendar — the date-range picker + the tide calendar triggers. */
+  calendar: '<rect x="3" y="4.5" width="18" height="16.5" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/>',
   /** Drag handle — six dots (rendered as round line-caps). */
 } as const;
 
@@ -75,6 +77,7 @@ export const RainIcon = (p: IconProps) => <Icon {...p} name="rain" />;
 export const HumidityIcon = (p: IconProps) => <Icon {...p} name="humidity" />;
 export const PressureIcon = (p: IconProps) => <Icon {...p} name="pressure" />;
 export const EyeIcon = (p: IconProps) => <Icon {...p} name="eye" />;
+export const CalendarIcon = (p: IconProps) => <Icon {...p} name="calendar" />;
 
 /** Raw `<svg>` markup for DOM/innerHTML contexts (the uPlot panel titles + hover card). */
 export function iconSvg(name: IconName, opts: { size?: number; color?: string; className?: string } = {}): string {

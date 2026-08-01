@@ -14,13 +14,15 @@
 
 import type { ReactNode } from 'react';
 import { useLocale, type MessageKey } from '@/lib/i18n';
+import { useUnits } from '@/lib/units';
 import { m } from '@/paraglide/messages';
-import { fmtNumber, fmtTimeOfDay } from '../lib/format';
+import { fmtCountdown, fmtNumber, fmtTimeOfDay } from '../lib/format';
 import { useNow } from '../lib/useNow';
 import { sunTimes } from '../lib/sun';
 import { tideMagnitude, tidePhase, raisedCosine, type TideEvent, type TidePhaseLabel, type Tides } from '../lib/tides';
 import { TideIcon } from './icons';
 import InfoPopover from './InfoPopover';
+import TideCalendar from './TideCalendar';
 
 const PHASE_KEY: Record<TidePhaseLabel, MessageKey> = {
   rising: 'tide_rising',
@@ -114,14 +116,6 @@ function SunGlyph({ up }: { up: boolean }) {
   );
 }
 
-/** Compact "2 h 08" / "14 min" countdown; the exact clock time carries the precise info. */
-function countdown(ms: number): string {
-  const totalMin = Math.max(0, Math.round(ms / 60_000));
-  const h = Math.floor(totalMin / 60);
-  const min = totalMin % 60;
-  return h > 0 ? `${h} h ${String(min).padStart(2, '0')}` : `${min} min`;
-}
-
 /** Small heading used by both groups: an icon + an uppercase label (+ optional info). */
 function GroupLabel({ icon, label, body }: { icon: ReactNode; label: string; body?: string }) {
   return (
@@ -135,6 +129,7 @@ function GroupLabel({ icon, label, body }: { icon: ReactNode; label: string; bod
 
 export default function TideStrip({ tides, tz, lat, lon }: { tides: Tides | null; tz: string; lat: number; lon: number }) {
   const { locale } = useLocale();
+  const { units } = useUnits();
   const now = useNow(30_000);
   if (!tides) return null;
   const phase = tidePhase(tides.events, now);
@@ -155,7 +150,7 @@ export default function TideStrip({ tides, tz, lat, lon }: { tides: Tides | null
       {high ? '▲' : '▼'}
     </span>
   );
-  const curveAria = `${m[PHASE_KEY[phase.label]]()} — ${m.tide_previous()} ${prevWord} ${fmtTimeOfDay(phase.previous.t, locale, tz)}, ${m.tide_next()} ${nextWord} ${fmtTimeOfDay(phase.next.t, locale, tz)} ${m.tide_in()} ${countdown(phase.msToNext)}`;
+  const curveAria = `${m[PHASE_KEY[phase.label]]()} — ${m.tide_previous()} ${prevWord} ${fmtTimeOfDay(phase.previous.t, locale, tz, units.clock)}, ${m.tide_next()} ${nextWord} ${fmtTimeOfDay(phase.next.t, locale, tz, units.clock)} ${m.tide_in()} ${fmtCountdown(phase.msToNext)}`;
 
   return (
     <div className="mt-5 flex flex-wrap items-stretch gap-x-8 gap-y-5 border-t border-line pt-4">
@@ -166,6 +161,8 @@ export default function TideStrip({ tides, tz, lat, lon }: { tides: Tides | null
           <span className="flex items-center gap-2">
             <GroupLabel icon={<TideIcon className="mr-1.5 shrink-0" style={{ color: 'var(--accent)' }} />} label={m.tide_title()} body={m.def_tide()} />
             <span className="font-display text-[1.05rem] font-medium leading-none text-fg">{m[PHASE_KEY[phase.label]]()}</span>
+            {/* the day-by-day view of the same predictions (spec 0008 §10) */}
+            <TideCalendar tides={tides} tz={tz} now={now} />
           </span>
           <div className="flex flex-col gap-1">
             <TideCurve prev={phase.previous} next={phase.next} progress={phase.progress} hue={hue} ariaLabel={curveAria} />
@@ -173,14 +170,14 @@ export default function TideStrip({ tides, tz, lat, lon }: { tides: Tides | null
             <div className="flex items-start justify-between font-mono text-[0.76rem]" style={{ width: CURVE_W }}>
               <span className="inline-flex items-center gap-1 text-faint" title={`${m.tide_previous()} · ${prevWord}`}>
                 {arrow(prevHigh)}
-                {fmtTimeOfDay(phase.previous.t, locale, tz)}
+                {fmtTimeOfDay(phase.previous.t, locale, tz, units.clock)}
               </span>
               <span className="flex flex-col items-end leading-tight" title={`${m.tide_next()} · ${nextWord}`}>
                 <span className="inline-flex items-center gap-1 text-fg">
                   {arrow(nextHigh)}
-                  {fmtTimeOfDay(phase.next.t, locale, tz)}
+                  {fmtTimeOfDay(phase.next.t, locale, tz, units.clock)}
                 </span>
-                <span className="text-[0.7rem] text-accent">{m.tide_in()} {countdown(phase.msToNext)}</span>
+                <span className="text-[0.7rem] text-accent">{m.tide_in()} {fmtCountdown(phase.msToNext)}</span>
               </span>
             </div>
           </div>
@@ -212,13 +209,13 @@ export default function TideStrip({ tides, tz, lat, lon }: { tides: Tides | null
             {sun.sunrise != null && (
               <span className="inline-flex items-center gap-1.5" title={m.sun_sunrise()}>
                 <span className="text-warm"><SunGlyph up /></span>
-                <span className="font-mono">{fmtTimeOfDay(sun.sunrise, locale, tz)}</span>
+                <span className="font-mono">{fmtTimeOfDay(sun.sunrise, locale, tz, units.clock)}</span>
               </span>
             )}
             {sun.sunset != null && (
               <span className="inline-flex items-center gap-1.5" title={m.sun_sunset()}>
                 <span className="text-faint"><SunGlyph up={false} /></span>
-                <span className="font-mono">{fmtTimeOfDay(sun.sunset, locale, tz)}</span>
+                <span className="font-mono">{fmtTimeOfDay(sun.sunset, locale, tz, units.clock)}</span>
               </span>
             )}
           </div>

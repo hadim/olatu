@@ -219,6 +219,62 @@ export function extremaSeries(events: TideEvent[], xminSec: number, xmaxSec: num
   return { t, h };
 }
 
+// --- Calendar grouping (spec 0008 §10) ---------------------------------------------------
+
+/** The longest plausible gap between two consecutive extrema (semi-diurnal ≈ 6 h 12).
+ *  A wider hole means missing predictions, not a real half-cycle — no marnage across it. */
+const MAX_HALF_CYCLE_MS = 12 * 3_600_000;
+
+/** An extremum inside a calendar day, carrying the marnage of the half-cycle that **ends**
+ *  on it (|Δh| to the previous extremum); `null` across a hole / for the first extremum. */
+export interface TideDayEvent extends TideEvent {
+  range: number | null;
+}
+
+/** One calendar day of tides, keyed by its **zoned** day index. */
+export interface TideDay {
+  di: number;
+  events: TideDayEvent[];
+  /** The day's biggest half-cycle range (m) — what "big tide today?" reads. */
+  marnage: number | null;
+}
+
+/** The `Intl` formatter behind `zonedDayIndex` — build it once and pass it when looping. */
+export const zonedDayFormatter = (tz: string) =>
+  new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+
+/**
+ * Calendar-day index (days since the epoch) of an instant **as seen in `tz`**. Tides are
+ * read as local dates, so a 23:40 UTC high tide belongs to the *next* Paris day — grouping
+ * on UTC days would file it under the wrong date. `di * 86_400_000` is that local date's
+ * UTC midnight, so it labels with `timeZone: 'UTC'` (see `lib/calendar.ts`).
+ */
+export function zonedDayIndex(ms: number, tz: string, fmt: Intl.DateTimeFormat = zonedDayFormatter(tz)): number {
+  const parts = fmt.formatToParts(new Date(ms));
+  const pick = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return Math.round(Date.UTC(pick('year'), pick('month') - 1, pick('day')) / 86_400_000);
+}
+
+/** Bucket the extrema into calendar days of `tz`, each with its own marnage. */
+export function groupTidesByDay(events: TideEvent[], tz: string): Map<number, TideDay> {
+  const fmt = zonedDayFormatter(tz);
+  const days = new Map<number, TideDay>();
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
+    const prev = i > 0 ? events[i - 1] : null;
+    const range = prev && e.t - prev.t <= MAX_HALF_CYCLE_MS ? Math.abs(e.h - prev.h) : null;
+    const di = zonedDayIndex(e.t, tz, fmt);
+    let day = days.get(di);
+    if (!day) {
+      day = { di, events: [], marnage: null };
+      days.set(di, day);
+    }
+    day.events.push({ ...e, range });
+    if (range != null) day.marnage = Math.max(day.marnage ?? 0, range);
+  }
+  return days;
+}
+
 export type TideMagLabel = 'neap' | 'small' | 'average' | 'large' | 'spring';
 
 const DEFAULT_REF: TideRangeRef = { neap: 1.2, spring: 4.5 };
