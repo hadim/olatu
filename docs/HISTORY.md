@@ -9,6 +9,26 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-08-02 — Bucket swept of two migrations' orphans (specs 0004 §6, 0008 §8.2)
+
+Housekeeping only — no code, no pipeline change. Two past tier migrations left keys behind
+because `sync_bucket` runs with `delete` off (deliberately: a partial upload must never prune
+live tiers). Both specs had flagged the cleanup as a manual one-time job; it's now done.
+
+- **Deleted 5 keys, ~7.3 MB**, all stamped 2026-07-05: `data/hourly.parquet` for each of the
+  three campaigns (superseded by per-year `data/hourly/<campaign>_YYYY.parquet`), plus
+  `06402/data/tides.json` and `06402/raw/06402_tides.csv` (superseded by the port-keyed
+  `tides/<port>/` root — Anglet was the only buoy that ever produced them, since the other two
+  had invalid site guesses).
+- **Checked unreferenced before deleting**, not just unused-looking: every `manifest.json` now
+  carries `tiers` = `latest`/`recent`/`daily` only — no `hourly`, no `tides` pointer — and no
+  `webapp/` or `ingest/` code path reads either key. The local `hfdata/` mirror doesn't hold
+  them either, so the next `update` won't re-upload them.
+- **The rest of the bucket audited clean**: no pre-0009 flat `<campaign>/` prefixes survive (the
+  `migrate delete` did land), reel backups sit at 15 dated folders per buoy matching
+  `REEL_BACKUP_RETENTION_DAYS = 14`, and the other old-timestamped files are meant to be old —
+  the `Candhis_*_arch.csv` archives and the one-shot `wind/*/raw/*_hist.csv` seeds.
+
 ## 2026-08-01 — A tide calendar, and a 24 h/12 h clock switch (specs 0008 §10, 0014 §6)
 
 Two owner requests, both pure front-end — no ingest, no new data.

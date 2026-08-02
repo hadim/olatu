@@ -180,7 +180,7 @@ runs can't race. A non-advancing newest timestamp logs a staleness warning.
 > `tiers.hourly` dropped. The webapp's mid-span tier (`TimeSeries.tsx`) fetches only the
 > per-year hourly chunks intersecting the window, like it already did for the 30-min year
 > files. One-time: the old `data/hourly.parquet` key lingers per campaign (`delete` is off
-> on the sync) — remove it manually.
+> on the sync) — remove it manually. **Done 2026-08-02** for all three campaigns (~7.3 MB).
 
 - **One command, local and CI:** `pixi run update [--campaign 06403]` orchestrates
   **pull → scrape → build → upload** (`ingest/update.py`): pull the accumulator from the
