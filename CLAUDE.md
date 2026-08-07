@@ -178,6 +178,13 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   with the chart smoothing. The **clock format** (Auto · 24 h · 12 h, spec 0014 §6) is a field of the
   same store: pass `units.clock` to `fmtTimeOfDay`/`fmtClock`/`fmtDateTime`/`fmtAxisTick` at every new
   call site. 24 h is `hourCycle: 'h23'`, **not** `hour12: false` (that renders midnight `24:00`).
+- **Current Conditions is a REAL-TIME snapshot (spec 0015).** No trends, deltas, history or forecast
+  on that card — a full 24 h sparkline + delta + range pass was built and rejected by the owner as
+  too much information. It answers "what now"; the chart stack below answers "how did it get there".
+  Its density instead comes from layout: a 128 px dial that is the *only* place the cardinal +
+  degrees appear, one `Metric` tile per reading, and grids that fill edge to edge (Mer 4-up, Air
+  6-up — never a `max-w` cap or an over-wide column). Air packs six-up only because
+  `cc_air_temp_short`/`cc_sea_temp_short` are printed; keep the full names in the popover title.
 - **Never run `npm audit fix --force` in `webapp/`.** The remaining advisories all sit under
   `@vite-pwa/assets-generator` (whose latest still pins `sharp ^0.33.5`), so `--force` "fixes" them by
   **downgrading `vite-plugin-pwa` 1.3 -> 0.18.2**. They're patched instead via `overrides` in
@@ -200,7 +207,7 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
 ## Status
 
 Shipped and live at **olatu.io** — foundation → PWA → analytics/legal → wind ingest → wind in the
-webapp → units/settings + wind-UX polish (specs 0001–0014). The full feature-by-feature history is in
+webapp → units/settings + wind-UX polish → Current Conditions density (specs 0001–0015). The full feature-by-feature history is in
 **[docs/HISTORY.md](docs/HISTORY.md)**; the spec index + statuses are in [specs/README.md](specs/README.md).
 
 **Open owner TODO:** add the **`API_MAREE_KEY`** (tides) and **`METEOFRANCE_API_KEY`** (6-min

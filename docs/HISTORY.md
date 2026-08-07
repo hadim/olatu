@@ -9,6 +9,34 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-08-07 — Current Conditions density pass (spec 0015)
+
+Owner feedback on the two realtime blocks: they read well but the surface is empty. Webapp-only
+layout work — same ten readings, same scan path, **~36 % less height** (two zones from ~630 px to
+~400 px at a 1171 px viewport, which puts the tide strip above the fold on a laptop).
+
+- **The dial stopped repeating itself.** It shrank 176 → 128 px and its centre (`N` / `355°`) is
+  now the only place those two appear; the old three-line caption below it ("Swell direction /
+  from N · 355° / Spread ±28°") is one label line plus the realm's second direction fact.
+- **One `Metric` tile for every reading**, in a grid that fills edge to edge: Mer **4-up**, Air
+  **6-up**. The Air zone's old second row was capped at `max-w-[22rem]`, so half of it was blank;
+  an intermediate 3-up Air row was tried and discarded — over-wide columns just move the
+  emptiness between the values. The wave-height hero is now a type-size variant, not a separate
+  block, so both zones share one rhythm.
+- **The cross-shore verdict moved into the header row** (title · verdict · freshness), freeing a
+  full-width band that held three tokens.
+- Six-up needs `cc_air_temp_short` / `cc_sea_temp_short` ("Temp. air" / "Temp. mer") — the full
+  names stay in the popover title. Labels reserve two lines so wrapping can't stagger the value
+  baselines, and tiles are left-aligned at every width (the old under-720 px centring reads as
+  misalignment in a 2-column phone grid).
+- **Micro-trends were built, then rejected.** A 24 h sparkline + 3 h delta + 24 h range per tile
+  (off the already-loaded `recent.json`, plus `loadWindRecent` for the station) roughly tripled the
+  facts per pixel; the owner's call was **too much information — keep it real-time**. See spec 0015
+  §3: this card answers "what now", the chart stack below answers "how did it get there". Nothing
+  of it was kept.
+
+---
+
 ## 2026-08-02 — Bucket swept of two migrations' orphans (specs 0004 §6, 0008 §8.2)
 
 Housekeeping only — no code, no pipeline change. Two past tier migrations left keys behind
