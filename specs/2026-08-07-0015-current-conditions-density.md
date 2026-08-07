@@ -41,8 +41,24 @@ them). Inside them:
 - **Two short labels.** Six-up only works because `cc_air_temp_short` / `cc_sea_temp_short`
   ("Temp. air" / "Temp. mer") are printed instead of the full names, which stay in the popover
   title. Every other label already fits.
-- **Labels reserve two lines** (`min-h-[2.3em]`). Several wrap once translated, and free wrapping
-  staggered the value baselines across a row.
+- **The type scales with the TILE, not the viewport.** Every tile is a `@container` and its value
+  is sized in `cqw` (`clamp(1.55rem,20cqw,2.35rem)`, hero `clamp(2.4rem,30cqw,3.6rem)`). This is the
+  fix for the *second* round of owner feedback — after the layout pass the block was shorter but a
+  ~190px Mer cell still held a 25px number, so it read empty. Viewport units cannot do this job:
+  the page is capped at `max-w-[1100px]`, so past ~1140px a `vw`-sized number stops tracking the box
+  it sits in, and a Mer cell (~187px) and a six-up Air cell (~121px) would get the same size anyway.
+  The percentages are set by the widest string each tile must hold **without wrapping** — Air's
+  "1 020 hPa" fixes its floor, the four-up Mer cell allows its ceiling, and the `clamp` max stops a
+  one-column phone tile (~300px) rendering a 60px number. Measured: Mer 37px / hero 56px, Air 26px,
+  no overflow at 390 · 880 · 1100 · 1400px.
+- **Values align by `subgrid`, not by reserved space.** Each tile spans two rows of its zone grid
+  and adopts them (`grid-rows-subgrid`), so the label track is exactly as tall as the tallest label
+  in that row. The label is `self-start`, the value `self-end` — that last part is what puts the
+  wave-height hero and the three smaller Mer values on **one baseline**. The earlier `min-h` on the
+  label did the same alignment job but cost a blank line's height whenever nothing actually wrapped,
+  which is the common case.
+- **The label is inline flow, not flex.** In a flex row the label text claims the whole line box, so
+  a two-line label shoved the `i` badge to the far right where it read as belonging to nothing.
 - **Tiles are left-aligned at every width.** The old gauges centred themselves under 720 px, which
   made sense as a single column; in the 2-column phone grid it reads as misalignment.
 
@@ -62,14 +78,23 @@ module it was, and `lib/units` gains no delta conversion. (If a delta is ever sh
 that a difference must NOT go through `convertKeyValue` — the °C→°F map is affine and would add its
 +32 offset to a change.)
 
-## 4. What this does not change
+## 4. Browser support
+
+`@container` and `subgrid` are both Baseline 2023 (Chrome 117+, Safari 16+, Firefox 110+). Neither
+is load-bearing for correctness: without container queries `cqw` falls back to the small-viewport
+size and every value simply renders at its `clamp` ceiling; without subgrid the tile is an ordinary
+two-row grid and values stop sharing a baseline across a row. Both degrade to "slightly less tidy",
+never to broken or unreadable.
+
+## 5. What this does not change
 
 The realm colours, the direction colour-code (N teal · E blue · S gold · W pink), the glyph family,
 the `InfoPopover` definitions, the staleness semantics, the tide strip, and every unit/clock
 behaviour from 0014. Webapp-only: no data-tier, ingest or manifest change.
 
-## 5. Effect
+## 6. Effect
 
 The two zones go from ~630 px of height to ~400 px (**≈ 36 % less**) at 1171 px viewport, with the
 same ten readings and the same scan path (realm tag → dial → hero value → tiles). The tide strip now
-sits above the fold on a laptop.
+sits above the fold on a laptop, and the numbers grew with the space rather than leaving it blank —
+the Mer values went 25px → 37px without the zone getting any taller.

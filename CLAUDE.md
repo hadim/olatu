@@ -185,6 +185,12 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   degrees appear, one `Metric` tile per reading, and grids that fill edge to edge (Mer 4-up, Air
   6-up — never a `max-w` cap or an over-wide column). Air packs six-up only because
   `cc_air_temp_short`/`cc_sea_temp_short` are printed; keep the full names in the popover title.
+  **Tile type is sized in `cqw`, never `vw`** — each tile is a `@container`, and the page is capped
+  at `max-w-[1100px]` so viewport units stop tracking the box past ~1140px; the `clamp` bounds come
+  from the widest string a tile must hold without wrapping (Air's "1 020 hPa"), so re-tune them if
+  you change the column count. Values align by **`subgrid`** (tile spans two rows, label
+  `self-start`, value `self-end`) — don't put a `min-h` back on the label, it reserves a blank line
+  in the common case where nothing wraps.
 - **Never run `npm audit fix --force` in `webapp/`.** The remaining advisories all sit under
   `@vite-pwa/assets-generator` (whose latest still pins `sharp ^0.33.5`), so `--force` "fixes" them by
   **downgrading `vite-plugin-pwa` 1.3 -> 0.18.2**. They're patched instead via `overrides` in

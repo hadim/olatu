@@ -25,6 +25,9 @@ import TideStrip from './TideStrip';
 import type { Tides } from '../lib/tides';
 
 const LABEL_ICON = 'mr-1.5 shrink-0';
+// Inside a Metric label the icon sits in an inline wrapper that carries the gap, so the icon
+// itself must not add one (see Metric).
+const TILE_ICON = 'shrink-0';
 
 // Annular ("ring") sector centred on "up" in the dial's local frame, half-angle =
 // spread, drawn between radii ri..ro so it stays in the outer ring and never covers
@@ -90,7 +93,21 @@ function CompassDial({
  * wrap freely would stagger the value baselines across a row. `title` lets a tile show a short
  * label while the popover still names the measure in full (the two temperatures) — the Air row
  * only packs six-up because "Température de l'air" isn't printed in a 120px column.
+ *
+ * **The type scales with the TILE, not the viewport** (spec 0015 §2). Every tile is a
+ * `@container`, so `cqw` resolves against its own grid cell: a Mer cell is ~190px and a six-up
+ * Air cell ~124px at the same window, and a fixed size that filled one left the other looking
+ * empty. Viewport units can't do this — the page is capped at `max-w-[1100px]`, so past ~1140px
+ * a `vw`-sized number stops tracking the box it sits in entirely.
  */
+// The percentages are set by the WIDEST string each tile must hold without wrapping — Air's
+// "1 020 hPa" is why its floor can't rise, Mer's four-up cell is why its ceiling can. The max
+// stops a one-column phone tile (~300px) from rendering a 60px number.
+const VALUE_SIZE = 'text-[clamp(1.55rem,20cqw,2.35rem)]';
+const VALUE_SIZE_HERO = 'text-[clamp(2.4rem,30cqw,3.6rem)]';
+const UNIT_SIZE = 'text-[clamp(0.85rem,9cqw,1.15rem)]';
+const UNIT_SIZE_HERO = 'text-[clamp(1rem,11cqw,1.5rem)]';
+
 function Metric({
   label, value, unit, defKey, accent, icon, hero = false, title,
 }: { label: string; value: string; unit?: string; defKey: MessageKey; accent?: string; icon?: ReactNode; hero?: boolean; title?: string }) {
@@ -98,18 +115,21 @@ function Metric({
   // centring each tile inside its cell (what the old single-column gauges did) reads as
   // misalignment rather than as centring.
   return (
-    <div className="flex min-w-0 flex-col gap-[0.15rem]">
-      <span className="inline-flex min-h-[2.3em] items-start text-[0.7rem] uppercase leading-[1.15] tracking-[0.05em] text-faint">
-        {icon}
-        <span>{label}</span>
+    <div className="@container grid min-w-0 grid-rows-subgrid gap-[0.15rem] [grid-row:span_2]">
+      {/* Inline flow, NOT flex: in a flex row the label text takes the whole line box, so once it
+          wraps to two lines the `i` badge is shoved to the far right and reads as belonging to
+          nothing. Inline, the icon · label · badge wrap together as one phrase. */}
+      <span className="block self-start text-[0.66rem] uppercase leading-[1.2] tracking-[0.04em] text-faint">
+        <span className="mr-1.5 inline-block align-[-0.2em]">{icon}</span>
+        {label}
         <InfoPopover title={title ?? label} body={m[defKey]()} />
       </span>
       <span
-        className={`font-display leading-none [font-feature-settings:'tnum'] ${hero ? 'text-[clamp(2.1rem,4.4vw,2.8rem)] font-bold tracking-[-0.02em]' : 'text-[1.5rem] font-medium'}`}
+        className={`self-end font-display leading-none [font-feature-settings:'tnum'] ${hero ? `${VALUE_SIZE_HERO} font-bold tracking-[-0.02em]` : `${VALUE_SIZE} font-medium`}`}
         style={accent ? { color: accent } : undefined}
       >
         {value}
-        {unit && <span className={`text-muted ${hero ? 'ml-[0.15rem] text-[1.05rem]' : 'text-[0.85rem]'}`}> {unit}</span>}
+        {unit && <span className={`text-muted ${hero ? `ml-[0.15rem] ${UNIT_SIZE_HERO}` : UNIT_SIZE}`}> {unit}</span>}
       </span>
     </div>
   );
@@ -235,8 +255,12 @@ const TILE_COL = 'border-l border-line pl-5 max-[720px]:w-full max-[720px]:borde
 // Sea 4-up, Air 6-up — each fills its grid EDGE TO EDGE at every breakpoint. No ragged last row,
 // no `max-w` cap leaving half a row blank (what made the old Air zone read as empty), and no
 // over-wide columns leaving rivers of white between the values.
-const SEA_TILES = `grid grid-cols-4 gap-x-5 gap-y-4 max-[1000px]:grid-cols-2 max-[420px]:grid-cols-1 ${TILE_COL}`;
-const AIR_TILES = `grid grid-cols-6 gap-x-4 gap-y-4 max-[1000px]:grid-cols-3 max-[560px]:grid-cols-2 ${TILE_COL}`;
+// `auto-rows-auto` + each tile spanning two rows and adopting them via `grid-rows-subgrid` aligns
+// every value baseline across a row WITHOUT reserving space: the label track is exactly as tall as
+// the tallest label in that row. A `min-h` on the label did the same job but cost a blank line's
+// height whenever no label actually wrapped, which is the common case.
+const SEA_TILES = `grid auto-rows-auto grid-cols-4 gap-x-5 gap-y-4 max-[1000px]:grid-cols-2 max-[420px]:grid-cols-1 ${TILE_COL}`;
+const AIR_TILES = `grid auto-rows-auto grid-cols-6 gap-x-4 gap-y-4 max-[1000px]:grid-cols-3 max-[560px]:grid-cols-2 ${TILE_COL}`;
 
 export default function CurrentConditions({
   latest, manifest, tides, wind,
@@ -315,10 +339,10 @@ export default function CurrentConditions({
             </DialCaption>
           </div>
           <div className={SEA_TILES}>
-            <Metric label={m.cc_wave_height()} value={num(hs)} unit="m" defKey="def_wave_height" accent="var(--accent)" hero icon={<WaveHeightIcon className={LABEL_ICON} style={{ color: 'var(--c-height)' }} />} />
-            <Metric label={m.cc_max_wave()} value={num(hmax)} unit="m" defKey="def_max_wave" icon={<MaxWaveIcon className={LABEL_ICON} style={{ color: 'var(--c-max)' }} />} />
-            <Metric label={m.cc_period()} value={num(period)} unit="s" defKey="def_period" icon={<PeriodIcon className={LABEL_ICON} style={{ color: 'var(--c-period)' }} />} />
-            <Metric label={m.cc_sea_temp_short()} title={m.cc_sea_temp()} value={fmtU(seaTemp, 'sea_temperature_c')} unit={keySuffix('sea_temperature_c', units) ?? undefined} defKey="def_sea_temp" accent="var(--accent)" icon={<TempIcon className={LABEL_ICON} style={{ color: 'var(--accent)' }} />} />
+            <Metric label={m.cc_wave_height()} value={num(hs)} unit="m" defKey="def_wave_height" accent="var(--accent)" hero icon={<WaveHeightIcon className={TILE_ICON} style={{ color: 'var(--c-height)' }} />} />
+            <Metric label={m.cc_max_wave()} value={num(hmax)} unit="m" defKey="def_max_wave" icon={<MaxWaveIcon className={TILE_ICON} style={{ color: 'var(--c-max)' }} />} />
+            <Metric label={m.cc_period()} value={num(period)} unit="s" defKey="def_period" icon={<PeriodIcon className={TILE_ICON} style={{ color: 'var(--c-period)' }} />} />
+            <Metric label={m.cc_sea_temp_short()} title={m.cc_sea_temp()} value={fmtU(seaTemp, 'sea_temperature_c')} unit={keySuffix('sea_temperature_c', units) ?? undefined} defKey="def_sea_temp" accent="var(--accent)" icon={<TempIcon className={TILE_ICON} style={{ color: 'var(--accent)' }} />} />
           </div>
         </div>
       </div>
@@ -342,12 +366,12 @@ export default function CurrentConditions({
               </DialCaption>
             </div>
             <div className={AIR_TILES}>
-              <Metric label={m.cc_wind()} value={fmtU(windSpeed, 'wind_speed_ms')} unit={keySuffix('wind_speed_ms', units) ?? undefined} defKey="def_wind" accent="var(--c-wind)" icon={<WindIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)' }} />} />
-              <Metric label={m.cc_gust()} value={fmtU(gust, 'wind_gust_ms')} unit={keySuffix('wind_gust_ms', units) ?? undefined} defKey="def_gust" icon={<WindIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)', opacity: 0.7 }} />} />
-              <Metric label={m.cc_air_temp_short()} title={m.cc_air_temp()} value={fmtU(airTemp, 'air_temperature_c')} unit={keySuffix('air_temperature_c', units) ?? undefined} defKey="def_air_temp" accent="var(--c-airtemp)" icon={<TempIcon className={LABEL_ICON} style={{ color: 'var(--c-airtemp)' }} />} />
-              <Metric label={m.cc_rain()} value={num(rain)} unit="mm" defKey="def_rain" icon={<RainIcon className={LABEL_ICON} style={{ color: 'var(--c-period)' }} />} />
-              <Metric label={m.cc_humidity()} value={humidity ? fmtNumber(humidity.value, locale, 0) : '—'} unit={humidity ? '%' : undefined} defKey="def_humidity" icon={<HumidityIcon className={LABEL_ICON} style={{ color: 'var(--c-tide)' }} />} />
-              <Metric label={m.cc_pressure()} value={fmtU(pressure, 'pressure_msl_hpa')} unit={pressure ? keySuffix('pressure_msl_hpa', units) ?? undefined : undefined} defKey="def_pressure" icon={<PressureIcon className={LABEL_ICON} style={{ color: 'var(--c-dir)' }} />} />
+              <Metric label={m.cc_wind()} value={fmtU(windSpeed, 'wind_speed_ms')} unit={keySuffix('wind_speed_ms', units) ?? undefined} defKey="def_wind" accent="var(--c-wind)" icon={<WindIcon className={TILE_ICON} style={{ color: 'var(--c-wind)' }} />} />
+              <Metric label={m.cc_gust()} value={fmtU(gust, 'wind_gust_ms')} unit={keySuffix('wind_gust_ms', units) ?? undefined} defKey="def_gust" icon={<WindIcon className={TILE_ICON} style={{ color: 'var(--c-wind)', opacity: 0.7 }} />} />
+              <Metric label={m.cc_air_temp_short()} title={m.cc_air_temp()} value={fmtU(airTemp, 'air_temperature_c')} unit={keySuffix('air_temperature_c', units) ?? undefined} defKey="def_air_temp" accent="var(--c-airtemp)" icon={<TempIcon className={TILE_ICON} style={{ color: 'var(--c-airtemp)' }} />} />
+              <Metric label={m.cc_rain()} value={num(rain)} unit="mm" defKey="def_rain" icon={<RainIcon className={TILE_ICON} style={{ color: 'var(--c-period)' }} />} />
+              <Metric label={m.cc_humidity()} value={humidity ? fmtNumber(humidity.value, locale, 0) : '—'} unit={humidity ? '%' : undefined} defKey="def_humidity" icon={<HumidityIcon className={TILE_ICON} style={{ color: 'var(--c-tide)' }} />} />
+              <Metric label={m.cc_pressure()} value={fmtU(pressure, 'pressure_msl_hpa')} unit={pressure ? keySuffix('pressure_msl_hpa', units) ?? undefined : undefined} defKey="def_pressure" icon={<PressureIcon className={TILE_ICON} style={{ color: 'var(--c-dir)' }} />} />
             </div>
           </div>
         </div>

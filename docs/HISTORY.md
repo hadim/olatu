@@ -26,9 +26,21 @@ layout work — same ten readings, same scan path, **~36 % less height** (two zo
 - **The cross-shore verdict moved into the header row** (title · verdict · freshness), freeing a
   full-width band that held three tokens.
 - Six-up needs `cc_air_temp_short` / `cc_sea_temp_short` ("Temp. air" / "Temp. mer") — the full
-  names stay in the popover title. Labels reserve two lines so wrapping can't stagger the value
-  baselines, and tiles are left-aligned at every width (the old under-720 px centring reads as
-  misalignment in a 2-column phone grid).
+  names stay in the popover title. Tiles are left-aligned at every width (the old under-720 px
+  centring reads as misalignment in a 2-column phone grid).
+- **The type scales with the tile, not the viewport** — second round of owner feedback: the block
+  was shorter but a ~190px Mer cell still held a 25px number, so it still read empty. Each tile is a
+  `@container` and its value is sized in `cqw`. Viewport units can't do it: the page is capped at
+  `max-w-[1100px]`, so past ~1140px a `vw` number stops tracking its box, and a Mer cell (187px) and
+  an Air cell (121px) would get the same size regardless. Mer values went 25 → 37px (hero 56px) with
+  no extra zone height; the `clamp` bounds come from the widest non-wrapping string per zone
+  ("1 020 hPa" sets Air's floor). Verified no overflow at 390 · 880 · 1100 · 1400px.
+- **Values align via `subgrid`** (tile spans two rows of its zone grid, label `self-start`, value
+  `self-end`) instead of a `min-h` reserving a blank line on the label — the reserve cost height in
+  the common case where nothing wraps. `self-end` is what puts the hero and the smaller Mer values
+  on one baseline. Both `@container` and `subgrid` are Baseline 2023 and degrade gracefully.
+- The tile label is **inline flow, not flex**: in a flex row the text claims the whole line box, so
+  a wrapped label shoved its `i` badge to the far right where it looked orphaned.
 - **Micro-trends were built, then rejected.** A 24 h sparkline + 3 h delta + 24 h range per tile
   (off the already-loaded `recent.json`, plus `loadWindRecent` for the station) roughly tripled the
   facts per pixel; the owner's call was **too much information — keep it real-time**. See spec 0015
