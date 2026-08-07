@@ -517,6 +517,13 @@ export default function TimeSeries({
   const { units } = useUnits();
   const hostRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  // The pinned touch readout (spec 0016 §2). On a phone the hover card sits ~1700px above the
+  // lower panels and, when it is on screen at all, right under your hand — so a touch scrub gets
+  // its own compact bar fixed to the top of the VIEWPORT. Desktop never sees it.
+  const scrubRef = useRef<HTMLDivElement>(null);
+  // Assigned by the render effect (it owns the uPlot instances); called by the bar's dismiss button.
+  const dismissScrubRef = useRef<() => void>(() => {});
+  const resetCardRef = useRef<() => void>(() => {});
   // Live uPlot instances + their base x-scale (used for immediate visual reset).
   const plotsRef = useRef<uPlot[]>([]);
   const baseScaleRef = useRef<{ min: number; max: number } | null>(null);
@@ -893,6 +900,20 @@ export default function TimeSeries({
 
     const timeEl = cardRef.current?.querySelector<HTMLElement>('.hover-time') ?? null;
     const statsEl = cardRef.current?.querySelector<HTMLElement>('.hover-stats') ?? null;
+    const scrubBar = scrubRef.current;
+    const scrubTimeEl = scrubBar?.querySelector<HTMLElement>('.scrub-time') ?? null;
+    // Visibility rides on a data attribute so the styling stays in CSS and React never re-renders
+    // mid-gesture (this whole effect is imperative by design — a re-render rebuilds every plot).
+    const showScrubBar = () => {
+      if (scrubBar) scrubBar.dataset.on = '1';
+    };
+    // Dismiss = hide the bar AND drop the cursor everywhere, since the cursor is deliberately left
+    // standing after a scrub ends (spec 0016 §2). Without this there'd be no way to put it away.
+    dismissScrubRef.current = () => {
+      if (scrubBar) delete scrubBar.dataset.on;
+      for (const p of plotsRef.current) p.setCursor({ left: -10, top: -10 }, true);
+      resetCardRef.current();
+    };
     // Units-aware value string for a metric (spec 0014): direction → compass; a convertible
     // measure (speed/temp/pressure) → converted value + its unit; else a fixed unit.
     const fmtMetric = (cm: { key: string; dir?: boolean; pm?: boolean; unit?: string; digits?: number }, v: number): string => {
@@ -951,17 +972,23 @@ export default function TimeSeries({
     // Default (no hover): keep the "hover to read" hint in the time slot, but ALWAYS
     // render the latest values so the card is at its full height from the start — no
     // layout jump when you hover (height is width-robust, not a guessed min-height).
+    // "Hover the chart" is a lie on a phone — a coarse pointer gets the touch wording (spec 0016).
+    const hint = () => (window.matchMedia('(hover: none)').matches ? m.chart_touch_hint() : m.chart_hover_hint());
     const resetCard = () => {
-      if (timeEl) timeEl.textContent = m.chart_hover_hint();
+      if (timeEl) timeEl.textContent = hint();
       if (statsEl) statsEl.innerHTML = lastIdx >= 0 ? chipsHTML(lastIdx) : '';
     };
+    resetCardRef.current = resetCard;
     const renderCard = (idx: number | null | undefined) => {
       if (idx == null) {
         resetCard();
         return;
       }
-      if (timeEl) timeEl.textContent = fmtDateTime(gxs[idx] * 1000, locale, tz, units.clock);
+      const stamp = fmtDateTime(gxs[idx] * 1000, locale, tz, units.clock);
+      if (timeEl) timeEl.textContent = stamp;
       if (statsEl) statsEl.innerHTML = chipsHTML(idx);
+      // The bar shows the same instant; it is only VISIBLE during/after a touch scrub.
+      if (scrubTimeEl) scrubTimeEl.textContent = stamp;
     };
     resetCard();
 
@@ -1443,7 +1470,7 @@ export default function TimeSeries({
             },
           },
         },
-        plugins: [touchZoomPlugin()],
+        plugins: [touchZoomPlugin({ onScrubStart: showScrubBar })],
         hooks,
       };
 
@@ -1730,7 +1757,29 @@ export default function TimeSeries({
         )}
       </div>
       <div className="relative">
-        <div ref={hostRef} className="charts relative rounded-2xl border border-line bg-surface-2 px-4 pb-4 pt-3" />
+        {/* Pinned touch readout (spec 0016 §2). Fixed to the VIEWPORT, not sticky inside the section:
+          the panel stack is ~1700px tall on a phone, so anything anchored to the section scrolls
+          away from the panel you're actually touching. Hidden until a touch scrub starts, and it
+          stays up after you lift your finger — that is the whole point, the values under a finger
+          are only readable once the finger is gone. Tap it to dismiss. */}
+      <div
+        ref={scrubRef}
+        className="ts-scrub fixed inset-x-0 top-0 z-[70] hidden items-center justify-center gap-3 border-b border-line bg-surface/95 px-4 py-[0.4rem] backdrop-blur-sm data-[on]:flex"
+        role="status"
+        aria-live="polite"
+      >
+        <span className="scrub-time font-mono text-[0.86rem] text-fg" />
+        <button
+          type="button"
+          onClick={() => dismissScrubRef.current()}
+          aria-label={m.a11y_close()}
+          className="shrink-0 rounded-full border border-line px-2 py-[0.1rem] font-mono text-[0.72rem] leading-none text-faint transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          <span aria-hidden="true">✕</span>
+        </button>
+      </div>
+
+      <div ref={hostRef} className="charts relative rounded-2xl border border-line bg-surface-2 px-4 pb-4 pt-3" />
         {detailLoading && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden="true">
             <span className="inline-flex items-center gap-2 rounded-full border border-line bg-surface/90 px-3.5 py-1.5 font-mono text-[0.76rem] text-muted shadow-[0_2px_12px_-4px_rgba(0,0,0,0.5)] backdrop-blur-sm">

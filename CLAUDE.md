@@ -201,6 +201,13 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   **`requestAnimationFrame`** (the panels aren't laid out in the same tick — releasing synchronously,
   or calling `scrollTo` there, is clamped away). Keep both halves if you touch that effect.
   See the 2026-07-25 LEARNINGS entry.
+- **Never `preventDefault()` a one-finger `touchmove` on a chart (spec 0016).** That is what turned
+  the ~1700px chart stack into a scroll trap on a phone. The plot hit area sets `touch-action: pan-y`
+  so the BROWSER scrolls vertically; a JS axis-lock (8px) then claims only horizontal gestures. One
+  finger horizontal = **scrub to read**, two fingers = pan/zoom — don't move pan back to one finger.
+  The touch readout bar is **fixed to the viewport** (the hover card sits ~1700px above the panel
+  you're touching) and is deliberately **not cleared on `touchend`**; the ✕ is the only way out, so
+  keep it.
 - **Reorder is Pointer Events, never HTML5 drag-and-drop** (spec 0013 §7) — `draggable` does nothing on
   touch. The one control is the per-panel **`.ts-band`** in the host's left gutter: pointer drag *and*
   the accessible/keyboard control (`role=button`, `tabindex`, ↑/↓, re-focused after the rebuild via
@@ -213,7 +220,7 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
 ## Status
 
 Shipped and live at **olatu.io** — foundation → PWA → analytics/legal → wind ingest → wind in the
-webapp → units/settings + wind-UX polish → Current Conditions density (specs 0001–0015). The full feature-by-feature history is in
+webapp → units/settings + wind-UX polish → Current Conditions density → touch charts (specs 0001–0016). The full feature-by-feature history is in
 **[docs/HISTORY.md](docs/HISTORY.md)**; the spec index + statuses are in [specs/README.md](specs/README.md).
 
 **Open owner TODO:** add the **`API_MAREE_KEY`** (tides) and **`METEOFRANCE_API_KEY`** (6-min

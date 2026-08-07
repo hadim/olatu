@@ -45,6 +45,7 @@
   "chart_smooth_strong": "Fort",
   "chart_temp_unavailable": "Données de température non disponibles pour cette période.",
   "chart_hover_hint": "Survolez le graphique pour lire les valeurs exactes",
+  "chart_touch_hint": "Glissez un doigt sur un graphique pour lire les valeurs exactes",
   "chart_jump_to": "Aller à une date",
   "time_buoy_local": "Heures en heure locale de la bouée",
   "glossary_open": "Définitions",

@@ -45,6 +45,7 @@
   "chart_smooth_strong": "Strong",
   "chart_temp_unavailable": "Temperature data not available for this period.",
   "chart_hover_hint": "Hover the chart to read exact values",
+  "chart_touch_hint": "Slide a finger across a chart to read exact values",
   "chart_jump_to": "Jump to date",
   "time_buoy_local": "Times shown in buoy local time",
   "glossary_open": "Definitions",

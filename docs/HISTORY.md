@@ -9,6 +9,31 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-08-07 — The charts stop trapping your finger (spec 0016)
+
+Two owner reports from a phone, both on the chart stack.
+
+- **Scroll trap, fixed.** Every panel `preventDefault()`ed *every* one-finger `touchmove` to pan the
+  x-scale, and none set `touch-action` — so a finger anywhere over the charts could not scroll the
+  page, and the stack is ~1700 px tall at 390 px wide. Now `touch-action: pan-y` hands vertical
+  panning back to the **browser** (native momentum + rubber-banding, which JS can't match) and a JS
+  axis-lock (8 px) decides on the first real move whose gesture it is. Belt and braces on purpose:
+  engines cancel our touches at different moments, and a diagonal scroll would otherwise jitter the
+  cursor on its way past. Under the threshold, a tap stays a tap.
+- **One finger now reads instead of panning.** A horizontal drag scrubs the cursor along the series;
+  pan/zoom moved to two fingers (and is still on `‹ ›`, the range chips and the history ribbon).
+  Reading was the worse-served of the two — it used to be tap-only, one value at a time.
+- **A pinned readout bar** carries the scrubbed date/time, **fixed to the viewport** (anything
+  anchored inside the section scrolls away from the panel you're touching) and **kept after you lift
+  your finger** — the values under a finger are only readable once the finger is gone. ✕ dismisses it
+  and drops the cursor everywhere. It carries the timestamp only: the 338 px hover card would eat
+  ~40 % of a phone screen, and the values are already on-plot in each panel's bubble.
+- The card's default hint branches on `(hover: none)` — "Hover the chart" is false on a phone.
+- Desktop is untouched: mouse drag-zoom, double-click reset, hover card and cursor bubbles behave
+  exactly as before, and the bar is only ever raised by a touch scrub.
+
+---
+
 ## 2026-08-07 — Current Conditions density pass (spec 0015)
 
 Owner feedback on the two realtime blocks: they read well but the surface is empty. Webapp-only

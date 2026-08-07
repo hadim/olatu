@@ -45,6 +45,7 @@
   "chart_smooth_strong": "Fuerte",
   "chart_temp_unavailable": "Datos de temperatura no disponibles para este período.",
   "chart_hover_hint": "Pasa el cursor por el gráfico para ver los valores exactos",
+  "chart_touch_hint": "Desliza un dedo por el gráfico para ver los valores exactos",
   "chart_jump_to": "Ir a una fecha",
   "time_buoy_local": "Horas en hora local de la boya",
   "glossary_open": "Definiciones",
