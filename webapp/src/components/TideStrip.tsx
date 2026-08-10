@@ -153,11 +153,13 @@ export default function TideStrip({ tides, tz, lat, lon }: { tides: Tides | null
   const curveAria = `${m[PHASE_KEY[phase.label]]()} — ${m.tide_previous()} ${prevWord} ${fmtTimeOfDay(phase.previous.t, locale, tz, units.clock)}, ${m.tide_next()} ${nextWord} ${fmtTimeOfDay(phase.next.t, locale, tz, units.clock)} ${m.tide_in()} ${fmtCountdown(phase.msToNext)}`;
 
   return (
-    <div className="mt-5 flex flex-wrap items-stretch gap-x-8 gap-y-5 border-t border-line pt-4">
+    /* Below 720px every group centres, like the realm zones above it (spec 0017 §3) — the strip
+       sits under a centred dial column, so a left-hugging tide curve read as mis-set. */
+    <div className="mt-5 flex flex-wrap items-stretch gap-x-8 gap-y-5 border-t border-line pt-4 max-[720px]:justify-center">
       {/* ── TIDE group: phase + curve timeline + range ────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-x-7 gap-y-4">
+      <div className="flex flex-wrap items-center gap-x-7 gap-y-4 max-[720px]:justify-center">
         {/* phase word + the integrated prev→now→next curve */}
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1.5 max-[720px]:items-center">
           <span className="flex items-center gap-2">
             <GroupLabel icon={<TideIcon className="mr-1.5 shrink-0" style={{ color: 'var(--accent)' }} />} label={m.tide_title()} body={m.def_tide()} />
             <span className="font-display text-[1.05rem] font-medium leading-none text-fg">{m[PHASE_KEY[phase.label]]()}</span>
@@ -184,7 +186,7 @@ export default function TideStrip({ tides, tz, lat, lon }: { tides: Tides | null
         </div>
 
         {/* marnage + neap↔spring fill — the "how big" readout */}
-        <div className="flex flex-col gap-[0.3rem] self-center">
+        <div className="flex flex-col gap-[0.3rem] self-center max-[720px]:items-center">
           <span className="inline-flex items-baseline gap-1.5">
             <span className="text-[0.72rem] uppercase tracking-[0.06em] text-faint">{m.tide_marnage()}</span>
             <span className="font-display text-[1.05rem] font-medium text-fg [font-feature-settings:'tnum']">
@@ -203,7 +205,7 @@ export default function TideStrip({ tides, tz, lat, lon }: { tides: Tides | null
 
       {/* ── SUN group: its own titled zone, separated by a divider ─────────────── */}
       {(sun.sunrise != null || sun.sunset != null) && (
-        <div className="ml-auto flex flex-col justify-center gap-1.5 border-l border-line pl-8 max-[720px]:ml-0 max-[720px]:border-l-0 max-[720px]:pl-0 max-[720px]:border-t max-[720px]:pt-4 max-[720px]:w-full">
+        <div className="ml-auto flex flex-col justify-center gap-1.5 border-l border-line pl-8 max-[720px]:ml-0 max-[720px]:w-full max-[720px]:items-center max-[720px]:border-l-0 max-[720px]:border-t max-[720px]:pl-0 max-[720px]:pt-4">
           <GroupLabel icon={<span className="mr-1.5 text-warm"><SunDisc /></span>} label={m.sun_title()} />
           <div className="flex items-center gap-5 text-[0.84rem] text-muted">
             {sun.sunrise != null && (

@@ -16,7 +16,13 @@ interface Drag {
   grab: number; // time grabbed at pointer-down
   cur: number; // current pointer time
   moved: boolean;
+  // Touch only (spec 0017 §6): the gesture hasn't committed to an axis yet. Until it does we
+  // neither capture the pointer nor preview a window, so a vertical swipe that starts on the
+  // ribbon still scrolls the page — the track used to be `touch-none`, i.e. a 48px scroll trap.
+  pending?: { x: number; y: number; id: number };
 }
+// Same threshold as the chart plugin's axis lock (lib/uplotTouch.ts) — one gesture model.
+const AXIS_LOCK_PX = 8;
 
 interface Props {
   t: number[]; // epoch seconds, ascending
@@ -95,11 +101,25 @@ export default function HeatRibbon({ t, hs, min, max, onChange }: Props) {
     const time = pxToTime(e.clientX);
     const handle = (e.target as HTMLElement).dataset.handle;
     const mode: Mode = handle === 'l' ? 'resize-l' : handle === 'r' ? 'resize-r' : time >= min && time <= max ? 'pan' : 'select';
-    setDrag({ mode, startMin: min, startMax: max, grab: time, cur: time, moved: false });
-    e.currentTarget.setPointerCapture(e.pointerId);
+    const touch = e.pointerType === 'touch';
+    setDrag({ mode, startMin: min, startMax: max, grab: time, cur: time, moved: false, pending: touch ? { x: e.clientX, y: e.clientY, id: e.pointerId } : undefined });
+    // A touch gesture captures only once it commits to horizontal (see onMove) — capturing here
+    // would swallow the vertical swipe the browser needs to scroll the page.
+    if (!touch) e.currentTarget.setPointerCapture(e.pointerId);
   };
   const onMove = (e: React.PointerEvent) => {
     if (!drag) return;
+    if (drag.pending) {
+      const dx = Math.abs(e.clientX - drag.pending.x);
+      const dy = Math.abs(e.clientY - drag.pending.y);
+      if (dx < AXIS_LOCK_PX && dy < AXIS_LOCK_PX) return; // undecided — a tap must stay a tap
+      if (dy > dx) {
+        setDrag(null); // vertical: the browser scrolls, we let go entirely
+        return;
+      }
+      e.currentTarget.setPointerCapture(drag.pending.id);
+      setDrag((d) => (d ? { ...d, pending: undefined } : d));
+    }
     const cur = pxToTime(e.clientX);
     setDrag((d) => (d ? { ...d, cur, moved: d.moved || d.mode !== 'select' || Math.abs(cur - d.grab) > span * 0.004 } : d));
   };
@@ -155,7 +175,10 @@ export default function HeatRibbon({ t, hs, min, max, onChange }: Props) {
   return (
     <div className="mb-[0.9rem]">
       <div
-        className="relative h-12 cursor-crosshair touch-none overflow-hidden rounded-[0.5rem] border border-line bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        /* `touch-pan-y`, not `touch-none`: vertical belongs to the BROWSER so a finger landing on
+           the ribbon can still scroll the page (spec 0016's rule, applied here by 0017 §6). The
+           axis-lock in onMove claims the horizontal half. */
+        className="relative h-12 cursor-crosshair touch-pan-y overflow-hidden rounded-[0.5rem] border border-line bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         ref={wrapRef}
         onPointerDown={onDown}
         onPointerMove={onMove}
@@ -172,10 +195,10 @@ export default function HeatRibbon({ t, hs, min, max, onChange }: Props) {
         <div className="pointer-events-none absolute bottom-0 top-0 bg-[color-mix(in_oklab,var(--bg)_60%,transparent)]" style={{ left: 0, width: `${Math.max(0, leftPct)}%` }} />
         <div className="pointer-events-none absolute bottom-0 top-0 bg-[color-mix(in_oklab,var(--bg)_60%,transparent)]" style={{ left: `${Math.min(100, rightPct)}%`, right: 0 }} />
         <div className="pointer-events-none absolute bottom-0 top-0 border-x-2 border-accent bg-[color-mix(in_oklab,var(--accent)_8%,transparent)]" style={{ left: `${leftPct}%`, width: `${Math.max(0.4, rightPct - leftPct)}%` }} />
-        <div className="group absolute bottom-0 top-0 z-[2] w-[14px] -translate-x-1/2 cursor-ew-resize touch-none" data-handle="l" style={{ left: `${leftPct}%` }} aria-hidden="true">
+        <div className="group absolute bottom-0 top-0 z-[2] w-[14px] -translate-x-1/2 cursor-ew-resize touch-pan-y" data-handle="l" style={{ left: `${leftPct}%` }} aria-hidden="true">
           <span className="pointer-events-none absolute left-1/2 top-1/2 h-[22px] w-[4px] -translate-x-1/2 -translate-y-1/2 rounded-[2px] bg-accent shadow-[0_0_0_2px_var(--surface-2)] group-hover:bg-accent-deep" />
         </div>
-        <div className="group absolute bottom-0 top-0 z-[2] w-[14px] -translate-x-1/2 cursor-ew-resize touch-none" data-handle="r" style={{ left: `${rightPct}%` }} aria-hidden="true">
+        <div className="group absolute bottom-0 top-0 z-[2] w-[14px] -translate-x-1/2 cursor-ew-resize touch-pan-y" data-handle="r" style={{ left: `${rightPct}%` }} aria-hidden="true">
           <span className="pointer-events-none absolute left-1/2 top-1/2 h-[22px] w-[4px] -translate-x-1/2 -translate-y-1/2 rounded-[2px] bg-accent shadow-[0_0_0_2px_var(--surface-2)] group-hover:bg-accent-deep" />
         </div>
       </div>

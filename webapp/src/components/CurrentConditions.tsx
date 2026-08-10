@@ -111,9 +111,8 @@ const UNIT_SIZE_HERO = 'text-[clamp(1rem,11cqw,1.5rem)]';
 function Metric({
   label, value, unit, defKey, accent, icon, hero = false, title,
 }: { label: string; value: string; unit?: string; defKey: MessageKey; accent?: string; icon?: ReactNode; hero?: boolean; title?: string }) {
-  // Left-aligned at every width: the zone stacks to a 2-column tile grid on a phone, where
-  // centring each tile inside its cell (what the old single-column gauges did) reads as
-  // misalignment rather than as centring.
+  // Alignment is inherited from the grid (TILE_COL): left-aligned from 720px up, centred below —
+  // where the zone stacks under a centred dial and a left column would read as mis-set (0017 §3).
   return (
     <div className="@container grid min-w-0 grid-rows-subgrid gap-[0.15rem] [grid-row:span_2]">
       {/* Inline flow, NOT flex: in a flex row the label text takes the whole line box, so once it
@@ -157,7 +156,7 @@ const ZONE: Record<'sea' | 'air', string> = {
 function ZoneHeader({ realm, tag, children }: { realm: 'sea' | 'air'; tag: string; children: ReactNode }) {
   const bg = realm === 'sea' ? 'var(--accent)' : 'var(--c-wind)';
   return (
-    <div className="mb-2 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+    <div className="mb-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 max-[720px]:justify-center max-[720px]:text-center">
       <span className="rounded-md px-2 py-[0.1rem] font-display text-[0.72rem] font-bold uppercase tracking-[0.05em]" style={{ background: bg, color: '#08201a' }}>
         {tag}
       </span>
@@ -182,7 +181,10 @@ function DialCaption({ label, defKey, icon, children }: { label: string; defKey:
   );
 }
 
-const STATUS_BADGE = 'inline-flex items-center gap-[0.45rem] rounded-full border bg-surface-2 px-[0.7rem] py-[0.32rem] font-mono text-[0.78rem] text-muted cursor-pointer transition-colors hover:border-accent hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
+// `flex-wrap` + `max-w-full`: the pill holds two nowrap spans ("il y a 31 minutes" · "10 août,
+// 18:00") that together are ~310px — wider than a 320px phone, and it overflowed the page rather
+// than breaking between them (spec 0017 §2).
+const STATUS_BADGE = 'inline-flex max-w-full flex-wrap items-center justify-center gap-x-[0.45rem] rounded-full border bg-surface-2 px-[0.7rem] py-[0.32rem] font-mono text-[0.78rem] text-muted cursor-pointer transition-colors hover:border-accent hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
 const STATUS_BORDER: Record<Freshness, string> = {
   fresh: 'border-[color-mix(in_oklab,var(--accent)_45%,var(--hairline))]',
   aging: 'border-[color-mix(in_oklab,var(--warning)_50%,var(--hairline))]',
@@ -251,7 +253,12 @@ function ShoreBridge({ swellDeg, windDeg, locale }: { swellDeg: number | null; w
 // Zone body: a narrow dial column + the tile grid. `items-center` keeps the tiles optically
 // centred against the taller dial, so the dial's spare height reads as padding, not a hole.
 const ZONE_GRID = 'grid grid-cols-[minmax(120px,0.4fr)_2.7fr] items-center gap-x-5 gap-y-4 max-[720px]:grid-cols-1 max-[720px]:justify-items-center';
-const TILE_COL = 'border-l border-line pl-5 max-[720px]:w-full max-[720px]:border-l-0 max-[720px]:pl-0';
+// Below 720px the zone stacks under a CENTRED dial, so the tiles centre too (spec 0017 §3) — a
+// left-aligned column under a centred dial reads as mis-set, which is exactly what it looked like.
+// From 720px up the 0015 rule stands unchanged: left-aligned, values on a subgrid baseline.
+// (`text-center` only — NOT `justify-items-center`: each tile is a `@container`, and shrink-wrapping
+// a size-contained box collapses it, taking the `cqw` type scale down with it.)
+const TILE_COL = 'border-l border-line pl-5 max-[720px]:w-full max-[720px]:border-l-0 max-[720px]:pl-0 max-[720px]:text-center';
 // Sea 4-up, Air 6-up — each fills its grid EDGE TO EDGE at every breakpoint. No ragged last row,
 // no `max-w` cap leaving half a row blank (what made the old Air zone read as empty), and no
 // over-wide columns leaving rivers of white between the values.
@@ -259,8 +266,10 @@ const TILE_COL = 'border-l border-line pl-5 max-[720px]:w-full max-[720px]:borde
 // every value baseline across a row WITHOUT reserving space: the label track is exactly as tall as
 // the tallest label in that row. A `min-h` on the label did the same job but cost a blank line's
 // height whenever no label actually wrapped, which is the common case.
-const SEA_TILES = `grid auto-rows-auto grid-cols-4 gap-x-5 gap-y-4 max-[1000px]:grid-cols-2 max-[420px]:grid-cols-1 ${TILE_COL}`;
-const AIR_TILES = `grid auto-rows-auto grid-cols-6 gap-x-4 gap-y-4 max-[1000px]:grid-cols-3 max-[560px]:grid-cols-2 ${TILE_COL}`;
+// Sea keeps TWO columns to the narrowest phone (spec 0017 §3): one column left a hero value alone
+// on a full-width row with an empty half beside it. The width freed in §2 pays for the second.
+const SEA_TILES = `grid auto-rows-auto grid-cols-4 gap-x-5 gap-y-4 max-[1000px]:grid-cols-2 max-[420px]:gap-x-3 ${TILE_COL}`;
+const AIR_TILES = `grid auto-rows-auto grid-cols-6 gap-x-4 gap-y-4 max-[1000px]:grid-cols-3 max-[560px]:grid-cols-2 max-[420px]:gap-x-3 ${TILE_COL}`;
 
 export default function CurrentConditions({
   latest, manifest, tides, wind,
@@ -303,7 +312,7 @@ export default function CurrentConditions({
   return (
     <section
       aria-label={m.cc_title()}
-      className={`relative flex flex-col gap-2 rounded-2xl border border-line bg-surface px-5 pb-5 pt-4 shadow-[0_0_40px_-28px_var(--accent)] ${fresh === 'stale' ? 'saturate-[0.55]' : ''}`}
+      className={`relative flex flex-col gap-2 rounded-2xl border border-line bg-surface px-3 pb-4 pt-3.5 shadow-[0_0_40px_-28px_var(--accent)] sm:px-5 sm:pb-5 sm:pt-4 ${fresh === 'stale' ? 'saturate-[0.55]' : ''}`}
     >
       {/* Header row: identity · the cross-realm verdict · freshness. The verdict rides here rather
           than in its own band (spec 0015); below 860px it drops to its own full-width line. */}
@@ -321,7 +330,7 @@ export default function CurrentConditions({
       </div>
 
       {/* ---- MER (buoy) zone ---- */}
-      <div className={`rounded-xl border p-3.5 ${ZONE.sea}`}>
+      <div className={`rounded-xl border p-2.5 sm:p-3.5 ${ZONE.sea}`}>
         <ZoneHeader realm="sea" tag={m.cc_realm_sea()}>
           <BuoyMark size={15} className="text-accent" />
           {m.cc_buoy()} {manifest.buoy.campaign_id} · {manifest.buoy.network}
@@ -349,7 +358,7 @@ export default function CurrentConditions({
 
       {/* ---- AIR (station) zone ---- */}
       {wind ? (
-        <div className={`rounded-xl border p-3.5 ${ZONE.air}`}>
+        <div className={`rounded-xl border p-2.5 sm:p-3.5 ${ZONE.air}`}>
           <ZoneHeader realm="air" tag={m.cc_realm_air()}>
             <StationIcon size={15} style={{ color: 'var(--c-wind)' }} />
             {m.cc_station()} {wind.manifest.station.label} <span className="text-faint">· {fmtNumber(wind.distanceKm, locale, 1)} km{kindLabel ? ` · ${kindLabel}` : ''} · {wind.manifest.source.provider}</span>
@@ -376,7 +385,7 @@ export default function CurrentConditions({
           </div>
         </div>
       ) : (
-        <div className={`flex items-center gap-2.5 rounded-xl border border-dashed p-3.5 ${ZONE.air}`}>
+        <div className={`flex items-center gap-2.5 rounded-xl border border-dashed p-2.5 sm:p-3.5 ${ZONE.air}`}>
           <StationIcon size={16} style={{ color: 'var(--c-wind)' }} />
           <span className="font-mono text-[0.78rem] text-muted">{manifest.wind ? m.cc_wind_unavailable() : m.cc_wind_none()}</span>
         </div>

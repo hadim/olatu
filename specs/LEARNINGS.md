@@ -9,6 +9,34 @@ Format per entry: **date — title** · what we found · why it matters · resol
 
 ---
 
+## 2026-08-10 — two silent layout lies on a phone: `clientWidth` includes padding, and `sr-only` doesn't hide a `<table>`
+
+**Finding.** Measuring the 390 px layout for [spec 0017](2026-08-10-0017-mobile-layout.md) turned up two
+long-standing bugs that were invisible because both failure modes are *quiet*:
+
+1. **Every chart panel was built too wide.** `new uPlot({ width: host.clientWidth })` — but `clientWidth`
+   is content **+ padding**, so each plot was `2 × --ts-pad` wider than the box it sits in (34 px at the
+   old `px-4`). The surplus hung off the right and was clipped by the wrapper's `overflow-hidden`, so
+   there was no scrollbar, no console warning and no visible break — just a permanently amputated right
+   edge on the x-axis, on desktop as well as mobile.
+2. **The visually-hidden summary table was 420 px wide.** `class="sr-only"` sets `width: 1px` +
+   `overflow: hidden`, which works on a `<div>` and **not** on a `<table>`: a table's `width` is a
+   *minimum*, and the clip doesn't apply to the table box. The accessible per-window summary therefore
+   laid out at full width and gave a 390 px phone 27 px of phantom horizontal scroll — visible only as
+   "the page wobbles sideways", with no element on screen to blame.
+
+**Why it matters.** Neither shows up in a screenshot or a test that asserts on the DOM; both were found
+only by comparing `document.documentElement.scrollWidth` against `innerWidth` and each plot's rect against
+its wrapper's. That comparison is now the cheapest mobile smoke test we have — run it before trusting a
+layout at a new width.
+
+**Resolution.** uPlot is sized from the host's **content** width
+(`clientWidth − paddingLeft − paddingRight`, via a `plotWidth()` helper used by the build *and* the
+ResizeObserver), and `sr-only` moved onto a wrapper `<div>` around the `<table>`. General rules:
+**never pass `clientWidth` to something that draws inside the padding box**, and **never put `sr-only` on
+a `<table>` (or any element whose width is a minimum rather than a used value)**. Refs:
+`webapp/src/components/TimeSeries.tsx`, [spec 0017 §2 / §6](2026-08-10-0017-mobile-layout.md).
+
 ## 2026-07-27 — a minimum row count turns an upstream buoy outage into a red cron, and guards nothing
 
 **Finding.** The refresh cron went red every 30 min with

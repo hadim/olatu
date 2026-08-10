@@ -9,6 +9,46 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-08-10 — The phone gets its width back (spec 0017)
+
+Owner feedback from a phone, on every surface at once. Webapp-only; desktop is a superset of the
+phone layout, not a second UI.
+
+- **Width.** Three nested paddings (page `px-5` + card `px-5` + zone `p-3.5`) ate ~18 % of a 390 px
+  screen before a single value. Now only the page shell pays for the screen edge: cards and zones
+  shrink their padding below 640 px, and the chart host's padding became **`--ts-pad`** — the day
+  overlay, the reorder drop line and the `.ts-band` gutter all position against it, so it can only
+  be changed in one place. ~48 px back, ~12 % more plot width.
+- **Centred below 720 px.** Under a centred dial, the Sea tiles fell to *one* left-hugging column.
+  They now stay two columns to the narrowest phone and centre their content, as do the Air zone and
+  the tide strip. (0015's left-alignment rule now reads "from 720 px up".) `text-center` only —
+  `justify-items-center` would shrink-wrap a `@container` tile and collapse the `cqw` type scale.
+- **Chart controls, re-laid-out — nothing removed.** Twelve range chips at 44 px wrapped to three
+  rows; they are now one horizontally-scrollable line (still wrapping from `md` up). The navigator
+  stays visible (and square at 44 px, it was a 28 px-wide sliver); smoothing + jump-to-date fold
+  behind a phone-only **⚙ Options** disclosure. Panels shrink 124 → 100 px below 560 px (~180 px off
+  the stack), re-derived on resize.
+- **The readout is a table, not a run of chips.** Each reading is `icon · LABEL` left + value
+  **right-aligned** on a hairline, grouped under **Sea** / **Air** headings — a wrapped label can no
+  longer shove its value out of line, and the two temperatures/directions stop being confusable.
+- **Hover really is synced now.** `setCursor` only refreshed the card from *buoy* panels, so hovering
+  wind, tide, humidity or pressure moved every crosshair while the card kept the previous instant.
+  Every panel drives it; panels on their own x-grid map cursor → time → nearest buoy index. Renders
+  are deduped by index (one write per move, not one per panel).
+- The pinned touch bar gained the core values beside the timestamp (0016 gave it the stamp only).
+
+Two real bugs found while measuring, both pre-existing:
+
+- **Panels were built ~2·padding too wide.** `host.clientWidth` includes padding, so every plot
+  overflowed its wrapper and the right edge of the x-axis was silently clipped by `overflow-hidden`.
+- **`<table class="sr-only">` doesn't hide.** A table treats `width: 1px` as a *minimum*, so the
+  visually-hidden summary was ~420 px wide and gave a 390 px phone 27 px of phantom horizontal
+  scroll. The class belongs on a wrapper `<div>`.
+- The history ribbon was a scroll trap too (`touch-none` on the track) — it now uses 0016's model:
+  `pan-y` + an axis-lock, capturing the pointer only once the gesture commits to horizontal.
+
+---
+
 ## 2026-08-07 — The charts stop trapping your finger (spec 0016)
 
 Two owner reports from a phone, both on the chart stack.

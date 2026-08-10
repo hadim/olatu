@@ -47,6 +47,10 @@ const WIND_HISTORY_COLUMNS = [
   'pressure_msl_hpa',
 ];
 
+// The page shell. On a phone the SHELL is the only thing that pays for the screen edge (spec
+// 0017 §2): the cards inside it shrink their own padding instead of stacking a third inset.
+const PAGE = 'mx-auto max-w-[1100px] px-3 pb-12 pt-5 sm:px-5';
+
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-[0.2rem]">
@@ -344,7 +348,7 @@ export default function App() {
 
   if (route !== 'home') {
     return (
-      <div className="mx-auto max-w-[1100px] px-5 pb-12 pt-5">
+      <div className={PAGE}>
         <Header />
         <LegalPage route={route} />
         <Footer />
@@ -354,7 +358,7 @@ export default function App() {
   }
 
   return (
-    <div className="mx-auto max-w-[1100px] px-5 pb-12 pt-5">
+    <div className={PAGE}>
       <Header />
 
       <main>

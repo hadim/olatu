@@ -178,6 +178,19 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   with the chart smoothing. The **clock format** (Auto · 24 h · 12 h, spec 0014 §6) is a field of the
   same store: pass `units.clock` to `fmtTimeOfDay`/`fmtClock`/`fmtDateTime`/`fmtAxisTick` at every new
   call site. 24 h is `hourCycle: 'h23'`, **not** `hour12: false` (that renders midnight `24:00`).
+- **Mobile is a layout mode, not a second UI (spec 0017).** Only the **page shell** pays for the
+  screen edge on a phone (`px-3 sm:px-5`); cards/zones shrink their own padding instead of stacking
+  a third inset, and the chart host's padding is **`--ts-pad`** (styles.css) because the day
+  overlay, the reorder drop line and the `.ts-band` gutter all position against it — never
+  hard-code `1rem` there again. Below **720px** the realm zones + tide strip **centre** (`text-center`
+  only — `justify-items-center` shrink-wraps a `@container` tile and collapses its `cqw` type
+  scale); from 720px up the 0015 left-alignment stands. Chart controls **lose nothing** on a phone:
+  ranges become one scrollable line, the navigator stays out, smoothing/jump fold behind a
+  phone-only ⚙ Options (`md:hidden` + `max-md:hidden`), so desktop is a superset. **Never size a
+  uPlot from `host.clientWidth`** (it includes padding → plots overflow and the x-axis right edge is
+  clipped): use the content width. **Never put `sr-only` on a `<table>`** — a table treats
+  `width:1px` as a minimum, so it doesn't hide and it adds phantom horizontal scroll; wrap it.
+  See the 2026-08-10 LEARNINGS entry.
 - **Current Conditions is a REAL-TIME snapshot (spec 0015).** No trends, deltas, history or forecast
   on that card — a full 24 h sparkline + delta + range pass was built and rejected by the owner as
   too much information. It answers "what now"; the chart stack below answers "how did it get there".
@@ -207,7 +220,13 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   finger horizontal = **scrub to read**, two fingers = pan/zoom — don't move pan back to one finger.
   The touch readout bar is **fixed to the viewport** (the hover card sits ~1700px above the panel
   you're touching) and is deliberately **not cleared on `touchend`**; the ✕ is the only way out, so
-  keep it.
+  keep it. It also carries the **core values** beside the stamp (spec 0017 §5). The same rule applies
+  to the ribbon and any new hit area: `pan-y` + an axis-lock, never `touch-none`.
+- **Every panel drives the hover readout (spec 0017 §5).** A panel on its own x-grid (tide, Air) maps
+  cursor → **time** → nearest buoy index. Don't reintroduce a "buoy panels only" guard: that was the
+  "hovering isn't synced between the plots" report — every crosshair moved while the card kept the
+  previous instant. Readout rows are label-left / **value-right** and grouped Sea/Air; keep that,
+  it's what makes the two temperatures and the two directions distinguishable at a glance.
 - **Reorder is Pointer Events, never HTML5 drag-and-drop** (spec 0013 §7) — `draggable` does nothing on
   touch. The one control is the per-panel **`.ts-band`** in the host's left gutter: pointer drag *and*
   the accessible/keyboard control (`role=button`, `tabindex`, ↑/↓, re-focused after the rebuild via
@@ -220,7 +239,8 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
 ## Status
 
 Shipped and live at **olatu.io** — foundation → PWA → analytics/legal → wind ingest → wind in the
-webapp → units/settings + wind-UX polish → Current Conditions density → touch charts (specs 0001–0016). The full feature-by-feature history is in
+webapp → units/settings + wind-UX polish → Current Conditions density → touch charts → mobile layout
+(specs 0001–0017). The full feature-by-feature history is in
 **[docs/HISTORY.md](docs/HISTORY.md)**; the spec index + statuses are in [specs/README.md](specs/README.md).
 
 **Open owner TODO:** add the **`API_MAREE_KEY`** (tides) and **`METEOFRANCE_API_KEY`** (6-min

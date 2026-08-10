@@ -54,7 +54,9 @@ export default function Header() {
         </div>
       </a>
 
-      <div className="flex items-center gap-2 max-[560px]:justify-start">
+      {/* `flex-wrap` + no-shrink children: at ~320px the row was too wide and flex squeezed the two
+          icon buttons from 38px to 20px — an unusable target. They now wrap instead (spec 0017 §2). */}
+      <div className="flex flex-wrap items-center gap-2 max-[560px]:justify-start [&>*]:shrink-0">
         <Glossary />
         <label>
           <span className="sr-only">{m.nav_language()}</span>

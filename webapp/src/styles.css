@@ -189,6 +189,21 @@
 /* ---- kept rules: things utilities can't express, or DOM injected by uPlot/MapLibre.
    Everything else lives as Tailwind utilities in the components (spec 0006 §2). ---- */
 
+/* The chart host's padding lives here as a custom property (spec 0017 §2) because three other
+   things must line up with it exactly: the day-separator overlay (inset so overlay-x matches each
+   canvas's valToPos), the reorder drop line, and the .ts-band drag gutter (which sits in negative
+   offset INSIDE this padding). They all read --ts-pad; change the padding only here. It narrows on
+   a phone, where the page shell already pays for the screen edge. */
+.charts {
+  --ts-pad: 0.7rem;
+  padding: 0.75rem var(--ts-pad) var(--ts-pad);
+}
+@media (min-width: 640px) {
+  .charts {
+    --ts-pad: 1rem;
+  }
+}
+
 /* uPlot overrides (uPlot owns this DOM). */
 .charts .u-select {
   background: color-mix(in oklab, var(--accent) 16%, transparent);
@@ -204,10 +219,10 @@
    carries the panel's realm colour (set in JS). */
 .ts-band {
   position: absolute;
-  left: -1rem; /* into the host's px-4 padding — the band never steals plot width */
+  left: calc(-1 * var(--ts-pad, 1rem)); /* into the host's own padding — never steals plot width */
   top: 0;
   bottom: 0;
-  width: 1rem;
+  width: var(--ts-pad, 1rem);
   display: flex;
   align-items: center;
   justify-content: center;

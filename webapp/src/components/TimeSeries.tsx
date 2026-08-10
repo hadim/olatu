@@ -39,6 +39,11 @@ const MIN_SPAN = HOUR;
 
 const CHIP_BASE =
   'inline-flex shrink-0 items-center justify-center font-mono text-[0.78rem] rounded-[0.5rem] border px-[0.7rem] py-[0.32rem] cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-35 disabled:cursor-default disabled:pointer-events-none max-md:min-h-11';
+// The chip row's two shapes (spec 0017 §4): ONE horizontally-scrollable line on a phone — twelve
+// 44px chips wrapped to three rows and pushed the charts a third of a screen down — wrapping from
+// md up, exactly as before. The scrollbar is hidden; the partially-cut last chip is the affordance.
+const CHIP_ROW =
+  'flex gap-[0.4rem] overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex-wrap md:overflow-visible md:pb-0';
 const chipCls = (active: boolean) =>
   cn(CHIP_BASE, active ? 'border-accent bg-accent text-bg' : 'border-line bg-surface text-muted hover:border-accent hover:text-fg');
 
@@ -305,6 +310,17 @@ const AIR_PANELS: PanelDef[] = [
   { id: 'pressure', realm: 'air', titleKey: 'cc_pressure', series: [{ key: 'pressure_msl_hpa', colorVar: '--c-dir', width: 1.5 }], emptyKey: 'cc_hp_unavailable' },
 ];
 
+// Panel height by kind, shorter on a phone (spec 0017 §4): the stack is ~1700px on a 390px screen,
+// and 124px per panel buys nothing there that 100px doesn't. Recomputed on resize, not just on
+// build, so a rotation re-derives it.
+const NARROW_PX = 560;
+function panelHeight(panel: PanelDef, hostWidth: number): number {
+  const narrow = hostWidth > 0 && hostWidth < NARROW_PX;
+  if (panel.glyph) return narrow ? 46 : 56; // single arrow row
+  if (panel.glued) return narrow ? 58 : 70; // the short line glued under it (spread)
+  return narrow ? 100 : 124;
+}
+
 const WIND_DETAIL_COLUMNS = ['wind_speed_ms', 'wind_gust_ms', 'wind_direction_deg', 'air_temperature_c', 'precipitation_mm', 'humidity_pct', 'pressure_msl_hpa'];
 const REALM_COLOR: Record<'sea' | 'air', string> = { sea: 'var(--accent)', air: 'var(--c-wind)' };
 
@@ -411,24 +427,30 @@ function movingAvg(arr: (number | null)[], radius: number): (number | null)[] {
   return out;
 }
 
-const CARD_METRICS: { key: string; labelKey: MessageKey; unit?: string; digits?: number; dir?: boolean; pm?: boolean; icon: IconName; colorVar: string }[] = [
+// `cardKey` is the label the READOUT prints: the short form for the two temperatures, which are the
+// pair most often confused across realms and the pair least able to afford a wrapped label there.
+const CARD_METRICS: { key: string; labelKey: MessageKey; cardKey?: MessageKey; unit?: string; digits?: number; dir?: boolean; pm?: boolean; icon: IconName; colorVar: string }[] = [
   { key: 'significant_wave_height_m', labelKey: 'cc_wave_height', unit: 'm', digits: 1, icon: 'waveHeight', colorVar: '--c-height' },
   { key: 'max_wave_height_m', labelKey: 'cc_max_wave', unit: 'm', digits: 1, icon: 'maxWave', colorVar: '--c-max' },
   { key: 'significant_period_s', labelKey: 'cc_period', unit: 's', digits: 1, icon: 'period', colorVar: '--c-period' },
   { key: 'peak_direction_deg', labelKey: 'cc_direction', dir: true, icon: 'direction', colorVar: '--c-dir' },
   { key: 'peak_directional_spread_deg', labelKey: 'cc_spread', unit: '°', digits: 0, pm: true, icon: 'spread', colorVar: '--c-dir' },
-  { key: 'sea_temperature_c', labelKey: 'cc_sea_temp', unit: '°C', digits: 1, icon: 'temp', colorVar: '--c-temp' },
+  { key: 'sea_temperature_c', labelKey: 'cc_sea_temp', cardKey: 'cc_sea_temp_short', unit: '°C', digits: 1, icon: 'temp', colorVar: '--c-temp' },
 ];
 
 // The paired station's readout chips (Air realm) — surfaced beside the sea chips in the hover card
 // so "which temperature / direction is which" reads at a glance (spec 0013 rev). Kept to the core
 // four; the panels + on-plot bubbles carry rain / humidity / pressure.
-const AIR_CARD_METRICS: { key: string; labelKey: MessageKey; dir?: boolean; icon: IconName; colorVar: string }[] = [
+const AIR_CARD_METRICS: { key: string; labelKey: MessageKey; cardKey?: MessageKey; dir?: boolean; icon: IconName; colorVar: string }[] = [
   { key: 'wind_speed_ms', labelKey: 'cc_wind', icon: 'wind', colorVar: '--c-wind' },
   { key: 'wind_gust_ms', labelKey: 'cc_gust', icon: 'wind', colorVar: '--c-wind' },
   { key: 'wind_direction_deg', labelKey: 'cc_wind_dir', dir: true, icon: 'wind', colorVar: '--c-dir' },
-  { key: 'air_temperature_c', labelKey: 'cc_air_temp', icon: 'temp', colorVar: '--c-airtemp' },
+  { key: 'air_temperature_c', labelKey: 'cc_air_temp', cardKey: 'cc_air_temp_short', icon: 'temp', colorVar: '--c-airtemp' },
 ];
+// The compact strip in the pinned touch bar (spec 0017 §5): icon + value only, no labels — the
+// icons + realm colours already disambiguate, and the bar must stay two lines on a phone.
+const SCRUB_SEA_KEYS = ['significant_wave_height_m', 'significant_period_s', 'peak_direction_deg', 'sea_temperature_c'];
+const SCRUB_AIR_KEYS = ['wind_speed_ms', 'wind_direction_deg', 'air_temperature_c'];
 
 // Fixed display unit for the non-convertible keys (the convertible speed/temp/pressure keys get
 // their unit from keySuffix + the settings, spec 0014). Powers the per-panel heading unit tag +
@@ -556,6 +578,9 @@ export default function TimeSeries({
   const [range, setRange] = useState<{ min: number; max: number }>(() => presetRange(mode.slice(2), T0, TN));
   const [navYear, setNavYear] = useState<number | null>(null);
   const [showJump, setShowJump] = useState(false);
+  // Phone-only disclosure for smoothing + jump-to-date (spec 0017 §4). Ignored from md up, where
+  // that group is inline — so this never hides a control from a desktop user.
+  const [showOpts, setShowOpts] = useState(false);
   const [detail, setDetail] = useState<Columnar | null>(null);
   // True while a finer tier (30-min year files / hourly means) is being fetched for the
   // current window — drives a spinner so narrow windows don't read as empty plots while
@@ -701,7 +726,9 @@ export default function TimeSeries({
   };
   const atStart = range.min <= T0 + 1;
   const atEnd = range.max >= TN - 1;
-  const navBtn = 'grid h-7 w-7 place-items-center leading-none disabled:opacity-40 disabled:pointer-events-none';
+  // Square at every width: with only `min-h-11` from CHIP_BASE these were 44px tall and 28px wide
+  // on touch — a tall sliver rather than a target (spec 0017 §6).
+  const navBtn = 'grid h-7 w-7 place-items-center px-0 leading-none disabled:opacity-40 disabled:pointer-events-none max-md:h-11 max-md:w-11';
 
   const dirLocale = (deg: number) => {
     const tok = ['N', 'E', 'S', 'W'][Math.round(deg / 90) % 4];
@@ -830,12 +857,22 @@ export default function TimeSeries({
     const prevScroll = window.scrollY;
     host.innerHTML = '';
 
+    // The plots' width is the host's CONTENT width. `clientWidth` includes the padding, so passing
+    // it straight to uPlot built every panel ~2·--ts-pad too wide: the surplus hung off the right,
+    // clipped by each wrapper's `overflow-hidden`, quietly eating the last of the x-axis.
+    const plotWidth = () => {
+      const cs = getComputedStyle(host);
+      return Math.max(120, host.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight));
+    };
+
     // Day separators live on ONE overlay spanning the whole stack (behind the panels, via
     // z-order) so a day break reads as a single continuous line through every plot and the
     // gaps between them — a per-canvas line would break at each heading/margin. Inset to
     // match the host padding so overlay-x lines up with each canvas's valToPos.
     const dayOverlay = document.createElement('div');
-    dayOverlay.className = 'pointer-events-none absolute left-4 right-4 top-3 bottom-4 z-0';
+    // Inset by the host's own padding — which is `--ts-pad` (spec 0017 §2), NOT a hard-coded 1rem:
+    // it narrows on a phone, and this overlay, the drop line and the .ts-band gutter must track it.
+    dayOverlay.className = 'pointer-events-none absolute left-[var(--ts-pad)] right-[var(--ts-pad)] top-3 bottom-[var(--ts-pad)] z-0';
     dayOverlay.setAttribute('aria-hidden', 'true');
     host.appendChild(dayOverlay);
     const dpr = window.devicePixelRatio || 1;
@@ -896,12 +933,14 @@ export default function TimeSeries({
     const gridColor = cssVar('--hairline');
     const DPR = window.devicePixelRatio || 1; // uPlot draws in device px; glyphs match
     const plots: uPlot[] = [];
+    const plotPanels: PanelDef[] = [];
     let syncing = false;
 
     const timeEl = cardRef.current?.querySelector<HTMLElement>('.hover-time') ?? null;
     const statsEl = cardRef.current?.querySelector<HTMLElement>('.hover-stats') ?? null;
     const scrubBar = scrubRef.current;
     const scrubTimeEl = scrubBar?.querySelector<HTMLElement>('.scrub-time') ?? null;
+    const scrubStatsEl = scrubBar?.querySelector<HTMLElement>('.scrub-stats') ?? null;
     // Visibility rides on a data attribute so the styling stays in CSS and React never re-renders
     // mid-gesture (this whole effect is imperative by design — a re-render rebuilds every plot).
     const showScrubBar = () => {
@@ -936,31 +975,68 @@ export default function TimeSeries({
       if (lo > 0 && Math.abs(windGxs[lo - 1] - t) < Math.abs(windGxs[lo] - t)) lo -= 1;
       return lo;
     };
-    const chip = (cm: { labelKey: MessageKey; icon: IconName; colorVar: string }, valueHtml: string): string => {
+    // One reading = one ROW, not a phrase (spec 0017 §5): `icon · LABEL` left, value RIGHT-aligned
+    // on a hairline. In the 2/3-column grid every value therefore lands on the same right edge of
+    // its column, and a label that wraps can no longer shove its own value out of line with its
+    // neighbours' — which is what made the old inline chips unscannable.
+    const chip = (cm: { labelKey: MessageKey; cardKey?: MessageKey; icon: IconName; colorVar: string }, valueHtml: string): string => {
       const icon = iconSvg(cm.icon, { className: 'shrink-0', color: `var(${cm.colorVar})` });
-      return `<span class="inline-flex items-center gap-[0.35rem]">${icon}<span class="text-[0.72rem] uppercase tracking-[0.05em] text-faint">${m[cm.labelKey]()}</span><span class="font-mono text-[0.98rem] text-fg">${valueHtml}</span></span>`;
+      // The label WRAPS rather than truncating: an ellipsed "Hauteur des vag…" beside a "Vague max"
+      // is exactly the "which value is which" problem this row layout exists to solve. Wrapping
+      // costs a line and nothing else — `items-baseline` keeps the value on the label's FIRST
+      // baseline, so the right-hand column stays aligned however many lines the label takes.
+      return `<span class="grid grid-cols-[1fr_auto] items-baseline gap-x-2 border-b border-line/50 pb-[0.15rem]"><span class="inline-flex min-w-0 items-center gap-[0.35rem] text-[0.64rem] uppercase leading-[1.2] tracking-[0.04em] text-faint">${icon}<span>${m[cm.cardKey ?? cm.labelKey]()}</span></span><span class="whitespace-nowrap font-mono text-[0.92rem] text-fg">${valueHtml}</span></span>`;
     };
+    // Realm sub-heading spanning the grid: the two temperatures and the two directions are the
+    // readings most often confused, and a heading separates them where colour alone did not.
+    const groupHead = (label: string, color: string): string =>
+      `<span class="col-span-full mt-[0.2rem] inline-flex items-center gap-1.5 font-mono text-[0.6rem] uppercase tracking-[0.09em]" style="color:${color}"><span class="inline-block h-[0.6rem] w-[3px] rounded-[2px]" style="background:${color}"></span>${label}</span>`;
     const chipsHTML = (idx: number) => {
-      const chips: string[] = [];
+      const rows: string[] = [groupHead(m.cc_realm_sea(), 'var(--accent)')];
       for (const cm of CARD_METRICS) {
         const v = gcols[cm.key]?.[idx];
-        if (v != null) chips.push(chip(cm, fmtMetric(cm, v)));
+        if (v != null) rows.push(chip(cm, fmtMetric(cm, v)));
       }
       // Reconstructed water level at the hovered time (from the extrema, not in gcols).
       const th = tides ? tideHeightAt(tides.events, gxs[idx]) : null;
-      if (th != null) chips.push(chip({ labelKey: 'tide_level', icon: 'tide', colorVar: '--c-tide' }, `${fmtNumber(th, locale, 1)} m`));
-      // Air chips (spec 0013 rev): the station's readings at the hovered TIME. Only when a station
+      if (th != null) rows.push(chip({ labelKey: 'tide_level', icon: 'tide', colorVar: '--c-tide' }, `${fmtNumber(th, locale, 1)} m`));
+      // Air rows (spec 0013 rev): the station's readings at the hovered TIME. Only when a station
       // is paired, so the card gains air values without ever pairing them to the buoy's index.
       if (windStation && windGxs.length) {
         const wi = windIdxAt(gxs[idx]);
         if (wi >= 0) {
+          const air: string[] = [];
           for (const cm of AIR_CARD_METRICS) {
             const v = windGcols[cm.key]?.[wi];
-            if (v != null) chips.push(chip(cm, fmtMetric(cm, v)));
+            if (v != null) air.push(chip(cm, fmtMetric(cm, v)));
+          }
+          if (air.length) rows.push(groupHead(m.cc_realm_air(), 'var(--c-wind)'), ...air);
+        }
+      }
+      return rows.join('');
+    };
+    // The pinned bar's strip: icon + value, one scrollable line (spec 0017 §5). The bubble under
+    // your finger only ever carries ONE panel's value, which is why the bar now carries the set.
+    const scrubHTML = (idx: number) => {
+      const out: string[] = [];
+      const cell = (cm: { icon: IconName; colorVar: string }, valueHtml: string) =>
+        `<span class="inline-flex shrink-0 items-center gap-[0.3rem]">${iconSvg(cm.icon, { className: 'shrink-0', color: `var(${cm.colorVar})` })}<span class="font-mono text-[0.82rem] text-fg">${valueHtml}</span></span>`;
+      for (const cm of CARD_METRICS) {
+        if (!SCRUB_SEA_KEYS.includes(cm.key)) continue;
+        const v = gcols[cm.key]?.[idx];
+        if (v != null) out.push(cell(cm, fmtMetric(cm, v)));
+      }
+      if (windStation && windGxs.length) {
+        const wi = windIdxAt(gxs[idx]);
+        if (wi >= 0) {
+          for (const cm of AIR_CARD_METRICS) {
+            if (!SCRUB_AIR_KEYS.includes(cm.key)) continue;
+            const v = windGcols[cm.key]?.[wi];
+            if (v != null) out.push(cell(cm, fmtMetric(cm, v)));
           }
         }
       }
-      return chips.join('');
+      return out.join('<span class="h-3 w-px shrink-0 bg-divider" aria-hidden="true"></span>');
     };
     // Index of the most recent sample that has any data — the card's default content.
     const lastIdx = (() => {
@@ -974,21 +1050,46 @@ export default function TimeSeries({
     // layout jump when you hover (height is width-robust, not a guessed min-height).
     // "Hover the chart" is a lie on a phone — a coarse pointer gets the touch wording (spec 0016).
     const hint = () => (window.matchMedia('(hover: none)').matches ? m.chart_touch_hint() : m.chart_hover_hint());
+    // Rendered index, so a synced pointer move writes the card ONCE and not once per panel (every
+    // panel drives it now — see the setCursor hook). -2 = "nothing rendered yet".
+    let cardIdx = -2;
     const resetCard = () => {
+      if (cardIdx === -1) return;
+      cardIdx = -1;
       if (timeEl) timeEl.textContent = hint();
       if (statsEl) statsEl.innerHTML = lastIdx >= 0 ? chipsHTML(lastIdx) : '';
     };
-    resetCardRef.current = resetCard;
+    resetCardRef.current = () => {
+      cardIdx = -2; // force the next reset through (the caller wants the card cleared now)
+      resetCard();
+    };
     const renderCard = (idx: number | null | undefined) => {
-      if (idx == null) {
+      if (idx == null || idx < 0) {
         resetCard();
         return;
       }
+      if (idx === cardIdx) return;
+      cardIdx = idx;
       const stamp = fmtDateTime(gxs[idx] * 1000, locale, tz, units.clock);
       if (timeEl) timeEl.textContent = stamp;
       if (statsEl) statsEl.innerHTML = chipsHTML(idx);
-      // The bar shows the same instant; it is only VISIBLE during/after a touch scrub.
+      // The bar shows the same instant + the core values; it is only VISIBLE during/after a scrub.
       if (scrubTimeEl) scrubTimeEl.textContent = stamp;
+      if (scrubStatsEl) scrubStatsEl.innerHTML = scrubHTML(idx);
+    };
+    // Snap a TIME to the buoy grid — how the tide + Air panels (their own x-grids) drive the one
+    // shared readout, instead of leaving it stale while every crosshair moved (spec 0017 §5).
+    const buoyIdxAt = (t: number): number => {
+      if (gxs.length === 0) return -1;
+      let lo = 0;
+      let hi = gxs.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (gxs[mid] < t) lo = mid + 1;
+        else hi = mid;
+      }
+      if (lo > 0 && Math.abs(gxs[lo - 1] - t) < Math.abs(gxs[lo] - t)) lo -= 1;
+      return lo;
     };
     resetCard();
 
@@ -1092,7 +1193,7 @@ export default function TimeSeries({
 
       const line = document.createElement('div');
       line.setAttribute('aria-hidden', 'true');
-      line.style.cssText = 'position:absolute;left:1rem;right:1rem;height:2px;border-radius:2px;background:var(--accent);box-shadow:0 0 0 4px color-mix(in oklab, var(--accent) 18%, transparent);z-index:40;pointer-events:none;';
+      line.style.cssText = 'position:absolute;left:var(--ts-pad);right:var(--ts-pad);height:2px;border-radius:2px;background:var(--accent);box-shadow:0 0 0 4px color-mix(in oklab, var(--accent) 18%, transparent);z-index:40;pointer-events:none;';
       const chipColor = def ? REALM_COLOR[def.realm] : 'var(--accent)';
       const chip = document.createElement('div');
       chip.setAttribute('aria-hidden', 'true');
@@ -1192,7 +1293,9 @@ export default function TimeSeries({
       wrap.className = 'relative z-10 w-full overflow-hidden';
       const heading = document.createElement('div');
       // Glued panels (spread under direction) get no top gap so the pair reads as one block.
-      heading.className = `${panel.glued ? 'mt-0' : 'mt-[0.6rem]'} mb-[0.1rem] ml-[0.2rem] relative z-10 flex w-full items-center text-[0.74rem] uppercase tracking-[0.07em] text-faint`;
+      // `flex-wrap`: title + unit + realm tag + the N/E/S/O legend + the eye don't fit on one line
+      // at ~320px, and without wrapping the right-hand group overflowed the page (spec 0017 §2).
+      heading.className = `${panel.glued ? 'mt-0' : 'mt-[0.6rem]'} mb-[0.1rem] ml-[0.2rem] relative z-10 flex w-full flex-wrap items-center gap-y-[0.15rem] text-[0.74rem] uppercase tracking-[0.07em] text-faint`;
       const panelIcon = PANEL_ICON[panel.titleKey];
       const titleIcon = panelIcon ? iconSvg(panelIcon, { className: 'mr-1.5 shrink-0', color: `var(${panel.series[0].colorVar})` }) : '';
       // Realm cue (spec 0013): a coloured left bar + a Mer/Air chip so a long stack always reads
@@ -1387,15 +1490,17 @@ export default function TimeSeries({
       };
 
       const hooks: uPlot.Hooks.Arrays = {
-        // The tide + Air panels sit on their own x-grid, so their cursor idx would corrupt the
-        // shared (buoy gxs-indexed) hover card, so only the buoy panels drive the card — but EVERY
-        // panel updates its own on-plot bubble, and hovering any panel still moves every crosshair.
+        // EVERY panel drives the shared readout (spec 0017 §5). The tide + Air panels ride their
+        // own x-grid, so their own cursor idx would index the buoy card wrongly — they convert
+        // their cursor POSITION to a time and snap that to the buoy grid instead. Hovering the
+        // wind or tide panel used to move every crosshair while the card kept the previous
+        // panel's instant, which read as "the plots aren't synced".
         setCursor: [
           (u) => {
+            const idx = u.cursor.idx;
+            const left = u.cursor.left;
             const el = cursorVal.el;
             if (el) {
-              const idx = u.cursor.idx;
-              const left = u.cursor.left;
               const txt = idx == null || left == null || left < 0 ? '' : bubbleText(idx);
               if (txt) {
                 el.textContent = txt;
@@ -1405,7 +1510,8 @@ export default function TimeSeries({
                 el.style.opacity = '0';
               }
             }
-            if (!(panel.tide || air)) renderCard(u.cursor.idx);
+            if (panel.tide || air) renderCard(idx == null || left == null || left < 0 ? null : buoyIdxAt(u.posToVal(left, 'x')));
+            else renderCard(idx);
           },
         ],
         setScale: [
@@ -1428,9 +1534,10 @@ export default function TimeSeries({
       }
 
       const opts: uPlot.Options = {
-        width: host.clientWidth || 800,
-        // Arrow row is a single thin band; the glued spread line is short too.
-        height: panel.glyph ? 56 : panel.glued ? 70 : 124,
+        width: plotWidth(),
+        // Arrow row is a single thin band; the glued spread line is short too — and every kind
+        // shrinks below 560px (see panelHeight).
+        height: panelHeight(panel, plotWidth()),
         // Fixed right padding on EVERY panel. Only the last panel shows x-axis labels,
         // and uPlot would otherwise auto-reserve right-edge space for its last tick
         // label on that panel alone — making it narrower than the others, so the same
@@ -1479,6 +1586,7 @@ export default function TimeSeries({
       u.root.setAttribute('role', 'img');
       u.root.setAttribute('aria-label', m[panel.titleKey]());
       plots.push(u);
+      plotPanels.push(panel); // parallel to `plots`: lets the resize observer re-derive heights
 
       // The on-plot value bubble (see setCursor above): appended into the cursor layer so its left
       // offset lines up with the crosshair; hidden until the cursor enters the plot.
@@ -1571,8 +1679,10 @@ export default function TimeSeries({
     host.addEventListener('touchend', commitGesture);
 
     const ro = new ResizeObserver(() => {
-      const w = host.clientWidth;
-      for (const p of plots) p.setSize({ width: w, height: p.height });
+      const w = plotWidth();
+      // Height is width-dependent too (panelHeight): a rotation from portrait to landscape must
+      // grow the panels back, not just widen them.
+      plots.forEach((p, i) => p.setSize({ width: w, height: panelHeight(plotPanels[i], w) }));
       if (plots[0]) renderDayOverlay(plots[0]); // widths changed → recompute line x
     });
     ro.observe(host);
@@ -1597,8 +1707,12 @@ export default function TimeSeries({
 
   return (
     <section className="mt-6">
-      <div className="mb-[0.8rem] flex flex-wrap items-center justify-between gap-x-4 gap-y-[0.6rem]">
-        <div className="flex flex-wrap items-center gap-[0.4rem]" role="group" aria-label={m.chart_range()}>
+      {/* Control bar (spec 0017 §4). Nothing is removed on a phone — it is re-laid-out by
+          priority: the ranges get one scrollable line, the navigator stays visible, and the rest
+          folds behind ⚙ Options. From md up the ⚙ is hidden and everything is inline, so the
+          desktop bar is a superset of the phone one rather than a second UI. */}
+      <div className="mb-[0.8rem] flex flex-col gap-[0.55rem]">
+        <div className={CHIP_ROW} role="group" aria-label={m.chart_range()}>
           {PRESETS.map((p) => {
             const key = `p:${p.key}`;
             return (
@@ -1620,46 +1734,64 @@ export default function TimeSeries({
               </button>
             );
           })}
-          <button type="button" className={chipCls(showJump)} aria-expanded={showJump} onClick={() => setShowJump((v) => !v)}>
-            {m.chart_jump_to()} {showJump ? '▾' : '▸'}
-          </button>
         </div>
-        <div className="flex flex-wrap items-center gap-[0.4rem]" role="group" aria-label={m.chart_smoothing()}>
-          <span className="mr-[0.15rem] text-[0.72rem] uppercase tracking-[0.06em] text-faint">{m.chart_smoothing()}</span>
-          {(['raw', 'light', 'strong'] as Smooth[]).map((s) => (
-            <button
-              key={s}
-              type="button"
-              className={chipCls(smooth === s)}
-              onClick={() => {
-                try {
-                  localStorage.setItem(SMOOTH_STORE, s);
-                } catch {
-                  /* storage unavailable — the choice still applies for this session */
-                }
-                setSmooth(s);
-              }}
-            >
-              {m[`chart_smooth_${s}` as MessageKey]()}
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-[0.5rem]">
+          <div className="flex items-center gap-[0.4rem]" role="group" aria-label={m.chart_navigate()}>
+            <button type="button" disabled={atStart} className={cn(chipCls(false), navBtn)} onClick={() => panBy(-0.5)} aria-label={m.chart_pan_back()} title={m.chart_pan_back()}>
+              ‹
             </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-[0.4rem]" role="group" aria-label={m.chart_navigate()}>
-          <button type="button" disabled={atStart} className={cn(chipCls(false), navBtn)} onClick={() => panBy(-0.5)} aria-label={m.chart_pan_back()} title={m.chart_pan_back()}>
-            ‹
+            <button type="button" className={cn(chipCls(false), navBtn)} onClick={() => zoomBy(2)} aria-label={m.chart_zoom_out()} title={m.chart_zoom_out()}>
+              −
+            </button>
+            <button type="button" className={cn(chipCls(false), navBtn)} onClick={() => zoomBy(0.5)} aria-label={m.chart_zoom_in()} title={m.chart_zoom_in()}>
+              +
+            </button>
+            <button type="button" disabled={atEnd} className={cn(chipCls(false), navBtn)} onClick={() => panBy(0.5)} aria-label={m.chart_pan_forward()} title={m.chart_pan_forward()}>
+              ›
+            </button>
+            <button type="button" className={cn(chipCls(false), navBtn)} onClick={resetZoom} aria-label={m.chart_reset()} title={m.chart_reset()}>
+              ⟲
+            </button>
+          </div>
+
+          {/* Phone-only disclosure for the rest. Hidden from md up, where the group below is
+              always inline — so this button never hides a control a desktop user can see. */}
+          <button
+            type="button"
+            className={cn(chipCls(showOpts), 'md:hidden')}
+            aria-expanded={showOpts}
+            onClick={() => setShowOpts((v) => !v)}
+          >
+            <span aria-hidden="true" className="mr-1.5">⚙</span>
+            {m.chart_options()} {showOpts ? '▾' : '▸'}
           </button>
-          <button type="button" className={cn(chipCls(false), navBtn)} onClick={() => zoomBy(2)} aria-label={m.chart_zoom_out()} title={m.chart_zoom_out()}>
-            −
-          </button>
-          <button type="button" className={cn(chipCls(false), navBtn)} onClick={() => zoomBy(0.5)} aria-label={m.chart_zoom_in()} title={m.chart_zoom_in()}>
-            +
-          </button>
-          <button type="button" disabled={atEnd} className={cn(chipCls(false), navBtn)} onClick={() => panBy(0.5)} aria-label={m.chart_pan_forward()} title={m.chart_pan_forward()}>
-            ›
-          </button>
-          <button type="button" className={cn(chipCls(false), navBtn)} onClick={resetZoom} aria-label={m.chart_reset()} title={m.chart_reset()}>
-            ⟲
-          </button>
+
+          <div className={cn('flex flex-wrap items-center gap-x-3 gap-y-[0.5rem] max-md:basis-full', !showOpts && 'max-md:hidden')}>
+            <button type="button" className={chipCls(showJump)} aria-expanded={showJump} onClick={() => setShowJump((v) => !v)}>
+              {m.chart_jump_to()} {showJump ? '▾' : '▸'}
+            </button>
+            <div className="flex flex-wrap items-center gap-[0.4rem]" role="group" aria-label={m.chart_smoothing()}>
+              <span className="mr-[0.15rem] text-[0.72rem] uppercase tracking-[0.06em] text-faint">{m.chart_smoothing()}</span>
+              {(['raw', 'light', 'strong'] as Smooth[]).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className={chipCls(smooth === s)}
+                  onClick={() => {
+                    try {
+                      localStorage.setItem(SMOOTH_STORE, s);
+                    } catch {
+                      /* storage unavailable — the choice still applies for this session */
+                    }
+                    setSmooth(s);
+                  }}
+                >
+                  {m[`chart_smooth_${s}` as MessageKey]()}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1729,10 +1861,12 @@ export default function TimeSeries({
       {/* Series manager (spec 0013): hidden panels sit here as chips (click to restore); each
           visible panel has a drag handle to reorder + an eye to hide. Order + hidden persist. */}
       <div className="mb-[0.7rem] flex flex-wrap items-center gap-2">
-        <span className="font-mono text-[0.66rem] uppercase tracking-[0.06em] text-faint">{m.ts_manage_hint()}</span>
+        {/* The hint names two pointer gestures, so it's desktop-only (spec 0017 §4) — but the
+            hidden-panel chips show at EVERY width: a hidden panel you can't find is a bug. */}
+        <span className="font-mono text-[0.66rem] uppercase tracking-[0.06em] text-faint max-md:hidden">{m.ts_manage_hint()}</span>
         {hiddenUnits.length > 0 && (
           <>
-            <span className="mx-1 h-3 w-px bg-divider" aria-hidden="true" />
+            <span className="mx-1 h-3 w-px bg-divider max-md:hidden" aria-hidden="true" />
             <span className="font-mono text-[0.66rem] uppercase tracking-[0.06em] text-faint">{m.ts_hidden()}:</span>
             {hiddenUnits.map((id) => {
               const p = panelById.get(id);
@@ -1764,22 +1898,32 @@ export default function TimeSeries({
           are only readable once the finger is gone. Tap it to dismiss. */}
       <div
         ref={scrubRef}
-        className="ts-scrub fixed inset-x-0 top-0 z-[70] hidden items-center justify-center gap-3 border-b border-line bg-surface/95 px-4 py-[0.4rem] backdrop-blur-sm data-[on]:flex"
+        className="ts-scrub fixed inset-x-0 top-0 z-[70] hidden flex-col gap-[0.15rem] border-b border-line bg-surface/95 px-3 py-[0.35rem] backdrop-blur-sm data-[on]:flex"
         role="status"
         aria-live="polite"
       >
-        <span className="scrub-time font-mono text-[0.86rem] text-fg" />
-        <button
-          type="button"
-          onClick={() => dismissScrubRef.current()}
-          aria-label={m.a11y_close()}
-          className="shrink-0 rounded-full border border-line px-2 py-[0.1rem] font-mono text-[0.72rem] leading-none text-faint transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-        >
-          <span aria-hidden="true">✕</span>
-        </button>
+        <div className="flex items-center justify-center gap-3">
+          <span className="scrub-time font-mono text-[0.86rem] text-fg" />
+          <button
+            type="button"
+            onClick={() => dismissScrubRef.current()}
+            aria-label={m.a11y_close()}
+            className="shrink-0 rounded-full border border-line px-2 py-[0.1rem] font-mono text-[0.72rem] leading-none text-faint transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            <span aria-hidden="true">✕</span>
+          </button>
+        </div>
+        {/* The core values at the scrubbed instant (spec 0017 §5). The on-plot bubbles carry ONE
+            panel's value each, and the hover card is ~1700px up the page — so the bar carries the
+            set. One scrollable line, so the bar stays two lines tall on a phone. */}
+        {/* `safe center`: centred while it fits, start-aligned once it overflows — plain `center`
+            would push the first values off the left edge where no scroll can reach them. */}
+        <div className="scrub-stats flex items-center gap-2.5 overflow-x-auto [justify-content:safe_center] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" />
       </div>
 
-      <div ref={hostRef} className="charts relative rounded-2xl border border-line bg-surface-2 px-4 pb-4 pt-3" />
+      {/* Padding comes from `--ts-pad` in styles.css (spec 0017 §2) — the day overlay, the reorder
+          drop line and the .ts-band gutter are positioned against it. */}
+      <div ref={hostRef} className="charts relative rounded-2xl border border-line bg-surface-2" />
         {detailLoading && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden="true">
             <span className="inline-flex items-center gap-2 rounded-full border border-line bg-surface/90 px-3.5 py-1.5 font-mono text-[0.76rem] text-muted shadow-[0_2px_12px_-4px_rgba(0,0,0,0.5)] backdrop-blur-sm">
@@ -1793,8 +1937,12 @@ export default function TimeSeries({
         )}
       </div>
 
-      {/* Accessible per-window summary — the non-visual truth for the canvas panels. */}
-      <table className="sr-only" aria-live="polite">
+      {/* Accessible per-window summary — the non-visual truth for the canvas panels. `sr-only` goes
+          on a WRAPPER, never on the <table>: a table treats `width: 1px` as a minimum and ignores
+          the clip, so the visually-hidden summary was ~420px wide and gave the phone 27px of
+          phantom horizontal scroll (spec 0017 §6). */}
+      <div className="sr-only">
+      <table aria-live="polite">
         <caption>{m.cc_title()}</caption>
         <thead>
           <tr>
@@ -1815,6 +1963,7 @@ export default function TimeSeries({
           ))}
         </tbody>
       </table>
+      </div>
     </section>
   );
 }
