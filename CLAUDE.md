@@ -137,8 +137,16 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
 - **Tides (marée, spec 0008)** come from **api-maree.fr** — needs `API_MAREE_KEY` (env / GitHub
   secret, **ingest-only, never in the client**). Keyed by **port, not buoy**
   (`schema.TIDE_PORTS` + `resolve_tide_port`: each buoy → nearest curated port ≤ `TIDE_MAX_KM=40`,
-  else no tide). Runtime `webapp/src/lib/tides.ts` reconstructs the raised-cosine curve; marnage
-  in metres (**no coefficient**). Predictions cover ~±30 days → older windows empty-state (like
+  else no tide). Fetched from **`/tide-extrema`** — one request per port for the whole J±30 window,
+  PM/BM **and** the coefficient; don't re-derive extrema or recompute the coefficient (spec §11).
+  Runtime `webapp/src/lib/tides.ts` reconstructs the raised-cosine curve. **Marnage in metres is the
+  primary metric** and the only input to the neap↔spring gauge; the **coefficient** (`c`, high-tide
+  rows only, nullable) is a *secondary* readout — a Brest-referenced **national** index, identical at
+  every French port, so it says nothing about the water *here*. Null `c` is normal (BM rows, and
+  anything older than the API's rolling window — it can't be backfilled), so the webapp reads the
+  tier **without a column projection**. A tide-tier schema change needs `pixi run update
+  --force-tides`: the horizon gate only asks how far ahead the accumulator runs, so it would
+  otherwise skip fetching for ~10 days. Predictions cover ~±30 days → older windows empty-state (like
   temp). Missing key/port is non-fatal (tide step skips). Valid site ids: 06403
   `saint-jean-de-luz`, 06402 `boucau-bayonne-biarritz`, 03302 `cap-ferret`. The **tide calendar**
   (spec 0008 §10, button beside the phase word) is pure UI over the already-loaded extrema — group

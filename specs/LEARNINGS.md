@@ -9,6 +9,39 @@ Format per entry: **date — title** · what we found · why it matters · resol
 
 ---
 
+## 2026-08-16 — the tide coefficient is not a marnage: don't compute it, and don't trust just any site to check it
+
+**Finding.** Adding the French *coefficient de marée* ([spec 0008 §11](2026-07-05-0008-tides.md))
+started from "it's just `100 × marnage / (2 × 3.05 m)` at Brest, we already have extrema". Three things
+turned up while checking that:
+
+1. **api-maree.fr grew a `/tide-extrema` endpoint** that returns PM/BM **with the coefficient** — the
+   spec 0008 premise ("no high/low or coefficient endpoint → we derive extrema ourselves") was simply
+   out of date. It also does in **one** request what `/water-levels` needed six chunked ones for.
+   *Re-read an upstream API's docs before porting a workaround forward.*
+2. **The naive formula drifts, and not by a constant.** Recomputing from our own Brest extrema gave
+   ±2 against the published values at spring but ran ~2 low at neap; the coefficient is an
+   *astronomical* index (a smoothed semi-diurnal amplitude), while a marnage also carries the
+   shallow-water and long-period terms. The reduction near neap is real water, not an error — the
+   two quantities genuinely diverge, so a marnage can never be converted into a coefficient by a
+   fixed factor.
+3. **Reference sites disagree by more than our own error.** Checked against two: `maree.info`'s Brest
+   calendar and `horaire-maree.fr`. The API matched maree.info within **±1** over 11 days (95/90,
+   84/78, 71/64, 30, 27/26, 63/68) but was up to **−6** against horaire-maree.fr, which is offset on
+   the whole waning half of the cycle. Had we validated against the second source alone, we would have
+   "fixed" a correct implementation with a bogus calibration.
+
+**Why it matters.** The coefficient is the number French users cross-check against their own app, so a
+2-unit bias is noticeable — and the temptation to derive it locally is strong because the marnage is
+right there. It is a **Brest-referenced national index**: identical at every French port (verified —
+`brest`, `saint-jean-de-luz` and `cap-ferret` return the same series), and therefore *not* a statement
+about the water at this buoy. That is exactly why the marnage in metres stays the primary metric.
+
+**Resolution.** Read `coef` from `/tide-extrema` and store it as a nullable `c` column on high-tide rows;
+never recompute it, never derive it from a local marnage, and never let it drive the neap↔spring gauge.
+When validating a public-data number, check **two independent sources** before concluding your own is
+wrong. Refs: `ingest/tides.py`, [spec 0008 §11](2026-07-05-0008-tides.md).
+
 ## 2026-08-10 — two silent layout lies on a phone: `clientWidth` includes padding, and `sr-only` doesn't hide a `<table>`
 
 **Finding.** Measuring the 390 px layout for [spec 0017](2026-08-10-0017-mobile-layout.md) turned up two

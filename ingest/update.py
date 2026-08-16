@@ -380,6 +380,7 @@ def update(
     do_pull: bool = True,
     do_scrape: bool = True,
     do_tides: bool = True,
+    force_tides: bool = False,
     do_wind: bool = True,
     do_upload: bool = True,
     seed_src: Path | None = None,
@@ -446,7 +447,10 @@ def update(
                     token,
                 )
             status = tides_mod.refresh_port(
-                _tides_root(work), tide_port["id"], os.environ.get(tides_mod.ENV_KEY)
+                _tides_root(work),
+                tide_port["id"],
+                os.environ.get(tides_mod.ENV_KEY),
+                force=force_tides,
             )
             result["tide"] = {
                 "port": tide_port["id"],
@@ -633,6 +637,13 @@ def main(
     no_tides: Annotated[
         bool, typer.Option("--no-tides", help="Skip the tide refresh (api-maree.fr).")
     ] = False,
+    force_tides: Annotated[
+        bool,
+        typer.Option(
+            "--force-tides",
+            help="Fetch tides even if the horizon gate would skip (tier schema changes).",
+        ),
+    ] = False,
     no_wind: Annotated[
         bool,
         typer.Option("--no-wind", help="Skip the wind refresh (Météo-France)."),
@@ -699,6 +710,7 @@ def main(
                     do_pull=do_pull,
                     do_scrape=not no_scrape,
                     do_tides=not no_tides,
+                    force_tides=force_tides,
                     do_wind=not no_wind,
                     do_upload=do_upload,
                     seed_src=seed_src,

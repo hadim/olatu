@@ -9,6 +9,30 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-08-16 — Tide coefficient, beside the marnage (spec 0008 §11)
+
+Owner request: keep the marnage as the primary amplitude metric, but print the French *coefficient
+de marée* next to it — "y a des users qui aiment bien l'avoir". Spec 0008 decision 2 had ruled it
+out; the premise expired.
+
+- **We don't compute it — api-maree.fr now serves it.** The API grew a `/tide-extrema` endpoint
+  returning PM/BM *with* the coefficient on each high tide. It also does in **one** request what
+  `/water-levels` needed six chunked 1440-point ones for, so the ingest step switched over wholesale:
+  `fetch_water_levels` + `find_extrema` (the slope-test/parabolic peak detection ported from
+  `wave-monitor`) are gone — same heights, times within ±2 min, a sixth of the quota.
+- **Validated ±1 against maree.info's Brest calendar** over 11 days, and identical across `brest`,
+  `saint-jean-de-luz` and `cap-ferret` — as a Brest-referenced *national* index must be. A second
+  site (horaire-maree.fr) is off by up to 6; see LEARNINGS before "fixing" a coefficient.
+- **Secondary by construction.** The tier gained a nullable `c` on high-tide rows; the banner prints
+  `Marnage 3,5 m · coef. 90` (small, muted, with a popover explaining the Brest reference) and the
+  calendar puts it on the day summary + against each PM, tide-table style. It never drives the
+  neap↔spring gauge, the hue or the magnitude word — metres measure the water *here*.
+- **Nulls are normal:** BM rows, and every accumulator row older than the API's rolling J±30 window
+  (they can't be backfilled). The webapp reads the tier **without a column projection** so a tier
+  ingest hasn't republished yet still renders.
+- **`pixi run update --force-tides`** (new) fetches past the horizon gate — a stateless "how far
+  ahead are we" check that would otherwise delay a tier *schema* change by ~10 days.
+
 ## 2026-08-10 — The phone gets its width back (spec 0017)
 
 Owner feedback from a phone, on every surface at once. Webapp-only; desktop is a superset of the

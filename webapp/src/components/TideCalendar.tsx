@@ -3,10 +3,10 @@
 // "and what about tomorrow morning / last Saturday".
 //
 //   [month grid]                    │  [the selected day's tides]
-//   Mon-first, only days the        │  ▲ high 04:12   4.12 m
-//   predictions cover are           │  ▼ low  10:31   0.86 m   ← next one carries the
-//   selectable; each cell carries   │  ▲ high 16:38   4.05 m     live countdown
-//   a marnage bar, so the           │  ▼ low  22:55   0.91 m
+//   Mon-first, only days the        │  ▲ high 04:12   4.12 m  95  ← the coefficient rides
+//   predictions cover are           │  ▼ low  10:31   0.86 m        its PM (spec §11); the
+//   selectable; each cell carries   │  ▲ high 16:38   4.05 m  92    next tide carries the
+//   a marnage bar, so the           │  ▼ low  22:55   0.91 m        live countdown
 //   spring↔neap rhythm of the
 //   month reads at a glance.
 //
@@ -24,6 +24,7 @@ import { DAY_MS, monthCells, monthKey, monthLabel, monthOf, weekdayNarrow } from
 import { fmtCountdown, fmtNumber, fmtTimeOfDay } from '../lib/format';
 import { groupTidesByDay, tideMagnitude, zonedDayIndex, type TideMagLabel, type Tides } from '../lib/tides';
 import { CalendarIcon } from './icons';
+import InfoPopover from './InfoPopover';
 
 /** Same rule as the strip: a big tide goes warm, everything else stays accent. */
 const magHue = (label: TideMagLabel) => (label === 'spring' || label === 'large' ? 'var(--warm)' : 'var(--accent)');
@@ -152,7 +153,11 @@ export default function TideCalendar({ tides, tz, now }: { tides: Tides; tz: str
                   disabled={!day}
                   aria-pressed={isSel}
                   aria-current={isToday ? 'date' : undefined}
-                  aria-label={`${dayTitle(c.di)}${mag ? ` · ${m.tide_marnage()} ${fmtNumber(day!.marnage!, locale, 1)} m` : ''}`}
+                  aria-label={
+                    `${dayTitle(c.di)}` +
+                    `${mag ? ` · ${m.tide_marnage()} ${fmtNumber(day!.marnage!, locale, 1)} m` : ''}` +
+                    `${day?.coef != null ? ` · ${m.tide_coef()} ${day.coef}` : ''}`
+                  }
                   onClick={() => setSel(c.di)}
                   className={cn(
                     'relative inline-flex h-[2.15rem] w-[2rem] flex-col items-center justify-start rounded-[0.35rem] border-0 bg-transparent pt-[0.28rem] font-mono text-[0.76rem] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
@@ -190,10 +195,20 @@ export default function TideCalendar({ tides, tz, now }: { tides: Tides; tz: str
                   ("Samedi 1 Août"), which is wrong in FR/ES. */}
               <span className="font-display text-[0.88rem] font-semibold text-fg first-letter:uppercase">{dayTitle(sel)}</span>
               {selMag && selDay?.marnage != null ? (
-                <span className="inline-flex items-baseline gap-1.5 font-mono text-[0.72rem] text-muted">
+                <span className="inline-flex flex-wrap items-baseline gap-x-1.5 font-mono text-[0.72rem] text-muted">
                   <span className="uppercase tracking-[0.06em] text-faint">{m.tide_marnage()}</span>
                   <span className="text-fg">{fmtNumber(selDay.marnage, locale, 1)} m</span>
                   <span style={{ color: magHue(selMag.label) }}>· {m[`tide_mag_${selMag.label}` as MessageKey]()}</span>
+                  {selDay.coef != null && (
+                    <span className="inline-flex items-baseline">
+                      <span className="mr-1.5 text-faint" aria-hidden="true">
+                        ·
+                      </span>
+                      {m.tide_coef_short()}
+                      <span className="ml-1 text-fg">{selDay.coef}</span>
+                      <InfoPopover title={m.tide_coef()} body={m.tide_coef_help()} />
+                    </span>
+                  )}
                 </span>
               ) : (
                 <span className="font-mono text-[0.72rem] text-faint">{m.tide_chart_empty()}</span>
@@ -228,6 +243,14 @@ export default function TideCalendar({ tides, tz, now }: { tides: Tides; tz: str
                       <span className="ml-auto font-mono text-fg [font-feature-settings:'tnum']">{fmtTimeOfDay(e.t, locale, tz, units.clock)}</span>
                       <span className="w-[3.2rem] text-right font-mono text-[0.74rem] text-muted [font-feature-settings:'tnum']">
                         {fmtNumber(e.h, locale, 2)} m
+                      </span>
+                      {/* The coefficient belongs to the PM, tide-table style — the column
+                          stays reserved on BM rows so the times/heights keep their grid. */}
+                      <span
+                        className="w-[1.6rem] text-right font-mono text-[0.72rem] text-faint [font-feature-settings:'tnum']"
+                        title={e.coef != null ? m.tide_coef() : undefined}
+                      >
+                        {e.coef ?? ''}
                       </span>
                     </li>
                   );

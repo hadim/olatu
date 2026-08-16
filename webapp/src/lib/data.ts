@@ -184,8 +184,16 @@ export async function loadTidesForManifest(manifest: Manifest): Promise<Tides | 
   const res = await fetch(`${tidesBase(meta.port)}tides.parquet`, { cache: 'no-cache' });
   if (!res.ok) return null;
   const file = await res.arrayBuffer();
-  const raw = (await parquetReadObjects({ file, columns: ['t', 'h', 'k'] })) as Record<string, unknown>[];
-  const rows: TideRow[] = raw.map((r) => ({ t: Number(r.t), h: Number(r.h), k: r.k as TideKind }));
+  // No column projection: the tier is a few kB, and `c` (coefficient, spec §11) only
+  // appears once ingest has republished a port — projecting a column the deployed tier
+  // may not have yet would break the whole strip for that window.
+  const raw = (await parquetReadObjects({ file })) as Record<string, unknown>[];
+  const rows: TideRow[] = raw.map((r) => ({
+    t: Number(r.t),
+    h: Number(r.h),
+    k: r.k as TideKind,
+    c: r.c == null ? null : Number(r.c),
+  }));
   return buildTides(meta, rows);
 }
 

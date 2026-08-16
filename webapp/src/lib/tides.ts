@@ -9,11 +9,17 @@
 
 export type TideKind = 'high' | 'low';
 
-/** One tide extremum. `t` is epoch **milliseconds** (UTC); `h` is metres. */
+/** One tide extremum. `t` is epoch **milliseconds** (UTC); `h` is metres.
+ *
+ *  `coef` is the French *coefficient de marée* (spec §11): a **national** index referenced
+ *  to Brest (`100 × marnage_Brest / 2 / 3.05 m`), so the same value holds at every French
+ *  port — it is NOT derived from this port's marnage. Carried by **high** tides only, and
+ *  `null` outside the predictions api-maree.fr covers (older accumulator rows have none). */
 export interface TideEvent {
   t: number;
   h: number;
   kind: TideKind;
+  coef: number | null;
 }
 
 export interface TideRangeRef {
@@ -39,11 +45,12 @@ export interface TideMeta {
   source: TideSource | null;
 }
 
-/** One tide.parquet row (epoch **seconds**). */
+/** One tide.parquet row (epoch **seconds**); `c` = coefficient, high tides only. */
 export interface TideRow {
   t: number;
   h: number;
   k: TideKind;
+  c: number | null;
 }
 
 /** Runtime tide model: port meta (from the manifest) + extrema (from the Parquet tier). */
@@ -65,7 +72,7 @@ export const raisedCosine = (a: number, b: number, p: number) => a + ((b - a) * 
  *  epoch **seconds**; we keep ms internally (matches `now` in `tidePhase`). */
 export function buildTides(meta: TideMeta, rows: TideRow[]): Tides {
   const events = rows
-    .map((r) => ({ t: r.t * 1000, h: r.h, kind: r.k }))
+    .map((r) => ({ t: r.t * 1000, h: r.h, kind: r.k, coef: r.c ?? null }))
     .sort((a, b) => a.t - b.t);
   return {
     label: meta.label,
@@ -87,8 +94,10 @@ export interface TidePhase {
   progress: number;
   /** True when the water is rising (heading toward a high). */
   rising: boolean;
-  /** Marnage of the current half-cycle, in metres. */
+  /** Marnage of the current half-cycle, in metres — the PRIMARY "how big" metric. */
   amplitude: number;
+  /** The half-cycle's coefficient (its high tide's), or `null` — a secondary readout. */
+  coef: number | null;
   /** Interpolated current sea level (m), raised-cosine. */
   height: number;
   /** Milliseconds until the next extremum. */
@@ -125,7 +134,11 @@ export function tidePhase(events: TideEvent[], now: number): TidePhase | null {
   else if (progress > 0.85) label = rising ? 'near-high' : 'near-low';
   else label = rising ? 'rising' : 'falling';
 
-  return { previous, next, progress, rising, amplitude, height, msToNext: next.t - now, label };
+  // The coefficient belongs to the high tide, so a half-cycle borrows it from whichever
+  // end of the bracket is the high one — the same number either side of a PM.
+  const coef = (rising ? next.coef : previous.coef) ?? null;
+
+  return { previous, next, progress, rising, amplitude, coef, height, msToNext: next.t - now, label };
 }
 
 /** Reconstructed water level (m) at epoch **seconds**, raised-cosine between the bracketing
@@ -237,6 +250,8 @@ export interface TideDay {
   events: TideDayEvent[];
   /** The day's biggest half-cycle range (m) — what "big tide today?" reads. */
   marnage: number | null;
+  /** The day's biggest coefficient, or `null` when none of its highs carry one. */
+  coef: number | null;
 }
 
 /** The `Intl` formatter behind `zonedDayIndex` — build it once and pass it when looping. */
@@ -266,11 +281,12 @@ export function groupTidesByDay(events: TideEvent[], tz: string): Map<number, Ti
     const di = zonedDayIndex(e.t, tz, fmt);
     let day = days.get(di);
     if (!day) {
-      day = { di, events: [], marnage: null };
+      day = { di, events: [], marnage: null, coef: null };
       days.set(di, day);
     }
     day.events.push({ ...e, range });
     if (range != null) day.marnage = Math.max(day.marnage ?? 0, range);
+    if (e.coef != null) day.coef = Math.max(day.coef ?? 0, e.coef);
   }
   return days;
 }
@@ -282,7 +298,8 @@ const DEFAULT_REF: TideRangeRef = { neap: 1.2, spring: 4.5 };
 /**
  * Classify a tidal range (m) against the site's neap→spring envelope so the UI can answer
  * "is this a big tide?" at a glance. `t` drives the gauge fill; `label` buckets it.
- * Metres only — no French coefficient (spec 0008 decision 2).
+ * **Metres only** — the coefficient (spec §11) is a secondary readout printed beside the
+ * marnage, never an input to this gauge (it says nothing about *this* port's water).
  */
 export function tideMagnitude(range: number, ref: TideRangeRef | null): { t: number; label: TideMagLabel } {
   const r = ref ?? DEFAULT_REF;

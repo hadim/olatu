@@ -7,8 +7,9 @@
 //   extremum, with a "now" dot riding it. Past is literally to the LEFT (where we came
 //   from), the future to the RIGHT (where we're heading) — the endpoints are labelled with
 //   their kind (▼ low / ▲ high) + time, and the next one also carries the live countdown.
-//   Beside it: the marnage (m) + neap↔spring fill.  The SUN group (sunrise/sunset) sits in
-//   its own titled zone behind a divider — no longer wedged between tide facts.
+//   Beside it: the marnage (m) + neap↔spring fill, with the French coefficient as a small
+//   secondary on the same line (spec §11).  The SUN group (sunrise/sunset) sits in its own
+//   titled zone behind a divider — no longer wedged between tide facts.
 //
 // Renders nothing when there's no tide data for the buoy.
 
@@ -185,14 +186,26 @@ export default function TideStrip({ tides, tz, lat, lon }: { tides: Tides | null
           </div>
         </div>
 
-        {/* marnage + neap↔spring fill — the "how big" readout */}
+        {/* marnage + neap↔spring fill — the "how big" readout. The coefficient rides the
+            same line as a small secondary: metres measure the water HERE, the coef is a
+            national Brest-referenced index (spec §11), so it never outranks the marnage. */}
         <div className="flex flex-col gap-[0.3rem] self-center max-[720px]:items-center">
-          <span className="inline-flex items-baseline gap-1.5">
+          <span className="inline-flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 max-[720px]:justify-center">
             <span className="text-[0.72rem] uppercase tracking-[0.06em] text-faint">{m.tide_marnage()}</span>
             <span className="font-display text-[1.05rem] font-medium text-fg [font-feature-settings:'tnum']">
               {fmtNumber(phase.amplitude, locale, 1)}
               <span className="text-[0.82rem] text-muted"> m</span>
             </span>
+            {phase.coef != null && (
+              <span className="inline-flex items-baseline font-mono text-[0.72rem] text-muted">
+                <span className="mr-1.5 text-faint" aria-hidden="true">
+                  ·
+                </span>
+                {m.tide_coef_short()}
+                <span className="ml-1 text-fg [font-feature-settings:'tnum']">{phase.coef}</span>
+                <InfoPopover title={m.tide_coef()} body={m.tide_coef_help()} />
+              </span>
+            )}
           </span>
           <div className="flex items-center gap-2">
             <div className="relative h-[6px] w-[68px] overflow-hidden rounded-full bg-surface-2" role="img" aria-label={m[`tide_mag_${mag.label}` as MessageKey]()}>
