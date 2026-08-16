@@ -182,7 +182,10 @@ def refresh_port(
         ui.detail(f"unknown port {port_id!r} → skip")
         return "unknown port"
     if not key:
-        ui.detail(f"no {ENV_KEY} → skip (webapp shows the tide empty-state)")
+        # WARN, not detail: this silently freezes the tide tier (and, since §11, means no
+        # coefficient ever lands) while the rest of the refresh reports success. `pixi run`
+        # does NOT load `.env` -- the key has to be exported into the environment.
+        ui.warn(f"no {ENV_KEY} in the environment → skip (tide tier stays as-is)")
         return "no key"
 
     acc = _load_acc(_acc_path(tides_root, port_id))

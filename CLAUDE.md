@@ -92,6 +92,11 @@ pixi run webapp                      # frontend dev server (reads data from HF; 
 pixi run webapp-build                # static build for GitHub Pages
 ```
 
+⚠️ **`pixi run` does NOT read `.env`.** The tide/wind steps then skip on a missing key and the
+run still reports success (the buoy data refreshes fine), so a whole feature can silently stop
+updating. Export first — `set -a && source .env && set +a && pixi run update …` — and check the
+run's Tides/Wind tables say `refreshed`, not `no key`.
+
 One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users/hadim/Data/olatu/06403`.
 
 ## Conventions & gotchas
