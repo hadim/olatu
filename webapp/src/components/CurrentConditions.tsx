@@ -147,13 +147,20 @@ function MiniArrow({ deg, color }: { deg: number | null; color: string }) {
   );
 }
 
-const ZONE: Record<'sea' | 'air', string> = {
+type Realm = 'sea' | 'air';
+
+const ZONE: Record<Realm, string> = {
   sea: 'border-[color-mix(in_oklab,var(--accent)_22%,var(--hairline))] bg-[color-mix(in_oklab,var(--accent)_6%,var(--surface))]',
   air: 'border-[color-mix(in_oklab,var(--c-wind)_24%,var(--hairline))] bg-[color-mix(in_oklab,var(--c-wind)_7%,var(--surface))]',
 };
 
-/** Zone header: a coloured realm tag + a source chip (buoy or station attribution). */
-function ZoneHeader({ realm, tag, children }: { realm: 'sea' | 'air'; tag: string; children: ReactNode }) {
+/** Zone header: a coloured realm tag + a source chip (buoy or station attribution), and — since
+ *  spec 0015 §7 — that realm's own freshness badge, pushed to the trailing edge. Each realm
+ *  answers for its own source: the buoy and the station fail independently (CANDHIS can freeze
+ *  for hours while Météo-France keeps reporting), so one shared badge could only ever be right
+ *  about one of them. `min-[720px]:ml-auto` rather than a plain `ml-auto` — below 720px the whole
+ *  header centres (spec 0017) and an auto margin would break that. */
+function ZoneHeader({ realm, tag, badge, children }: { realm: Realm; tag: string; badge?: ReactNode; children: ReactNode }) {
   const bg = realm === 'sea' ? 'var(--accent)' : 'var(--c-wind)';
   return (
     <div className="mb-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 max-[720px]:justify-center max-[720px]:text-center">
@@ -161,6 +168,7 @@ function ZoneHeader({ realm, tag, children }: { realm: 'sea' | 'air'; tag: strin
         {tag}
       </span>
       <span className="inline-flex items-center gap-1.5 font-mono text-[0.72rem] text-muted">{children}</span>
+      {badge && <span className="min-[720px]:ml-auto">{badge}</span>}
     </div>
   );
 }
@@ -196,15 +204,18 @@ const STATUS_DOT: Record<Freshness, string> = {
   stale: 'bg-faint',
 };
 
-function StalenessBadge({ fresh, stampMs, tz, now }: { fresh: Freshness; stampMs: number | null; tz: string; now: number }) {
+function StalenessBadge({ realm, fresh, stampMs, tz, now }: { realm: Realm; fresh: Freshness; stampMs: number | null; tz: string; now: number }) {
   const { locale } = useLocale();
   const { units } = useUnits();
   const ago = stampMs != null ? relativeAgo(stampMs, locale, now) : null;
   const clock = stampMs != null ? fmtClock(stampMs, locale, tz, units.clock) : null;
-  const help = m[`cc_${fresh}_help` as MessageKey]();
+  // The help text is source-agnostic; the reporting cadence that explains the age is what
+  // differs between the realms (buoy every 30 min vs station every 6 min behind our refresh).
+  const help = `${m[`cc_${fresh}_help` as MessageKey]()} ${m[`cc_cadence_${realm}` as MessageKey]()}`;
   const body = stampMs != null ? `${help} · ${m.cc_updated()} ${clock}` : help;
+  const realmLabel = realm === 'sea' ? m.cc_realm_sea() : m.cc_realm_air();
   return (
-    <InfoPopover title={m[`cc_${fresh}` as MessageKey]()} body={body} align="end" triggerClassName={`${STATUS_BADGE} ${STATUS_BORDER[fresh]}`} triggerLabel={m.cc_freshness()}>
+    <InfoPopover title={`${realmLabel} · ${m[`cc_${fresh}` as MessageKey]()}`} body={body} align="end" triggerClassName={`${STATUS_BADGE} ${STATUS_BORDER[fresh]}`} triggerLabel={`${m.cc_freshness()} · ${realmLabel}`}>
       <span className={`h-[9px] w-[9px] rounded-full ${STATUS_DOT[fresh]}`} aria-hidden="true" />
       {ago && <span className="whitespace-nowrap">{ago}</span>}
       {clock && <span className="whitespace-nowrap text-faint">· {clock}</span>}
@@ -303,8 +314,12 @@ export default function CurrentConditions({
   // The matching unit suffix comes from keySuffix(key, units).
   const fmtU = (v: { value: number } | null, key: string) => (v ? formatKeyValue(key, v.value, units, locale) : '—');
 
-  const stampMs = latestTimestamp(latest);
-  const fresh = stampMs != null ? freshness(now - stampMs) : 'stale';
+  // One stamp PER REALM (spec 0015 §7). The two sources are unrelated feeds on unrelated
+  // cadences and they stall independently, so neither one may stand in for the other.
+  const seaStampMs = latestTimestamp(latest);
+  const seaFresh = seaStampMs != null ? freshness(now - seaStampMs) : 'stale';
+  const airStampMs = wl ? latestTimestamp(wl) : null;
+  const airFresh = airStampMs != null ? freshness(now - airStampMs) : 'stale';
 
   const kind = wind ? stationInfo(wind.station)?.kind : undefined;
   const kindLabel = kind ? m[`station_kind_${kind.replaceAll('-', '_')}` as MessageKey]() : '';
@@ -312,10 +327,11 @@ export default function CurrentConditions({
   return (
     <section
       aria-label={m.cc_title()}
-      className={`relative flex flex-col gap-2 rounded-2xl border border-line bg-surface px-3 pb-4 pt-3.5 shadow-[0_0_40px_-28px_var(--accent)] sm:px-5 sm:pb-5 sm:pt-4 ${fresh === 'stale' ? 'saturate-[0.55]' : ''}`}
+      className="relative flex flex-col gap-2 rounded-2xl border border-line bg-surface px-3 pb-4 pt-3.5 shadow-[0_0_40px_-28px_var(--accent)] sm:px-5 sm:pb-5 sm:pt-4"
     >
-      {/* Header row: identity · the cross-realm verdict · freshness. The verdict rides here rather
-          than in its own band (spec 0015); below 860px it drops to its own full-width line. */}
+      {/* Header row: identity · the cross-realm verdict. The verdict rides here rather than in its
+          own band (spec 0015); below 860px it drops to its own full-width line. Freshness used to
+          sit here too, as ONE badge fed by the buoy alone — it now lives per zone (spec 0015 §7). */}
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <span className="font-mono text-[0.74rem] uppercase tracking-[0.08em] text-faint">
           {m.cc_title()}
@@ -326,12 +342,11 @@ export default function CurrentConditions({
             <ShoreBridge swellDeg={dir?.value ?? null} windDeg={windDir?.value ?? null} locale={locale} />
           </div>
         )}
-        <StalenessBadge fresh={fresh} stampMs={stampMs} tz={tz} now={now} />
       </div>
 
       {/* ---- MER (buoy) zone ---- */}
-      <div className={`rounded-xl border p-2.5 sm:p-3.5 ${ZONE.sea}`}>
-        <ZoneHeader realm="sea" tag={m.cc_realm_sea()}>
+      <div className={`rounded-xl border p-2.5 sm:p-3.5 ${ZONE.sea} ${seaFresh === 'stale' ? 'saturate-[0.55]' : ''}`}>
+        <ZoneHeader realm="sea" tag={m.cc_realm_sea()} badge={<StalenessBadge realm="sea" fresh={seaFresh} stampMs={seaStampMs} tz={tz} now={now} />}>
           <BuoyMark size={15} className="text-accent" />
           {m.cc_buoy()} {manifest.buoy.campaign_id} · {manifest.buoy.network}
         </ZoneHeader>
@@ -358,8 +373,8 @@ export default function CurrentConditions({
 
       {/* ---- AIR (station) zone ---- */}
       {wind ? (
-        <div className={`rounded-xl border p-2.5 sm:p-3.5 ${ZONE.air}`}>
-          <ZoneHeader realm="air" tag={m.cc_realm_air()}>
+        <div className={`rounded-xl border p-2.5 sm:p-3.5 ${ZONE.air} ${airFresh === 'stale' ? 'saturate-[0.55]' : ''}`}>
+          <ZoneHeader realm="air" tag={m.cc_realm_air()} badge={<StalenessBadge realm="air" fresh={airFresh} stampMs={airStampMs} tz={tz} now={now} />}>
             <StationIcon size={15} style={{ color: 'var(--c-wind)' }} />
             {m.cc_station()} {wind.manifest.station.label} <span className="text-faint">· {fmtNumber(wind.distanceKm, locale, 1)} km{kindLabel ? ` · ${kindLabel}` : ''} · {wind.manifest.source.provider}</span>
           </ZoneHeader>

@@ -211,7 +211,11 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   degrees appear, one `Metric` tile per reading, and grids that fill edge to edge (Mer 4-up, Air
   6-up — never a `max-w` cap or an over-wide column). Air packs six-up only because
   `cc_air_temp_short`/`cc_sea_temp_short` are printed; keep the full names in the popover title.
-  **Tile type is sized in `cqw`, never `vw`** — each tile is a `@container`, and the page is capped
+  **Freshness is per realm, never per card (spec 0015 §7)** — the badge lives in each `ZoneHeader`
+  (Mer reads the buoy tier, Air the station tier) and `stale` desaturates **its own zone**. The two
+  feeds fail independently (CANDHIS froze on all three buoys at once on 2026-08-21 while
+  Météo-France kept reporting), so never put a single buoy-fed badge back in the header row, and
+  never desaturate the card element. **Tile type is sized in `cqw`, never `vw`** — each tile is a `@container`, and the page is capped
   at `max-w-[1100px]` so viewport units stop tracking the box past ~1140px; the `clamp` bounds come
   from the widest string a tile must hold without wrapping (Air's "1 020 hPa"), so re-tune them if
   you change the column count. Values align by **`subgrid`** (tile spans two rows, label

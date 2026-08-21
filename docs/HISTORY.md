@@ -9,6 +9,37 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-08-21 — Freshness per realm (spec 0015 §7)
+
+Reported by the owner: "la bouée de Anglet et Saint Jean donne plus de news depuis 5 heures — c'est
+bien la bouée elle-même et pas le site ?"
+
+**It was upstream.** CANDHIS froze at 2026-08-21 01:00 UTC on **all three** buoys at once (06403,
+06402, 03302 — 300 km apart, same minute), so the buoys were fine and so were we: the 05:44 UTC
+cron ran green, scraped 97 valid rows, and printed its own alarm, `newest timestamp did not
+advance (2026-08-21 01:00:00); feed may be stale`. `campagne.php` still served a complete 48 h
+window with no holes in it; the window just stopped moving. The scraper's never-shrink + coalesce
+guarantees meant there was nothing to fix or replay.
+
+**What the incident did expose was a UI bug.** With the buoy 5 h behind and the Socoa station 14 min
+behind, the card showed one badge (buoy-fed) reading "5 hours ago" over both zones, and fired
+`saturate-[0.55]` on the *card*, greying out the Air zone as well — with no timestamp of its own to
+argue back. The freshest data on the page rendered as the deadest.
+
+- **The badge moved into each `ZoneHeader`.** Mer reads `latestTimestamp(latest)`, Air reads
+  `latestTimestamp(wind.latest)`; the header row keeps identity + the offshore/onshore verdict and
+  loses its badge. Since 0012/0013 this card has shown two unrelated feeds (CANDHIS 30 min via HTML
+  scrape, Météo-France 6 min via DPObs) that fail independently — one badge could only ever be
+  right about one of them.
+- **Desaturation is per zone.** A frozen buoy no longer makes a healthy station look dead.
+- **Thresholds unchanged (2 h / 6 h), explanations split.** `cc_{fresh,aging,stale}_help` went
+  source-agnostic and a new `cc_cadence_{sea,air}` line carries the rhythm that makes an age
+  legible. Both badges are realm-qualified for screen readers (`Reading freshness · Air`).
+- `ZoneHeader`'s badge slot uses `min-[720px]:ml-auto`, not `ml-auto` — below 720 px the header
+  centres (0017) and an auto margin would break it; the badge wraps to its own centred line.
+
+Display-only: both timestamps were already loaded, so no tier, manifest or ingest change.
+
 ## 2026-08-16 — Tide coefficient, beside the marnage (spec 0008 §11)
 
 Owner request: keep the marnage as the primary amplitude metric, but print the French *coefficient

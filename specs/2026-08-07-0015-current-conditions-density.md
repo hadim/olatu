@@ -98,3 +98,57 @@ The two zones go from ~630 px of height to ~400 px (**≈ 36 % less**) at 1171 p
 same ten readings and the same scan path (realm tag → dial → hero value → tiles). The tide strip now
 sits above the fold on a laptop, and the numbers grew with the space rather than leaving it blank —
 the Mer values went 25px → 37px without the zone getting any taller.
+
+## 7. Revision (2026-08-21) — freshness is per realm, not per card
+
+Revises §5 above ("the staleness semantics [are unchanged]") and the header row of §2, and with
+them the single-source staleness model that came from
+[0003](2026-06-27-0003-ux-refinement.md) back when the card only ever showed one feed.
+
+### 7.1 Why
+
+On 2026-08-21 the CANDHIS publication chain froze at 01:00 UTC. All three buoys — 06403, 06402 and
+03302, 300 km of coast apart — stopped on the same minute, so this was upstream, not the buoys and
+not our pipeline (which kept scraping, kept logging `newest timestamp did not advance`, and kept
+uploading). Five hours later the card looked like this:
+
+- the **one** `StalenessBadge` in the header row read the buoy tier alone (`latestTimestamp(latest)`),
+  so it said "5 hours ago" — for the whole card;
+- `saturate-[0.55]` fired on the **card element**, so the Air zone was greyed out too;
+- the Air zone carried **no timestamp at all**.
+
+The station was 14 minutes old. The freshest data on the page was rendered as the deadest, and a
+reader had no way to tell that the wind numbers were still perfectly good.
+
+That is not a bad threshold, it is a modelling error: since 0012/0013 this card shows **two
+unrelated feeds** — CANDHIS every 30 min via HTML scrape, Météo-France every 6 min via DPObs — which
+fail **independently**. One badge can only ever be right about one of them.
+
+### 7.2 Decision
+
+**Each realm answers for its own source.** The freshness badge moves out of the header row and into
+the `ZoneHeader` of each zone, at its trailing edge:
+
+- Mer reads `latestTimestamp(latest)`, Air reads `latestTimestamp(wind.latest)`. Neither stands in
+  for the other, and neither is derived from the other.
+- The `stale` desaturation applies to **its own zone**, never to the card. A frozen buoy must not
+  make a healthy station look dead.
+- The header row keeps identity + the offshore/onshore verdict, and loses its badge — with two
+  zone badges, a third one above them would be a summary of nothing.
+
+The `fresh`/`aging`/`stale` thresholds (2 h / 6 h) are unchanged and shared. What is realm-specific
+is the *explanation*: `cc_{fresh,aging,stale}_help` are now source-agnostic and a new
+`cc_cadence_{sea,air}` line carries the reporting rhythm that makes an age legible — "the buoy
+reports every 30 minutes" vs "the station reports every 6 minutes; Olatu refreshes every 30
+minutes". Each badge's accessible name is realm-qualified (`Reading freshness · Air`) so the two
+are distinguishable to a screen reader, and its popover title leads with the realm.
+
+### 7.3 Notes
+
+- `ZoneHeader` gains an optional `badge` slot placed with `min-[720px]:ml-auto`, **not** a bare
+  `ml-auto`: below 720 px the whole header centres (0017) and an auto margin would break that. The
+  badge simply wraps onto its own centred line there.
+- This is display-only. No tier, manifest or ingest change — both timestamps were already loaded.
+- The upstream freeze itself needs no code change: the scraper's coalesce-merge already handles it
+  (it kept writing a valid, non-shrinking file throughout), so the series reconnects by itself
+  whenever CEREMA republishes.
