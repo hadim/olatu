@@ -9,6 +9,42 @@ Format per entry: **date — title** · what we found · why it matters · resol
 
 ---
 
+## 2026-08-24 — an accumulation is not a state: rain broke every rule the schema assumed
+
+**What we found.** `precipitation_mm` sat in a schema where every other variable is a *state* read
+at an instant, and it inherited all three of that schema's assumptions — each one wrong for a
+cumulative depth:
+
+1. **One column, one meaning.** False: the hourly bulk feed gives `RR1` (1 h) and the DPObs 6-min
+   feed gives `rr_per` (6 min). A mixed-cadence source silently made the column mean two different
+   things, with a 10x step at the seam — the *same* class of bug as the gap-break cadence guess
+   (2026-07-25 entry). Mixed cadence keeps costing us; assume it, don't discover it.
+2. **Down-sampling is a mean.** False, and expensively so: `mean()` over a daily bucket divided the
+   rain by 24 (by ~240 in the 6-min era). Socoa took 51.2 mm on 2026-02-16 and the "years" view
+   announced 2.1 mm. **Nothing surfaced this** — rain's normal value is 0, so a wrong rain series
+   looks exactly like a right one. It was found by asking what the number meant, not by looking.
+3. **The stamp is the instant of the reading.** False: an accumulation is stamped at the **end** of
+   its window. Both feeds do this.
+
+**Why it matters.** Point 3 is the one you cannot look up. Météo-France's own field descriptor says
+only *"RR1 : quantité de précipitation tombée en 1 heure"* — it never states which hour, though it
+does bother to call `T` *"température sous abri **instantanée**"*. Guessing wrong is a silent
+one-hour shift that no chart will ever reveal.
+
+**Resolution.** Probe, don't assume: cross-check the hourly feed against the 6-min feed over a rainy
+hour. On 2026-08-23 at Socoa, `(H-1h, H]` matched `rr1` exactly on all seven hours and `[H, H+1h)`
+on none. That single test settled the convention and the aggregation bucket
+(`closed='right', label='left'`) falls straight out of it. The general rule: **before aggregating a
+cumulative variable, prove its window and its stamp against a second, finer feed.**
+
+Also: `sum()` of an all-null bucket is `0.0` in polars, not null — for rain that turns "no
+measurement" into "it stayed dry", and it is invisible. Guard every accumulation aggregate.
+
+**Refs:** [0018 — Precipitation window & aggregation](2026-08-24-0018-precipitation-window.md),
+`ingest/wind.py` (`_downsample`, `_trailing_hour_accum`, `_sum_keep_null`), `schema.WIND_ACCUM_VARS`.
+
+---
+
 ## 2026-08-16 — the tide coefficient is not a marnage: don't compute it, and don't trust just any site to check it
 
 **Finding.** Adding the French *coefficient de marée* ([spec 0008 §11](2026-07-05-0008-tides.md))

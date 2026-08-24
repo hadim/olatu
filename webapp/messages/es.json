@@ -210,7 +210,7 @@
   "def_wind": "La velocidad del viento y la dirección desde la que sopla, en la estación meteorológica costera más cercana (un anemómetro real, media de 10 min). Cruzada con la dirección del mar de fondo indica offshore u onshore.",
   "def_gust": "La racha instantánea más fuerte del intervalo — la intensidad real en los picos, muy por encima del viento medio.",
   "def_air_temp": "La temperatura del aire en la estación. Compárala con la temperatura del agua en la boya (neopreno vs el viento en la playa).",
-  "def_rain": "La lluvia acumulada en el intervalo en la estación.",
+  "def_rain": "La lluvia caída en la última hora en la estación (mm/h). Las vistas diarias muestran el total del día.",
   "def_humidity": "La humedad relativa en la estación. No se mide en todas las estaciones.",
   "def_pressure": "La presión atmosférica a nivel del mar en la estación — un barómetro que baja suele preceder un cambio de tiempo. No se mide en todas las estaciones.",
   "def_offshore": "Offshore u onshore — la dirección del viento cruzada con la del mar de fondo. Un viento offshore (de la tierra hacia el mar, contra el oleaje) alisa las olas; uno onshore (que entra con el oleaje) las deshace. Cruza el viento de la estación con el oleaje de la boya: es una aproximación, la estación está en tierra.",

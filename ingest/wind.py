@@ -14,6 +14,10 @@ station beside a buoy on the same time axis at any zoom (years ↔ a single day)
     wind/<station>/data/hourly/<station>_<YEAR>.parquet  hourly means (uniform over all history)
     wind/<station>/data/daily.parquet                    daily means (the wide "years" view)
 
+Precipitation is the one CUMULATIVE variable and does not follow "means" (specs/0018): it sums
+into the hourly/daily buckets, and the native tier carries a trailing-HOUR total so the mixed
+cadence (hourly history, 6-min live) does not make the column mean two different things.
+
 Two feeds, one schema (8 canonical vars, sensible units):
   - **Historical, hourly, no key** — the open bulk files on meteo.data.gouv.fr
     (`donnees-climatologiques-de-base-horaires`). Fetched ONCE (`--seed`), written to `_hist.csv`,
@@ -48,6 +52,7 @@ from . import build as build_mod
 from . import ui
 from .schema import (
     CAMPAIGN_ID,
+    WIND_ACCUM_VARS,
     WIND_DIRECTION_VARS,
     WIND_HEADLINE,
     WIND_HOURLY_MAP,
@@ -415,17 +420,86 @@ def scrape_live(wind_root: Path, sid: str, key: str, *, minutes: int) -> int:
 # ------------------------------------------------------------------------- tiers
 
 
+def _sum_keep_null(c: str) -> pl.Expr:
+    """Sum an accumulation over a bucket, but keep an all-null bucket NULL.
+
+    `sum()` of nothing is 0.0 in polars, which would print "0 mm -- it stayed dry" over a gap
+    where we simply have no measurement. Rain's normal value IS 0, so that lie is invisible.
+    """
+    return (
+        pl.when(pl.col(c).is_null().all())
+        .then(None)
+        .otherwise(pl.col(c).sum())
+        .alias(c)
+    )
+
+
 def _downsample(df: pl.DataFrame, every: str) -> pl.DataFrame:
-    """Down-sample all 8 vars: arithmetic mean, but CIRCULAR mean for the direction columns."""
+    """Down-sample all 8 vars to `every` (specs/0018 §3.2).
+
+    States (wind, temp, humidity, pressure) take the arithmetic mean -- CIRCULAR for the
+    direction columns. Accumulations (rain) take the SUM, and on their own bucket: the sources
+    stamp a total at the END of its window, so the bucket must be right-closed and left-labelled
+    (`(t, t+every]` labelled `t`) for the total to land on the period it actually fell in. That
+    is exact for BOTH layers -- an hourly RR1 stamped `t+1h` and the ten 6-min readings stamped
+    `t+6min .. t+1h` describe the same hour and both land in the bucket labelled `t`.
+    """
+    df = df.sort(DT)
+    states = [c for c in _TIER_COLS if c not in WIND_ACCUM_VARS]
     exprs = []
-    for c in _TIER_COLS:
+    for c in states:
         if c in WIND_DIRECTION_VARS:
             ang = pl.col(c).radians()
             mean_ang = pl.arctan2(ang.sin().mean(), ang.cos().mean()).degrees()
             exprs.append(((mean_ang + 360) % 360).alias(c))
         else:
             exprs.append(pl.col(c).mean().alias(c))
-    return df.sort(DT).group_by_dynamic(DT, every=every).agg(exprs)
+    out = df.group_by_dynamic(DT, every=every).agg(exprs)
+    accum = df.group_by_dynamic(DT, every=every, closed="right", label="left").agg(
+        [_sum_keep_null(c) for c in WIND_ACCUM_VARS]
+    )
+    # The two grids can differ by one bucket at either end (the accumulation grid starts one
+    # bucket earlier when the first sample sits exactly on a boundary), so join outer and
+    # restore the canonical column order.
+    return (
+        out.join(accum, on=DT, how="full", coalesce=True)
+        .sort(DT)
+        .select([DT, *_TIER_COLS])
+    )
+
+
+def _trailing_hour_accum(df: pl.DataFrame) -> pl.DataFrame:
+    """Re-express the accumulation columns as a 1-hour ROLLING total (specs/0018 §3.1).
+
+    The native tier is mixed-cadence by construction -- hourly history, then a 6-min live tail --
+    so the raw column means "mm over the last hour" before the seam and "mm over the last 6 min"
+    after it, a 10x cliff at a date with no weather in it. A trailing-hour total is the same
+    quantity at every sample: in the history era the window holds exactly one RR1 row (the value
+    is unchanged), in the live era it is the sum of ten 6-min readings.
+
+    Call this PER LAYER, before the hist/live coalesce -- across the seam the window would hold
+    an hourly RR1 *and* the 6-min readings it already contains, and double-count them.
+    """
+    if df.height == 0:
+        return df
+    df = df.sort(DT)
+    return df.with_columns(
+        [
+            # An all-null window rolls up to 0.0 (same trap as _sum_keep_null), so count the
+            # non-null samples in the window and keep "no measurement" null.
+            pl.when(
+                pl.col(c)
+                .is_not_null()
+                .cast(pl.Int32)
+                .rolling_sum_by(DT, window_size="1h", closed="right")
+                == 0
+            )
+            .then(None)
+            .otherwise(pl.col(c).rolling_sum_by(DT, window_size="1h", closed="right"))
+            .alias(c)
+            for c in WIND_ACCUM_VARS
+        ]
+    )
 
 
 def _assemble(hist: pl.DataFrame, live: pl.DataFrame) -> pl.DataFrame:
@@ -440,7 +514,14 @@ def _assemble(hist: pl.DataFrame, live: pl.DataFrame) -> pl.DataFrame:
 
 def build_station(wind_root: Path, sid: str) -> int:
     """Coalesce hist+live and (re)emit the buoy-style tiers for a station. Returns row count."""
-    merged = _assemble(read_hist(wind_root, sid), read_live(wind_root, sid))
+    hist, live = read_hist(wind_root, sid), read_live(wind_root, sid)
+    # Two views of the same series (specs/0018 §3): `merged` keeps the raw per-interval totals,
+    # which is what the hourly/daily buckets must SUM; `native` re-expresses them as a trailing
+    # hour, per layer, which is what the native tier + latest/recent publish.
+    merged = _assemble(hist, live)
+    native = _assemble(
+        _trailing_hour_accum(_canonical(hist)), _trailing_hour_accum(_canonical(live))
+    )
     out = wind_root / sid / "data"
     # Rewrite data/ from scratch so a restructure never leaves orphaned tiers behind locally.
     if out.exists():
@@ -453,7 +534,7 @@ def build_station(wind_root: Path, sid: str) -> int:
     years = sorted({d.year for d in merged[DT].to_list() if d is not None})
     year_files = []
     for y in years:
-        g = merged.filter(pl.col(DT).dt.year() == y)
+        g = native.filter(pl.col(DT).dt.year() == y)
         rel = f"year/{sid}_{y}.parquet"
         size = build_mod.write_parquet(out / rel, g, ROW_GROUP_SIZE)
         year_files.append(
@@ -472,9 +553,9 @@ def build_station(wind_root: Path, sid: str) -> int:
         )
     build_mod.write_parquet(out / "daily.parquet", daily)
 
-    last_dt = merged[DT].max()
-    latest = merged.filter(pl.col(DT) >= last_dt - timedelta(hours=48))
-    recent = merged.filter(pl.col(DT) >= last_dt - timedelta(days=30))
+    last_dt = native[DT].max()
+    latest = native.filter(pl.col(DT) >= last_dt - timedelta(hours=48))
+    recent = native.filter(pl.col(DT) >= last_dt - timedelta(days=30))
     build_mod.write_json(
         out / "latest.json", build_mod._to_columnar(latest, _TIER_COLS)
     )
@@ -489,6 +570,16 @@ def build_station(wind_root: Path, sid: str) -> int:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "timezone": "Europe/Paris",
         "cadence": "hourly (history) + 6-min (live)",
+        # An accumulation only means something with its window named (specs/0018 §2). The window
+        # is a property of the TIER, so state it per tier and let the webapp label the unit.
+        "accumulation_window": {
+            "variables": WIND_ACCUM_VARS,
+            "year": "1h",  # trailing hour, evaluated at every native sample
+            "latest": "1h",
+            "recent": "1h",
+            "hourly": "1h",  # the total for the hour beginning at the stamp
+            "daily": "1d",  # the total for the UTC day beginning at the stamp
+        },
         "span": {
             "start": merged[DT].min().replace(tzinfo=timezone.utc).isoformat(),
             "end": merged[DT].max().replace(tzinfo=timezone.utc).isoformat(),

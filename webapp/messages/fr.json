@@ -210,7 +210,7 @@
   "def_wind": "La vitesse du vent et la direction d'où il souffle, depuis la station météo côtière la plus proche (un vrai anémomètre, moyenne sur 10 min). Croisée avec la direction de la houle, elle donne offshore ou onshore.",
   "def_gust": "La rafale instantanée la plus forte de l'intervalle — la vraie intensité dans les pointes, bien au-dessus du vent moyen.",
   "def_air_temp": "La température de l'air à la station. À comparer avec la température de l'eau à la bouée (combinaison vs le vent sur la plage).",
-  "def_rain": "La pluie cumulée sur l'intervalle à la station.",
+  "def_rain": "La pluie tombée sur la dernière heure à la station (mm/h). Les vues journalières montrent le cumul du jour.",
   "def_humidity": "L'humidité relative à la station. Pas mesurée à toutes les stations.",
   "def_pressure": "La pression atmosphérique au niveau de la mer à la station — un baromètre qui chute annonce souvent un changement de temps. Pas mesurée à toutes les stations.",
   "def_offshore": "Offshore ou onshore — la direction du vent croisée avec celle de la houle. Un vent offshore (de la terre vers le large, contre la houle) lisse les vagues ; un vent onshore (qui rentre avec la houle) les déforme. On croise le vent de la station avec la houle de la bouée : c'est une approximation, la station est à terre.",

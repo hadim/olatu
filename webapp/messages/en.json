@@ -210,7 +210,7 @@
   "def_wind": "Wind speed and the compass direction it blows FROM, from the nearest coastal weather station (a real anemometer, 10-minute mean). Crossed with the swell direction it tells you offshore vs onshore.",
   "def_gust": "The strongest instantaneous gust (rafale) in the interval — how hard it truly blows in the peaks, well above the mean wind.",
   "def_air_temp": "Air temperature at the weather station. Compare it with the buoy's sea temperature (wetsuit vs the wind on the beach).",
-  "def_rain": "Rainfall accumulated over the interval at the station.",
+  "def_rain": "Rainfall over the last hour at the station (mm/h). Daily views show the whole day's total.",
   "def_humidity": "Relative humidity at the station. Not measured at every station.",
   "def_pressure": "Mean sea-level atmospheric pressure at the station — a falling barometer often precedes a change of weather. Not measured at every station.",
   "def_offshore": "Offshore vs onshore — the wind direction crossed with the swell direction. Offshore wind (from land out to sea, against the swell) grooms the waves clean; onshore (blowing in with the swell) blows them out. Compares the station's wind with the buoy's swell, so it's an approximation — the station is on land.",

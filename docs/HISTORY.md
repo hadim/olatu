@@ -9,6 +9,52 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-08-24 — Precipitation: window & aggregation (spec 0018)
+
+Owner question: *"la pluie en mm correspond à des cumuls sur quelle fenêtre ?"* — the honest answer
+was **two windows, and neither was aggregated correctly**.
+
+`precipitation_mm` is the only **accumulation** in an otherwise all-*state* schema, and it had been
+ingested as if it were a state:
+
+- **Two windows in one column.** History = `RR1` (hourly bulk, 1 h); live = `rr_per` (DPObs 6-min,
+  **6 min**). The series dropped ~10x at the 2026-07-24 seam for no meteorological reason, and the
+  Current Conditions tile printed the rain of *the last 6 minutes* labelled "mm" — which is why it
+  read 0,0 almost always.
+- **`_downsample` averaged a total.** Measured on Socoa: 2026-02-16 took **51.2 mm** and
+  `daily.parquet` said **2.13 mm** (÷24); in the live era 0.80 mm became 0.0034 mm (÷236). The
+  divisor changed at the seam, so even relative comparisons were false.
+
+**The stamping convention was probed, not assumed.** Météo-France's field descriptor says only
+*"RR1 : quantité de précipitation tombée en 1 heure"* (while `T` is explicitly *"instantanée"*) and
+never says which hour. Cross-checking the hourly feed against the 6-min feed over a rainy evening at
+Socoa (2026-08-23) matched `(H-1h, H]` **exactly on all seven hours** and `[H, H+1h)` on none:
+both feeds are **end-stamped**.
+
+**The fix** (`ingest/wind.py`, `schema.WIND_ACCUM_VARS`):
+
+- Rain **sums**; states keep mean / circular mean. The accumulation bucket is **right-closed,
+  left-labelled** (`(t, t+every]` labelled `t`) — given end-stamping that is *exact* for both
+  layers, verified against the raw: 49.4 mm for 2026-02-16 (the end-stamped day), 0.6 mm for the
+  22:00 hour of 2026-08-14, and the hourly bucket at `t` equals the `RR1` stamped `t+1h`.
+- The **native tier carries a trailing-hour total**, computed **per layer before the coalesce** (a
+  window spanning the seam would hold an hourly `RR1` *and* the 6-min readings it already contains).
+  In the history era the window holds exactly one row, so the value is unchanged; in the live era it
+  is the ten-reading sum. Native and hourly now agree exactly at `:00` — 6.9 / 12.1 / 2.7 mm on
+  2026-08-09 — so zooming never moves the rain.
+- `sum()` of nothing is `0.0` in polars, which would print "0 mm, it stayed dry" over a gap. Both
+  the bucket sum and the rolling sum keep an **all-null window null**.
+- **Unit is tier-aware** (spec 0018 §3.3): **mm/h** on Current Conditions + the native/hourly panel,
+  **mm/24h** on the daily one. `mm/24h` rather than a localised "mm/j" — same string in EN/FR/ES,
+  and it says the window out loud. Glossary (`def_rain`) now names the window instead of the useless
+  "over the interval".
+
+`build_station` re-emits every tier from the immutable `raw/` accumulators, so `pixi run wind --all`
+was enough — no history re-fetch. Daily rain values change by ~24x; that is the fix, not a
+regression.
+
+---
+
 ## 2026-08-21 — Freshness per realm (spec 0015 §7)
 
 Reported by the owner: "la bouée de Anglet et Saint Jean donne plus de news depuis 5 heures — c'est

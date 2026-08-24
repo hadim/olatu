@@ -168,6 +168,19 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   distance, never "wind at the buoy". Non-fatal; `update()` scrapes the 6-min feed + rebuilds
   tiers every run, while the **hourly history is a one-shot seed** (`pixi run wind --seed`), never
   re-fetched — forward growth is 6-min only.
+- **Rain is an ACCUMULATION, not a state (spec 0018).** `precipitation_mm` is the only cumulative
+  variable in the schema (`schema.WIND_ACCUM_VARS`) and it breaks every rule the others follow.
+  It **sums** when down-sampling — `mean()` divided the daily rain by 24 (by ~240 in the 6-min era)
+  and nothing surfaced it, because rain's normal value is 0. Both Météo-France feeds **end-stamp**
+  a total (`RR1` at H covers `(H-1h, H]`, `rr_per` at T covers `(T-6min, T]`), so the bucket is
+  `closed='right', label='left'` — that is what makes it exact for the hourly history *and* the
+  6-min live layer at once. The native tier carries a **trailing-hour** total, computed **per layer
+  before the hist/live coalesce** (a window spanning the seam double-counts an `RR1` with the 6-min
+  readings inside it) — that is what keeps the seam flat and makes native == hourly at `:00`.
+  Guard every accumulation aggregate against polars' `sum()`-of-nothing = `0.0`. Display unit is
+  **tier-aware**: `mm/h` on native/hourly + Current Conditions, `mm/24h` on daily — never label a
+  daily total `mm/h`. Adding another cumulative variable (`DRR1`, snow) means adding it to
+  `WIND_ACCUM_VARS`, not to the mean path. See the 2026-08-24 LEARNINGS entry.
 - **Wind webapp (spec 0013)** = the **Air realm** (amber `--c-wind`) opposite the buoy **Mer realm**
   (teal), one colour+glyph system across selection · current conditions · timeseries so "buoy vs
   station" reads at a glance. A **station picker** sits beside the (kept) collapsible buoy switcher:

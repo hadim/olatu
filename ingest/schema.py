@@ -280,6 +280,12 @@ WIND_HEADLINE = ["wind_speed_ms", "wind_direction_deg", "wind_gust_ms"]
 # -- the wind analog of DIRECTION_VARS.
 WIND_DIRECTION_VARS = ["wind_direction_deg", "wind_gust_direction_deg"]
 
+# Cumulative vars: a DEPTH accumulated over a window, not a state read at an instant. They SUM
+# when aggregating (averaging a total is meaningless -- it divided the daily rain by 24), and
+# both Meteo-France feeds stamp them at the END of their window: RR1 at H covers (H-1h, H],
+# `rr_per` at T covers (T-6min, T]. See specs/0018.
+WIND_ACCUM_VARS = ["precipitation_mm"]
+
 # Canonical column order in the wind Parquet tier (datetime first, then the 8 variables).
 WIND_CANONICAL_ORDER = ["datetime_utc"] + list(WIND_UNITS.keys())
 

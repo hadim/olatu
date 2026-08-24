@@ -393,7 +393,7 @@ export default function CurrentConditions({
               <Metric label={m.cc_wind()} value={fmtU(windSpeed, 'wind_speed_ms')} unit={keySuffix('wind_speed_ms', units) ?? undefined} defKey="def_wind" accent="var(--c-wind)" icon={<WindIcon className={TILE_ICON} style={{ color: 'var(--c-wind)' }} />} />
               <Metric label={m.cc_gust()} value={fmtU(gust, 'wind_gust_ms')} unit={keySuffix('wind_gust_ms', units) ?? undefined} defKey="def_gust" icon={<WindIcon className={TILE_ICON} style={{ color: 'var(--c-wind)', opacity: 0.7 }} />} />
               <Metric label={m.cc_air_temp_short()} title={m.cc_air_temp()} value={fmtU(airTemp, 'air_temperature_c')} unit={keySuffix('air_temperature_c', units) ?? undefined} defKey="def_air_temp" accent="var(--c-airtemp)" icon={<TempIcon className={TILE_ICON} style={{ color: 'var(--c-airtemp)' }} />} />
-              <Metric label={m.cc_rain()} value={num(rain)} unit="mm" defKey="def_rain" icon={<RainIcon className={TILE_ICON} style={{ color: 'var(--c-period)' }} />} />
+              <Metric label={m.cc_rain()} value={num(rain)} unit="mm/h" defKey="def_rain" icon={<RainIcon className={TILE_ICON} style={{ color: 'var(--c-period)' }} />} />
               <Metric label={m.cc_humidity()} value={humidity ? fmtNumber(humidity.value, locale, 0) : '—'} unit={humidity ? '%' : undefined} defKey="def_humidity" icon={<HumidityIcon className={TILE_ICON} style={{ color: 'var(--c-tide)' }} />} />
               <Metric label={m.cc_pressure()} value={fmtU(pressure, 'pressure_msl_hpa')} unit={pressure ? keySuffix('pressure_msl_hpa', units) ?? undefined : undefined} defKey="def_pressure" icon={<PressureIcon className={TILE_ICON} style={{ color: 'var(--c-dir)' }} />} />
             </div>

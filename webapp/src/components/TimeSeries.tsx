@@ -460,10 +460,20 @@ const FIXED_UNIT: Record<string, string> = {
   max_wave_height_m: 'm',
   significant_period_s: 's',
   peak_directional_spread_deg: '°',
-  precipitation_mm: 'mm',
+  precipitation_mm: 'mm/h',
   humidity_pct: '%',
   tide: 'm',
 };
+
+// Rain is the one ACCUMULATION here, so its unit depends on the window the tier carries — 1 h on
+// the native + hourly tiers, the whole UTC day on the daily one (spec 0018 §3.3). Everything else
+// is a state and reads the same at any zoom. `mm/24h` rather than a localised "mm/j" — it is the
+// same string in EN/FR/ES and says the window out loud.
+const RAIN_DAILY_UNIT = 'mm/24h';
+function fixedUnit(key: string, dailyTier: boolean): string {
+  if (key === 'precipitation_mm' && dailyTier) return RAIN_DAILY_UNIT;
+  return FIXED_UNIT[key] ?? '';
+}
 
 // Panel title → icon (the wave-height panel carries both Hs and Hmax, so its title
 // uses the wave-height glyph). Tinted with the panel's primary series colour.
@@ -1322,7 +1332,7 @@ export default function TimeSeries({
       // Unit tag beside the title (spec 0014): the display unit for a convertible measure, else the
       // fixed unit; direction panels show none (their N/E/S/O legend carries the meaning).
       const uKey = panel.series[0].key;
-      const uSuffix = keySuffix(uKey, units) ?? FIXED_UNIT[uKey] ?? '';
+      const uSuffix = keySuffix(uKey, units) ?? fixedUnit(uKey, panel.realm === 'air' && !windDetail);
       const unitTag = uSuffix ? `<span class="ml-1.5 font-mono text-[0.62rem] font-normal normal-case tracking-normal text-faint">${uSuffix}</span>` : '';
       heading.innerHTML = `${realmBar}${titleIcon}<span>${m[panel.titleKey]()}</span>${unitTag}${realmTag}<span class="ts-right ml-auto flex items-center gap-[0.55rem] text-[0.66rem]">${legendInner}</span>`;
 
@@ -1485,7 +1495,7 @@ export default function TimeSeries({
         if (panel.glyph) return `${compass(v, locale)} · ${Math.round(v)}°`;
         const kind = measureKind(k);
         if (kind) return `${formatKeyValue(k, v, units, locale)} ${measureSuffix(kind, units)}`;
-        const suf = FIXED_UNIT[k];
+        const suf = fixedUnit(k, panel.realm === 'air' && !windDetail);
         return `${fmtNumber(v, locale, 1)}${suf ? ` ${suf}` : ''}`;
       };
 
