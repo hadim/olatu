@@ -7,11 +7,12 @@ import Footer from './components/Footer';
 import ConsentBanner from './components/ConsentBanner';
 import LegalPage from './pages/LegalPage';
 import { BannerSkeleton, ChartsSkeleton, StationLocationSkeleton } from './components/Skeletons';
+import DataStatus from './components/DataStatus';
 import { useRoute } from '@/lib/route';
 import { initAnalytics } from '@/lib/analytics';
 import { useLocale } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
-import { loadManifest, loadLatest, loadRecent, loadTidesForManifest, loadWindManifest, loadWindLatest, type Manifest, type Series, type WindData } from './lib/data';
+import { loadEager, loadManifest, loadLatest, loadRecent, loadTidesForManifest, loadWindEager, loadWindLatest, type Eager, type Manifest, type Series, type WindData, type WindManifest } from './lib/data';
 import type { Tides } from './lib/tides';
 import { loadParquetTier, loadWindParquetTier, type Columnar } from './lib/parquet';
 import { initialCampaign, persistCampaign, campaignUrl, buoyInfo } from './lib/buoys';
@@ -91,6 +92,9 @@ export default function App() {
   // with no key/site, in which case the banner strip + chart panel show the empty-state.
   const [tides, setTides] = useState<{ campaign: string; tides: Tides } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Soft failure: the page IS showing data (painted from the local cache) but the network
+  // copy didn't arrive. Distinct from `error`, which means "nothing to show at all".
+  const [refreshError, setRefreshError] = useState(false);
   // The build's stamp; used to detect when the HF dataset has a fresh upload so a
   // background refresh only swaps state when there is genuinely something new.
   const generatedAtRef = useRef<string | null>(null);
@@ -146,19 +150,35 @@ export default function App() {
   }, []);
 
   // Load (or reload, on buoy switch) the eager tiers for the selected campaign.
+  //
+  // Stale-while-revalidate (spec 0019): `loadEager`'s callback hands over the copy stored on
+  // this device — the page paints the buoy you were looking at last time, right away — and the
+  // promise then resolves with the network copy, or `null` when it is byte-identical (nothing
+  // to re-render). A network failure is only fatal when nothing was painted.
   useEffect(() => {
     let cancelled = false;
     setData(null);
     setError(null);
     generatedAtRef.current = null;
-    Promise.all([loadManifest(campaign), loadLatest(campaign), loadRecent(campaign)])
-      .then(([manifest, latest, recent]) => {
+    let painted = false;
+    const apply = (e: Eager) => {
+      if (cancelled) return;
+      generatedAtRef.current = e.manifest.generated_at;
+      setData({ campaign, manifest: e.manifest, latest: e.latest, recent: e.recent });
+    };
+    loadEager(campaign, (e) => {
+      painted = true;
+      apply(e);
+    })
+      .then((e) => {
         if (cancelled) return;
-        generatedAtRef.current = manifest.generated_at;
-        setData({ campaign, manifest, latest, recent });
+        if (e) apply(e);
+        setRefreshError(false);
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (cancelled) return;
+        if (painted) setRefreshError(true); // cached data stands; say so instead of blanking it
+        else setError(e instanceof Error ? e.message : String(e));
       });
     return () => {
       cancelled = true;
@@ -175,6 +195,7 @@ export default function App() {
     try {
       const manifest = await loadManifest(c);
       if (c !== campaignRef.current) return; // buoy switched mid-flight
+      setRefreshError(false);
       if (manifest.generated_at === generatedAtRef.current) return;
       const [latest, recent] = await Promise.all([loadLatest(c), loadRecent(c)]);
       if (c !== campaignRef.current) return;
@@ -191,6 +212,7 @@ export default function App() {
       }
     } catch (e) {
       console.error('Background data refresh failed:', e);
+      setRefreshError(true);
     }
   }, []);
 
@@ -262,9 +284,14 @@ export default function App() {
     let cancelled = false;
     setHistory(null);
     setHistoryError(null);
-    loadParquetTier(campaign, 'daily.parquet', HISTORY_COLUMNS)
+    loadParquetTier(campaign, 'daily.parquet', HISTORY_COLUMNS, (cols) => {
+      // Cached copy → the charts are on screen before the network answers (spec 0019).
+      if (!cancelled) setHistory({ campaign, cols });
+    })
       .then((d) => {
-        if (!cancelled) setHistory({ campaign, cols: d });
+        // null = byte-identical to the cached copy already plotted: keep it, a swap here
+        // would rebuild every uPlot for nothing.
+        if (d && !cancelled) setHistory({ campaign, cols: d });
       })
       .catch((e) => {
         // charts are best-effort; the banner still works without history
@@ -290,9 +317,13 @@ export default function App() {
       setTides(null);
       return;
     }
-    loadTidesForManifest(mf)
+    loadTidesForManifest(mf, (t) => {
+      if (!cancelled) setTides({ campaign: mf.buoy.campaign_id, tides: t });
+    })
       .then((t) => {
-        if (!cancelled) setTides(t ? { campaign: mf.buoy.campaign_id, tides: t } : null);
+        // undefined = unchanged since the cached copy already shown; null = this buoy has no tides.
+        if (cancelled || t === undefined) return;
+        setTides(t ? { campaign: mf.buoy.campaign_id, tides: t } : null);
       })
       .catch(() => {
         if (!cancelled) setTides(null); // no tides for this buoy — empty-state handles it
@@ -310,19 +341,22 @@ export default function App() {
     setWind(null);
     if (!stationId) return;
     const buoy = buoyInfo(campaign);
-    Promise.all([loadWindManifest(stationId), loadWindLatest(stationId)])
-      .then(([wm, wl]) => {
-        if (cancelled) return;
-        const dist = stationsForBuoy(buoy.lat, buoy.lon).find((s) => s.id === stationId)?.distanceKm ?? 0;
-        setWind({
-          campaign,
-          station: stationId,
-          data: { station: stationId, manifest: wm, latest: wl, distanceKm: dist, isOverride: hasStationOverride(campaign) },
-        });
+    const dist = stationsForBuoy(buoy.lat, buoy.lon).find((s) => s.id === stationId)?.distanceKm ?? 0;
+    const apply = (wm: WindManifest, wl: Series) => {
+      if (cancelled) return;
+      setWind({
+        campaign,
+        station: stationId,
+        data: { station: stationId, manifest: wm, latest: wl, distanceKm: dist, isOverride: hasStationOverride(campaign) },
+      });
+    };
+    loadWindEager(stationId, (e) => apply(e.manifest, e.latest))
+      .then((e) => {
+        if (e) apply(e.manifest, e.latest); // null = unchanged since the cached paint
       })
       .catch((e) => {
         console.error('Failed to load wind station:', e);
-        if (!cancelled) setWind(null); // → CurrentConditions wind empty-state
+        if (!cancelled) setWind((w) => (w && w.campaign === campaign && w.station === stationId ? w : null)); // keep a cached paint; else → empty-state
       });
     return () => {
       cancelled = true;
@@ -334,9 +368,11 @@ export default function App() {
     let cancelled = false;
     setWindHistory(null);
     if (!stationId) return;
-    loadWindParquetTier(stationId, 'daily.parquet', WIND_HISTORY_COLUMNS)
+    loadWindParquetTier(stationId, 'daily.parquet', WIND_HISTORY_COLUMNS, (cols) => {
+      if (!cancelled) setWindHistory({ campaign, station: stationId, cols });
+    })
       .then((cols) => {
-        if (!cancelled) setWindHistory({ campaign, station: stationId, cols });
+        if (cols && !cancelled) setWindHistory({ campaign, station: stationId, cols });
       })
       .catch((e) => {
         console.error('Failed to load wind history (daily.parquet):', e);
@@ -359,6 +395,7 @@ export default function App() {
 
   return (
     <div className={PAGE}>
+      <DataStatus hasData={!!ready} refreshError={refreshError} />
       <Header />
 
       <main>

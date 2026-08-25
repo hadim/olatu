@@ -9,6 +9,35 @@ Format per entry: **date — title** · what we found · why it matters · resol
 
 ---
 
+## 2026-08-25 — a fast failure beats your cache: `Promise.all` blanked the page offline
+
+**What we found.** With the new local tier cache (spec 0019) the offline case still rendered
+*nothing*, even though every tier was stored on the device. The cause is an ordering nobody plans
+for: **failing is faster than reading IndexedDB.** A 503 (or a dead connection) answers in a
+fraction of a millisecond, while opening IndexedDB and reading an entry takes a few. The eager
+tiers were loaded with `Promise.all`, so the first rejection settled the group *before* the cached
+copies had been read — the app took the rejection, saw "nothing painted", and showed the fatal
+error over a cache full of perfectly good data.
+
+The same shape bit a second time one layer down: the stale *decode* of a cached parquet tier is
+async, and a `settled` flag set in a `.finally()` suppressed the stale paint on the **failure** path
+too — so the charts stayed empty offline while Current Conditions came back.
+
+**Why it matters.** Both bugs are invisible online: the network wins every race when it works, so
+the cache path is only ever exercised in the exact conditions where these orderings flip. A cache
+that silently does nothing when the network is down is worse than no cache, because you believe you
+have one.
+
+**Resolution.** `loadEager`/`loadWindEager` use `Promise.allSettled` and rethrow after everything
+has settled (so every cached copy got its chance to paint), and the "don't paint stale" flag is set
+**only when a fresh copy is actually being returned** — never on failure, never on an unchanged
+tier. Test the cache path by making the backend fail, not by making it slow.
+
+**Refs.** [spec 0019 §4](2026-08-25-0019-instant-load-cache.md), `webapp/src/lib/swr.ts`,
+`webapp/src/lib/parquet.ts`, `webapp/src/lib/data.ts`.
+
+---
+
 ## 2026-08-24 — an accumulation is not a state: rain broke every rule the schema assumed
 
 **What we found.** `precipitation_mm` sat in a schema where every other variable is a *state* read

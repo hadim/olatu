@@ -14,6 +14,7 @@
 // Override the root with VITE_DATA_BASE_URL (must end in `/`), e.g. a fork's bucket.
 
 import { parquetReadObjects } from 'hyparquet';
+import { swrBuffer, swrJSON } from './swr';
 import { buildTides, type TideKind, type TideMeta, type TideRow, type Tides } from './tides';
 
 export const DATA_ROOT: string =
@@ -143,10 +144,17 @@ export interface WindData {
   isOverride: boolean;
 }
 
+// Every tier goes through the stale-while-revalidate layer (lib/swr.ts, spec 0019): the
+// cached copy paints first, the network copy replaces it, and an unchanged tier resolves
+// `null` so nothing re-renders for nothing. A call with no `onStale` never sees that null.
+
+function tierURL(base: string, name: string): string {
+  return `${base}${name}`;
+}
+
+/** Network-only load (no cached paint) — used by the periodic background refresh. */
 async function loadJSONFrom<T>(base: string, name: string): Promise<T> {
-  const res = await fetch(`${base}${name}`, { cache: 'no-cache' });
-  if (!res.ok) throw new Error(`Failed to load ${base}${name} (${res.status})`);
-  return (await res.json()) as T;
+  return (await swrJSON<T>(tierURL(base, name))) as T;
 }
 
 export function loadManifest(campaign: string) {
@@ -175,26 +183,160 @@ export function loadWindRecent(station: string) {
   return loadJSONFrom<Series>(windBase(station), 'recent.json');
 }
 
+/** The three JSON tiers the page needs before it can render anything real. */
+export interface Eager {
+  manifest: Manifest;
+  latest: Series;
+  recent: Series;
+}
+
+/**
+ * The buoy's eager tiers, loaded together (spec 0019). `onStale` fires ONCE, with the cached
+ * set, and only when all three are cached — painting a mixed old-manifest/new-latest set
+ * would be worse than waiting. Resolves `null` when the network copies are byte-identical to
+ * the painted ones (nothing to re-render).
+ */
+export async function loadEager(campaign: string, onStale?: (e: Eager) => void): Promise<Eager | null> {
+  const base = dataBase(campaign);
+  const staged: Partial<Eager> = {};
+  let painted = false;
+  const paint = () => {
+    if (painted || !onStale) return;
+    if (staged.manifest && staged.latest && staged.recent) {
+      painted = true;
+      onStale({ manifest: staged.manifest, latest: staged.latest, recent: staged.recent });
+    }
+  };
+  const stale = <K extends keyof Eager>(k: K) =>
+    onStale
+      ? (v: Eager[K]) => {
+          staged[k] = v;
+          paint();
+        }
+      : undefined;
+
+  // allSettled, not all: a tier that fails FAST (an offline 503 beats the IndexedDB read)
+  // would otherwise reject the group before the cached copies had a chance to paint — the
+  // one case where the local cache matters most. Settle everything, paint, then rethrow.
+  const settled = await Promise.allSettled([
+    swrJSON<Manifest>(tierURL(base, 'manifest.json'), { onStale: stale('manifest') }),
+    swrJSON<Series>(tierURL(base, 'latest.json'), { onStale: stale('latest') }),
+    swrJSON<Series>(tierURL(base, 'recent.json'), { onStale: stale('recent') }),
+  ]);
+  const failed = settled.find((r) => r.status === 'rejected');
+  if (failed) throw (failed as PromiseRejectedResult).reason;
+  const [manifest, latest, recent] = settled.map((r) => (r as PromiseFulfilledResult<unknown>).value) as [
+    Manifest | null,
+    Series | null,
+    Series | null,
+  ];
+  if (manifest == null && latest == null && recent == null) return null; // all three unchanged
+  return {
+    manifest: manifest ?? (staged.manifest as Manifest),
+    latest: latest ?? (staged.latest as Series),
+    recent: recent ?? (staged.recent as Series),
+  };
+}
+
+/** A station's eager tiers — the wind mirror of `loadEager` (same stale/unchanged contract). */
+export async function loadWindEager(
+  station: string,
+  onStale?: (e: { manifest: WindManifest; latest: Series }) => void,
+): Promise<{ manifest: WindManifest; latest: Series } | null> {
+  const base = windBase(station);
+  const staged: { manifest?: WindManifest; latest?: Series } = {};
+  let painted = false;
+  const paint = () => {
+    if (painted || !onStale) return;
+    if (staged.manifest && staged.latest) {
+      painted = true;
+      onStale({ manifest: staged.manifest, latest: staged.latest });
+    }
+  };
+  const settled = await Promise.allSettled([
+    swrJSON<WindManifest>(tierURL(base, 'manifest.json'), {
+      onStale: onStale
+        ? (v) => {
+            staged.manifest = v;
+            paint();
+          }
+        : undefined,
+    }),
+    swrJSON<Series>(tierURL(base, 'latest.json'), {
+      onStale: onStale
+        ? (v) => {
+            staged.latest = v;
+            paint();
+          }
+        : undefined,
+    }),
+  ]);
+  const failed = settled.find((r) => r.status === 'rejected');
+  if (failed) throw (failed as PromiseRejectedResult).reason; // see the note in loadEager
+  const [manifest, latest] = settled.map((r) => (r as PromiseFulfilledResult<unknown>).value) as [
+    WindManifest | null,
+    Series | null,
+  ];
+  if (manifest == null && latest == null) return null; // unchanged
+  return {
+    manifest: manifest ?? (staged.manifest as WindManifest),
+    latest: latest ?? (staged.latest as Series),
+  };
+}
+
 /** Tide extrema for a buoy: reads its manifest's `tide` block for the port + attribution,
- *  then fetches the shared `tides/<port>/data/tides.parquet` (spec 0008 §8.2). Returns null
- *  when the buoy has no port in range, or when the tier is unavailable (→ empty-state). */
-export async function loadTidesForManifest(manifest: Manifest): Promise<Tides | null> {
+ *  then fetches the shared `tides/<port>/data/tides.parquet` (spec 0008 §8.2).
+ *  `null` = this buoy has no tides (no port in range, or the tier is unavailable → empty-state);
+ *  `undefined` = the fresh tier is byte-identical to the cached one already painted via
+ *  `onStale`, so the caller must keep what it has (spec 0019). */
+export async function loadTidesForManifest(
+  manifest: Manifest,
+  onStale?: (t: Tides) => void,
+): Promise<Tides | null | undefined> {
   const meta: TideMeta | null = manifest.tide;
   if (!meta) return null;
-  const res = await fetch(`${tidesBase(meta.port)}tides.parquet`, { cache: 'no-cache' });
-  if (!res.ok) return null;
-  const file = await res.arrayBuffer();
-  // No column projection: the tier is a few kB, and `c` (coefficient, spec §11) only
-  // appears once ingest has republished a port — projecting a column the deployed tier
-  // may not have yet would break the whole strip for that window.
-  const raw = (await parquetReadObjects({ file })) as Record<string, unknown>[];
-  const rows: TideRow[] = raw.map((r) => ({
-    t: Number(r.t),
-    h: Number(r.h),
-    k: r.k as TideKind,
-    c: r.c == null ? null : Number(r.c),
-  }));
-  return buildTides(meta, rows);
+  const url = `${tidesBase(meta.port)}tides.parquet`;
+  // Parsing the stale copy is async, so the network can win the race. `superseded` is set only
+  // when a fresh copy is actually returned — see the same note in lib/parquet.ts.
+  let superseded = false;
+  let painted = false;
+  let buf: ArrayBuffer | null;
+  try {
+    buf = await swrBuffer(url, {
+      onStale: onStale
+        ? (b) => void parseTides(meta, b).then((t) => {
+            if (t && !superseded) {
+              painted = true;
+              onStale(t);
+            }
+          })
+        : undefined,
+    });
+  } catch {
+    // Unavailable tier: keep a painted stale copy (undefined), else show the empty-state.
+    return painted ? undefined : null;
+  }
+  if (buf == null) return undefined; // unchanged
+  superseded = true;
+  return parseTides(meta, buf);
+}
+
+async function parseTides(meta: TideMeta, file: ArrayBuffer): Promise<Tides | null> {
+  try {
+    // No column projection: the tier is a few kB, and `c` (coefficient, spec §11) only
+    // appears once ingest has republished a port — projecting a column the deployed tier
+    // may not have yet would break the whole strip for that window.
+    const raw = (await parquetReadObjects({ file })) as Record<string, unknown>[];
+    const rows: TideRow[] = raw.map((r) => ({
+      t: Number(r.t),
+      h: Number(r.h),
+      k: r.k as TideKind,
+      c: r.c == null ? null : Number(r.c),
+    }));
+    return buildTides(meta, rows);
+  } catch {
+    return null;
+  }
 }
 
 /** Latest non-null value of a variable in a columnar series, with its timestamp (ms). */

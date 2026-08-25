@@ -238,6 +238,17 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   `@vite-pwa/assets-generator` (whose latest still pins `sharp ^0.33.5`), so `--force` "fixes" them by
   **downgrading `vite-plugin-pwa` 1.3 -> 0.18.2**. They're patched instead via `overrides` in
   `package.json` (`sharp`, `brace-expansion`) — keep those; drop one only when upstream bumps.
+- **Tiers are stale-while-revalidate, not fetch-on-load (spec 0019).** Every tier body is cached
+  per URL in IndexedDB (`lib/cache.ts`) and painted **immediately** via the `onStale` callback of
+  `lib/swr.ts`, while the network copy revalidates; a loader resolving **`null` means "unchanged,
+  keep what you painted"**, never "no data" (the tide loader adds `undefined` = unchanged, `null` =
+  no tides). Don't "simplify" that null away — re-setting identical data rebuilds every uPlot. Two
+  orderings must be kept or the cache silently does nothing offline: **failing is faster than
+  reading IndexedDB**, so grouped loads use `Promise.allSettled` (never `all`), and the flag that
+  suppresses a late stale paint is set **only when a fresh copy actually replaces it** — never on a
+  failure or an unchanged tier. Test the cache path with a *failing* backend, not a slow one. Every
+  fetch registers with `lib/progress.ts`, which is what `DataStatus` renders: keep new tier loads
+  going through `swr` so the rail/pill stay honest.
 - **Rebuilding the chart stack must not move the page.** `TimeSeries`'s render effect destroys every
   uPlot and re-appends the panels, so the host collapses and the browser clamps the scroll to the top.
   The cleanup **pins `host.style.minHeight`** before `destroy()`, and the rebuild releases it in a
@@ -270,7 +281,7 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
 
 Shipped and live at **olatu.io** — foundation → PWA → analytics/legal → wind ingest → wind in the
 webapp → units/settings + wind-UX polish → Current Conditions density → touch charts → mobile layout
-(specs 0001–0017). The full feature-by-feature history is in
+→ rain accumulation → instant load from the local tier cache (specs 0001–0019). The full feature-by-feature history is in
 **[docs/HISTORY.md](docs/HISTORY.md)**; the spec index + statuses are in [specs/README.md](specs/README.md).
 
 **Open owner TODO:** add the **`API_MAREE_KEY`** (tides) and **`METEOFRANCE_API_KEY`** (6-min

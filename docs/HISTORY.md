@@ -9,6 +9,40 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-08-25 — Instant load: local tier cache + visible progress (spec 0019)
+
+Owner report: *"quand je charge la page, il y a toujours un petit temps d'attente avant de voir les
+données"* — plus the question behind it: why re-fetch what the browser already had?
+
+**Stale-while-revalidate over an IndexedDB byte cache.** Every tier body is stored keyed by its URL
+(`webapp/src/lib/cache.ts`); on load the cached copy paints immediately while the network copy is
+fetched in parallel (`lib/swr.ts`), then replaces it in place — or, when the bytes are identical
+(the usual case between two 30-min refreshes), **nothing re-renders at all**. Bytes, not parsed
+arrays: the parse costs milliseconds, and byte-comparability is what makes the "unchanged → don't
+rebuild every uPlot" shortcut possible.
+
+Measured against a local mock bucket at 600 ms/tier: real data on screen at **~250 ms warm** vs
+~900 ms cold, with Current Conditions *and* seven plots already drawn at +250 ms. With the backend
+returning 503 the page still comes up complete, from the cache.
+
+**One widget for the wait** (`components/DataStatus.tsx`, fed by the `lib/progress.ts` store every
+fetch registers with): a 3 px rail across the top plus a pill — determinate *"Loading data… 45 %"*
+on a cold load, a discreet *"Refreshing…"* (delayed 500 ms) on a warm one, *"Data updated"* for
+2.2 s only when a refresh that started with data on screen actually changed something, and
+*"Could not refresh — showing your saved data"* when the network fails with a page already painted.
+`error` (nothing to show) and `refreshError` (showing saved data) are now different states.
+
+Three ordering rules cost real debugging and are written into the spec: an offline 503 answers
+*before* IndexedDB does, so the eager group uses `allSettled` (with `Promise.all` the rejection beat
+the cached paint and blanked the page in exactly the case the cache exists for); a late stale
+*decode* may only be suppressed when a fresh copy actually replaces it; and a partially-cached set
+never paints (an old manifest with a new `latest` is worse than waiting).
+
+The Workbox NetworkFirst policy for the tiers (spec 0010) is unchanged — it is invisible to the app,
+so the app owns its own cache. See [0019](../specs/2026-08-25-0019-instant-load-cache.md).
+
+---
+
 ## 2026-08-24 — Precipitation: window & aggregation (spec 0018)
 
 Owner question: *"la pluie en mm correspond à des cumuls sur quelle fenêtre ?"* — the honest answer

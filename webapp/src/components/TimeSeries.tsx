@@ -771,16 +771,34 @@ export default function TimeSeries({
       }
       // Spin only if something actually has to be fetched (cached tiles are instant).
       if (!cancelled && !needed.every((y) => cache.has(y))) setDetailLoading(true);
+      // Stale-while-revalidate per tile (spec 0019): a tile stored on this device plots at
+      // once, and the network copy replaces it only if it differs. The stale merge waits for
+      // EVERY needed tile — half-old/half-new across a year boundary would be a lie.
+      const staged: Record<number, Columnar> = {};
+      let mergedStale = false;
+      let fresh = false;
+      const paintStale = () => {
+        if (cancelled || !needed.every((y) => staged[y])) return;
+        mergedStale = true;
+        setDetail(mergeColumnar(needed.map((y) => staged[y]), DETAIL_COLUMNS));
+      };
       const parts: Columnar[] = [];
       for (const y of needed) {
         let c = cache.get(y);
-        if (!c) {
-          c = await loadParquetTier(campaign, files[y], DETAIL_COLUMNS);
+        if (c) {
+          fresh = true; // in-memory tile: it was never staged, so the final merge must run
+        } else {
+          const got = await loadParquetTier(campaign, files[y], DETAIL_COLUMNS, (cols) => {
+            staged[y] = cols;
+            paintStale();
+          });
+          if (got) fresh = true; // null = identical to the staged copy already plotted
+          c = got ?? staged[y];
           cache.set(y, c);
         }
         parts.push(c);
       }
-      if (!cancelled) setDetail(mergeColumnar(parts, DETAIL_COLUMNS));
+      if (!cancelled && (fresh || !mergedStale)) setDetail(mergeColumnar(parts, DETAIL_COLUMNS));
     };
 
     (async () => {
@@ -829,16 +847,32 @@ export default function TimeSeries({
         if (!cancelled) setWindDetail(null);
         return;
       }
+      // Same stale-while-revalidate tiling as the buoy detail above (spec 0019).
+      const staged: Record<number, Columnar> = {};
+      let mergedStale = false;
+      let fresh = false;
+      const paintStale = () => {
+        if (cancelled || !needed.every((y) => staged[y])) return;
+        mergedStale = true;
+        setWindDetail(mergeColumnar(needed.map((y) => staged[y]), WIND_DETAIL_COLUMNS));
+      };
       const parts: Columnar[] = [];
       for (const y of needed) {
         let c = cache.get(y);
-        if (!c) {
-          c = await loadWindParquetTier(windStation, files[y], WIND_DETAIL_COLUMNS);
+        if (c) {
+          fresh = true;
+        } else {
+          const got = await loadWindParquetTier(windStation, files[y], WIND_DETAIL_COLUMNS, (cols) => {
+            staged[y] = cols;
+            paintStale();
+          });
+          if (got) fresh = true;
+          c = got ?? staged[y];
           cache.set(y, c);
         }
         parts.push(c);
       }
-      if (!cancelled) setWindDetail(mergeColumnar(parts, WIND_DETAIL_COLUMNS));
+      if (!cancelled && (fresh || !mergedStale)) setWindDetail(mergeColumnar(parts, WIND_DETAIL_COLUMNS));
     };
     (async () => {
       try {
