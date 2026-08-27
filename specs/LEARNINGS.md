@@ -9,6 +9,45 @@ Format per entry: **date — title** · what we found · why it matters · resol
 
 ---
 
+## 2026-08-27 — a cache moves your mount into the past, and everything seeded at mount with it
+
+**What we found.** Painting from the local tier cache (spec 0019) broke the charts in a way the
+cache work never touched: the x-axis stopped reaching "now", while Current Conditions stayed
+correct. Nothing in the caching layer was wrong. `TimeSeries` seeds its x-window from `TN` (the
+latest reading) in a `useState` initializer, and that mount used to happen **on fresh data** because
+the charts simply didn't exist until the network answered. With a cache, the same mount happens on
+data as old as your last visit — and nothing ever revisited it. The in-memory per-year tile caches
+had the same shape: filled once, never invalidated, so even a window that did advance plotted a line
+that stopped where the previous visit did. Current Conditions escaped only because it is derived
+from `latest` on every render.
+
+A second, independent bug in the same report: `swrBuffer` reports "unchanged" as soon as the hashes
+match, but the stale *decode* it handed to `onStale` is async. On a fast network the unchanged
+sentinel resolved first, so the caller was told to keep a copy it had not been given — it kept
+nothing, and the charts fell back to the coarse daily tier. That path is taken whenever you reload
+inside one 30-min build window, i.e. constantly.
+
+**Why it matters.** Both are the same class of mistake, and it is the one a cache invites: *a cache
+changes WHEN your code first runs, not just how fast*. Any value seeded once "because by then the
+data is fresh" is now seeded on stale data, and every "you already have this" answer is a claim
+about the caller's state that the caller may not have reached yet. Neither is visible online without
+a cache — the network won every race — so both survived the review that shipped 0019.
+
+**Resolution.** `TimeSeries` watches `TN`: when it advances it drops the tile caches for the year(s)
+crossed and slides the window forward, but **only** when the window was sitting on the latest reading
+— a window the user navigated to is left alone (and `⟲ Reset` follows the window, not the pin).
+`loadParquetTierFrom`/`loadTidesForManifest` await the stale paint before returning the unchanged
+sentinel. Callers tolerate a tile that resolves to nothing rather than caching or merging the hole.
+
+Verified by rewinding `manifest.span.end` 3 h on the first load and releasing it on the next
+refresh, then re-running the same script against the unpatched code — a test that passes both ways
+proves nothing.
+
+**Refs.** [spec 0019 §8](2026-08-25-0019-instant-load-cache.md), `webapp/src/components/TimeSeries.tsx`,
+`webapp/src/lib/parquet.ts`, `webapp/src/lib/data.ts`.
+
+---
+
 ## 2026-08-25 — a fast failure beats your cache: `Promise.all` blanked the page offline
 
 **What we found.** With the new local tier cache (spec 0019) the offline case still rendered

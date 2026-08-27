@@ -9,6 +9,35 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-08-27 — The charts follow the clock again (spec 0019 §8)
+
+Owner report: *"quand la page démarre sur l'ancien data et s'update, ça met bien à jour les data
+actuel mais pas les time series — l'heure actuelle n'est pas le point x le plus à droite des plots"*.
+
+A side effect of painting from the cache. `TimeSeries` seeds its x-window from `TN` (the latest
+reading) **at mount** — which used to mean "on fresh data", and now means "on data as old as your
+last visit". Nothing reacted when `TN` advanced afterwards, so the window, and the in-memory
+per-year tile caches behind it, stayed pinned to the instant the stack was mounted with. Current
+Conditions was right because it is re-derived from `latest` on every render.
+
+- **The window follows the latest reading** when it was sitting on it, and only then — a window the
+  user panned to stays exactly where they put it, and `⟲ Reset` keeps pointing at the window it was
+  pointing at rather than the one it was pinned to.
+- **The current year's tile cache is dropped when `TN` crosses it**, so the finer tier actually
+  refetches. Older years never grow, so they are kept. Without this the axis reached "now" over a
+  line that stopped where the last visit did.
+- **`swrBuffer` may not say "unchanged, keep what you have" before the caller has it.** The stale
+  parquet decode is async while the hash comparison is instant, so a fast network resolved the
+  unchanged sentinel first and the caller kept *nothing* — the charts fell back to the coarse daily
+  tier. `loadParquetTierFrom` and `loadTidesForManifest` now await the stale paint before returning
+  it. This fired on the most ordinary action there is: reloading twice inside one build window.
+
+Verified in Chromium against the live bucket by rewinding `manifest.span.end` 3 h on the first load
+and releasing it on the next refresh: the window advances by exactly 3 h and both year tiles
+refetch; parked on an older window it does not move; without the fix neither happens.
+
+---
+
 ## 2026-08-25 — Instant load: local tier cache + visible progress (spec 0019)
 
 Owner report: *"quand je charge la page, il y a toujours un petit temps d'attente avant de voir les

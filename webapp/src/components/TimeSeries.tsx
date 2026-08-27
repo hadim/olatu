@@ -718,6 +718,44 @@ export default function TimeSeries({
   // Seed the Reset target from the initial preset (once — the guard makes it render-safe).
   if (presetBaseRef.current === null) presetBaseRef.current = { min: range.min, max: range.max, mode };
 
+  // Follow the latest reading as it advances.
+  //
+  // `range` is SEEDED from TN at mount, but TN keeps moving afterwards: the 5-min manifest poll
+  // brings a fresh build, and (spec 0019) the charts now mount on the CACHED daily tier, so the
+  // very first TN is as old as your last visit. Nothing here used to react to that — the x-window
+  // and the in-memory tiles stayed pinned to the instant the stack was mounted with, which is why
+  // "now" was no longer the right edge even though Current Conditions was up to date.
+  //
+  // Two things have to move with it:
+  //   1. the per-year tile caches for the year(s) TN crossed — older years never grow, but the
+  //      current one just did, so its cached tile stops short of the new readings;
+  //   2. the x-window, but ONLY when it was sitting on the latest reading (the `atEnd` test). A
+  //      window the user navigated to stays exactly where they put it.
+  const tnRef = useRef(TN);
+  useEffect(() => {
+    const prev = tnRef.current;
+    tnRef.current = TN;
+    if (TN <= prev) return;
+    for (let y = new Date(prev * 1000).getUTCFullYear(); y <= new Date(TN * 1000).getUTCFullYear(); y++) {
+      detailCache.current.delete(y);
+      hourlyCache.current.delete(y);
+      windDetailCache.current.delete(y);
+      windHourlyCache.current.delete(y);
+    }
+    setRange((r) => {
+      if (r.max < prev - 1) return r; // parked on an older window — don't yank it forward
+      // A preset re-derives (so "All" keeps reaching T0); anything else keeps its width and slides.
+      const next = mode.startsWith('p:')
+        ? presetRange(mode.slice(2), T0, TN)
+        : { min: Math.max(T0, Math.min(r.min + (TN - r.max), TN - MIN_SPAN)), max: TN };
+      if (next.min === r.min && next.max === r.max) return r;
+      // Keep ⟲ Reset pointing at the window it was pointing at, not the one it was pinned to.
+      const base = presetBaseRef.current;
+      if (base && base.max >= prev - 1) presetBaseRef.current = { ...next, mode: base.mode };
+      return next;
+    });
+  }, [TN, T0, mode]);
+
   // Time-navigation controls: pan by half a window, zoom by ~1.6×, both clamped to the
   // series bounds. They navigate (load the matching tier) but pass isZoom so ⟲ Reset
   // still returns to the chosen preset, not an intermediate pan/zoom.
@@ -794,6 +832,12 @@ export default function TimeSeries({
           });
           if (got) fresh = true; // null = identical to the staged copy already plotted
           c = got ?? staged[y];
+          if (!c) {
+            // Neither a fresh copy nor a usable cached one — don't poison the cache with it,
+            // and leave the coarse daily tier standing rather than merging a hole.
+            if (!cancelled) setDetail(null);
+            return;
+          }
           cache.set(y, c);
         }
         parts.push(c);
@@ -868,6 +912,10 @@ export default function TimeSeries({
           });
           if (got) fresh = true;
           c = got ?? staged[y];
+          if (!c) {
+            if (!cancelled) setWindDetail(null); // see the buoy loader above
+            return;
+          }
           cache.set(y, c);
         }
         parts.push(c);

@@ -58,19 +58,29 @@ export async function loadParquetTierFrom(
   // tier or a failed fetch the stale paint is the data, and suppressing it would blank the
   // charts exactly when the cache is what's saving the page.
   let superseded = false;
+  // Decoding is async but `swrBuffer` reports "unchanged" as soon as the bytes match, so a fast
+  // network can get there first. Resolving `null` then tells the caller to keep a copy it has not
+  // been handed yet — it keeps nothing, and the charts fall back to the coarse daily tier for a
+  // window that has a fine one. Hold the null until the stale paint has actually landed.
+  let stalePaint: Promise<void> | null = null;
   const buf = await swrBuffer(url, {
     onStale: onStale
-      ? (b) => void decode(b, columns).then(
-          (cols) => {
-            if (!superseded) onStale(cols);
-          },
-          () => {
-            /* a corrupt cached tier is simply not painted */
-          },
-        )
+      ? (b) => {
+          stalePaint = decode(b, columns).then(
+            (cols) => {
+              if (!superseded) onStale(cols);
+            },
+            () => {
+              /* a corrupt cached tier is simply not painted */
+            },
+          );
+        }
       : undefined,
   });
-  if (buf == null) return null; // unchanged — the painted stale copy stands
+  if (buf == null) {
+    await stalePaint;
+    return null; // unchanged — the painted stale copy stands
+  }
   superseded = true;
   return decode(buf, columns);
 }

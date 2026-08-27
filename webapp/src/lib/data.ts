@@ -300,23 +300,33 @@ export async function loadTidesForManifest(
   // when a fresh copy is actually returned — see the same note in lib/parquet.ts.
   let superseded = false;
   let painted = false;
+  // The parse is async while `swrBuffer` reports "unchanged" the moment the bytes match, so the
+  // network can beat the stale paint. Every `return` below therefore waits for that paint first:
+  // answering "unchanged, keep what you have" before the caller HAS it leaves the tide UI empty.
+  let stalePaint: Promise<void> | null = null;
   let buf: ArrayBuffer | null;
   try {
     buf = await swrBuffer(url, {
       onStale: onStale
-        ? (b) => void parseTides(meta, b).then((t) => {
-            if (t && !superseded) {
-              painted = true;
-              onStale(t);
-            }
-          })
+        ? (b) => {
+            stalePaint = parseTides(meta, b).then((t) => {
+              if (t && !superseded) {
+                painted = true;
+                onStale(t);
+              }
+            });
+          }
         : undefined,
     });
   } catch {
     // Unavailable tier: keep a painted stale copy (undefined), else show the empty-state.
+    await stalePaint;
     return painted ? undefined : null;
   }
-  if (buf == null) return undefined; // unchanged
+  if (buf == null) {
+    await stalePaint;
+    return painted ? undefined : null; // unchanged (or an unusable cached copy → empty-state)
+  }
   superseded = true;
   return parseTides(meta, buf);
 }

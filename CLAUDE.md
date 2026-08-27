@@ -249,6 +249,17 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   failure or an unchanged tier. Test the cache path with a *failing* backend, not a slow one. Every
   fetch registers with `lib/progress.ts`, which is what `DataStatus` renders: keep new tier loads
   going through `swr` so the rail/pill stay honest.
+- **A cache moved the charts' mount into the past (spec 0019 §8).** `TimeSeries` seeds its x-window
+  from **`TN`** (the latest reading) at mount — which now means "on data as old as your last visit".
+  `TN` keeps moving after that (the 5-min manifest poll; the network copy replacing the cached
+  paint), so **nothing may be seeded from it and then left alone**: the window slides forward, but
+  ONLY when it was sitting on the latest reading (a window the user panned to stays put), and the
+  in-memory per-year tile caches are dropped for the year(s) `TN` crossed — older years never grow.
+  Drop either half and the axis reaches "now" over a line that stops where the last visit did.
+  Matching rule one layer down: **"unchanged, keep what you have" may only be said to a caller that
+  HAS it** — the stale parquet/tide parse is async while the hash compare is instant, so
+  `loadParquetTierFrom`/`loadTidesForManifest` await the stale paint before returning the unchanged
+  sentinel. See the 2026-08-27 LEARNINGS entry.
 - **Rebuilding the chart stack must not move the page.** `TimeSeries`'s render effect destroys every
   uPlot and re-appends the panels, so the host collapses and the browser clamps the scroll to the top.
   The cleanup **pins `host.style.minHeight`** before `destroy()`, and the rebuild releases it in a

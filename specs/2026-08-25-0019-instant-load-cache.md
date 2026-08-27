@@ -132,3 +132,37 @@ by ~1.6 s. Sitting on the page, a refresh swaps the values in place and flashes 
 - Showing an explicit "this data is from your cache" banner: the freshness badges already state the
   reading's age, which is the honest version of that claim.
 - Any change to the Workbox runtime caching (§2.2).
+
+## 8. Amendment (2026-08-27) — the charts have to follow the clock
+
+Owner report: *"quand la page démarre sur l'ancien data et s'update, ça met bien à jour les data
+actuel mais pas les time series — l'heure actuelle n'est pas le point x le plus à droite"*.
+
+Painting from the cache moved a mount that used to happen **once, on fresh data** to a mount that
+happens **on data as old as your last visit**. Three things were seeded at that mount and never
+revisited, so the chart stack stayed pinned to the previous visit's instant while Current Conditions
+(re-derived on every render from `latest`) was correct — which is exactly what the report describes.
+
+Two more rules for §4:
+
+- **Nothing may be seeded once from the latest reading and then left alone.** `TN` (the latest
+  reading, `max(daily tier tail, manifest.span.end)`) moves after mount — the 5-min manifest poll
+  brings a fresh build, and the network copy of the daily tier replaces the cached paint. Whatever
+  is derived from it has to move too:
+  - the **x-window** (`range`), but only when it was sitting on the latest reading (`atEnd`) — a
+    window the user navigated to stays where they put it, and `⟲ Reset` follows the window it was
+    pointing at, not the one it was pinned to;
+  - the **in-memory per-year tile caches** (`detailCache`/`hourlyCache` and their wind twins) for
+    the year(s) `TN` crossed. Older years never grow; the current one just did, so its cached tile
+    stops short of the new readings. Without this the axis reaches "now" over a line that doesn't.
+- **"Unchanged, keep what you have" may only be said to a caller that HAS it.** `swrBuffer` reports
+  unchanged the moment the hashes match, but the stale *decode/parse* handed to `onStale` is async,
+  so a fast network resolves `null`/`undefined` before the caller has been given anything — and the
+  caller keeps nothing. `loadParquetTierFrom` and `loadTidesForManifest` therefore **await the stale
+  paint before returning the unchanged sentinel**. This is the §4 "suppress a late stale paint only
+  when a fresh copy replaces it" rule seen from the other end, and it fires on the most ordinary
+  action there is: reloading the page twice inside one 30-min build window.
+
+A caller must still tolerate a tile that resolves to nothing (a corrupt cached copy plus an
+unchanged network copy): the detail loaders drop back to the coarse daily tier rather than caching
+or merging the hole.
