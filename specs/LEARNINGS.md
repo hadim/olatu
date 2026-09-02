@@ -17,7 +17,12 @@ before touching any buoy, on the OIDC exchange:
 changed on our side — the run before and the run after exchanged the very same kind of GitHub
 id_token. "This operation was aborted" is Node's `AbortSignal` message: the Hub's token endpoint
 timed out on **its own** upstream call (verifying our JWT against GitHub's keys) and surfaced
-that as a *client* error. The status page showed everything operational throughout. The night
+that as a *client* error. **Ten-second diagnosis:** POST a *bogus* JWT (any `iss:
+https://token.actions.githubusercontent.com` payload, garbage signature) to
+`https://huggingface.co/oauth/token` from a laptop — during the incident it answered the same
+`aborted` body after exactly ~10 s every time, where a healthy Hub rejects the signature at
+once. Same answer from outside CI = HF-wide, not our claims, not the trusted-publisher
+config, not GitHub. The status page showed everything operational throughout. The night
 before, a separate run died on a `429` whose HTML body carried no `Retry-After`: our 1-2-4-8 s
 schedule (15 s in total) sat entirely inside HF's rate-limit window, so all five attempts got
 the same answer.
