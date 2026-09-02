@@ -63,6 +63,33 @@ HF_AUD = "https://huggingface.co"
 # retry, so a single transient blip aborts the whole run. Back off and retry.
 _RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 
+# Backoff for the exchange: 3, 6, 12, 24, 48 s (~90 s over 6 attempts). The old 1-2-4-8 s
+# schedule (15 s total) sat entirely inside HF's rate-limit window, so a 429 on the first
+# call was a 429 on all five (2026-09-01). Still far below the job's 15-min cap.
+_POST_ATTEMPTS = 6
+_POST_BASE_DELAY_S = 3.0
+
+
+def _hf_aborted(resp: httpx.Response) -> bool:
+    """True when HF's token endpoint reports ITS OWN upstream timeout as a client error.
+
+    On 2026-09-02 three consecutive crons died on
+    `400 {"error":"invalid_grant","error_description":"This operation was aborted"}`.
+    That is Node's AbortSignal message: the Hub gave up verifying our GitHub id_token
+    (its own fetch timed out), not a bad grant — the next cron exchanged the very same
+    kind of token fine. A status-only retry never fires on a 400, so match the body.
+    """
+    if resp.status_code != 400:
+        return False
+    try:
+        body = resp.json()
+    except ValueError:
+        return False
+    if not isinstance(body, dict):
+        return False
+    return "aborted" in str(body.get("error_description", "")).lower()
+
+
 # A *transport* fault (reset, refused, timeout) is as transient as a 5xx and must retry the
 # same way. It didn't: on 2026-07-13 HF dropped connections mid-handshake and the run died
 # on the very first call with `ConnectError: Connection reset by peer`, before any buoy was
@@ -82,8 +109,15 @@ _RESOLVE_TOKEN = object()
 # ------------------------------------------------------------------------ auth
 
 
-def _post_with_retry(url: str, *, attempts: int = 5, **kwargs) -> httpx.Response:
-    """POST, retrying transient faults — 429/5xx *and* connection errors — with backoff.
+def _post_with_retry(
+    url: str,
+    *,
+    attempts: int = _POST_ATTEMPTS,
+    base_delay: float = _POST_BASE_DELAY_S,
+    **kwargs,
+) -> httpx.Response:
+    """POST, retrying transient faults with backoff: 429/5xx, connection errors, *and*
+    HF's "operation was aborted" 400 (see `_hf_aborted`).
 
     Retrying only status codes isn't enough: a reset peer raises instead of answering, and
     that exception used to escape and abort the whole refresh (2026-07-13). Both paths back
@@ -97,16 +131,22 @@ def _post_with_retry(url: str, *, attempts: int = 5, **kwargs) -> httpx.Response
             last = e
             if i == attempts - 1:
                 break
-            delay = 2.0**i
+            delay = base_delay * 2**i
             ui.warn(f"HF unreachable ({type(e).__name__}); retrying in {delay:.0f}s")
             time.sleep(delay)
             continue
+        aborted = _hf_aborted(resp)
         # Last attempt: hand the response back so the caller reports the real status.
-        if resp.status_code not in _RETRY_STATUS or i == attempts - 1:
+        if (resp.status_code not in _RETRY_STATUS and not aborted) or i == attempts - 1:
             return resp
         retry_after = resp.headers.get("retry-after", "")
-        delay = float(retry_after) if retry_after.isdigit() else 2.0**i
-        ui.warn(f"HF returned {resp.status_code}; retrying in {delay:.0f}s")
+        delay = float(retry_after) if retry_after.isdigit() else base_delay * 2**i
+        why = (
+            "aborted its own upstream call (400)"
+            if aborted
+            else f"returned {resp.status_code}"
+        )
+        ui.warn(f"HF {why}; retrying in {delay:.0f}s")
         time.sleep(delay)
     raise RuntimeError(f"HF unreachable after {attempts} attempts: {last!r}")
 

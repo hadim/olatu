@@ -9,6 +9,34 @@ Format per entry: **date — title** · what we found · why it matters · resol
 
 ---
 
+## 2026-09-02 — HF reports its own timeout as a `400 invalid_grant`; a status-only retry never fires
+
+**What we found.** Three consecutive `*/30` refreshes (04:42, 05:19, 05:40 UTC) died 10 s in,
+before touching any buoy, on the OIDC exchange:
+`400 {"error":"invalid_grant","error_description":"This operation was aborted"}`. Nothing
+changed on our side — the run before and the run after exchanged the very same kind of GitHub
+id_token. "This operation was aborted" is Node's `AbortSignal` message: the Hub's token endpoint
+timed out on **its own** upstream call (verifying our JWT against GitHub's keys) and surfaced
+that as a *client* error. The status page showed everything operational throughout. The night
+before, a separate run died on a `429` whose HTML body carried no `Retry-After`: our 1-2-4-8 s
+schedule (15 s in total) sat entirely inside HF's rate-limit window, so all five attempts got
+the same answer.
+
+**Why it matters.** The exchange is the run's *first* network call, so any blip there takes
+all three buoys down at once and the site's freshness badge goes grey for 30 min per miss.
+The 2026-07-13 fix made `_post_with_retry` retry 429/5xx *and* transport faults — but a
+transient dressed as a `400` is invisible to a status-code allow-list, and a backoff shorter
+than the rate-limit window is no backoff at all. Both are the same lesson as July: classify
+by *what happened*, not by the code the other side chose.
+
+**Resolution.** `update._hf_aborted` recognises the aborted-upstream body and
+`_post_with_retry` treats it as transient alongside 429/5xx; a genuine `400` (bad claims,
+mis-configured trusted publisher) still returns at once so the log names the real cause.
+Backoff is now 3-6-12-24-48 s over 6 attempts (~90 s, versus the job's 15-min cap). Refs:
+`ingest/update.py`, [HISTORY](../docs/HISTORY.md#2026-09-02--the-oidc-exchange-rides-out-hfs-own-timeouts).
+
+---
+
 ## 2026-08-27 — a cache moves your mount into the past, and everything seeded at mount with it
 
 **What we found.** Painting from the local tier cache (spec 0019) broke the charts in a way the

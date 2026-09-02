@@ -9,6 +9,22 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-09-02 — The OIDC exchange rides out HF's own timeouts
+
+Three consecutive crons failed on the HF token exchange with
+`400 invalid_grant · "This operation was aborted"` — the Hub timing out on its own upstream
+call and reporting it as a client error — and one the night before on a `429` that outlasted
+the 15 s backoff (diagnosis in
+[LEARNINGS](../specs/LEARNINGS.md#2026-09-02--hf-reports-its-own-timeout-as-a-400-invalid_grant-a-status-only-retry-never-fires)).
+
+- **`update._hf_aborted`** matches that body, and `_post_with_retry` retries it like a 429/5xx.
+  A real `400` (bad claims, trusted-publisher misconfiguration) still fails immediately with
+  the server's text.
+- **Backoff 3-6-12-24-48 s over 6 attempts** (~90 s) instead of 1-2-4-8 s (15 s), so a
+  rate-limit window is actually waited out. Well under the job's 15-minute cap.
+
+---
+
 ## 2026-08-27 — The charts follow the clock again (spec 0019 §8)
 
 Owner report: *"quand la page démarre sur l'ancien data et s'update, ça met bien à jour les data
