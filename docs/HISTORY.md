@@ -20,8 +20,9 @@ the 15 s backoff (diagnosis in
 - **`update._hf_aborted`** matches that body, and `_post_with_retry` retries it like a 429/5xx.
   A real `400` (bad claims, trusted-publisher misconfiguration) still fails immediately with
   the server's text.
-- **Backoff 3-6-12-24-48 s over 6 attempts** (~90 s) instead of 1-2-4-8 s (15 s), so a
-  rate-limit window is actually waited out. Well under the job's 15-minute cap.
+- **Backoff 3-6-12-24-48-60-60 s over 8 attempts** (~3.5 min) instead of 1-2-4-8 s (15 s), so
+  a rate-limit window is actually waited out. The verifying run needed 6 attempts before HF
+  accepted the exchange. Under the 600 s auth watchdog and the job's 15-minute cap.
 
 ---
 

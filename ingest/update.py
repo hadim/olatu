@@ -63,11 +63,15 @@ HF_AUD = "https://huggingface.co"
 # retry, so a single transient blip aborts the whole run. Back off and retry.
 _RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 
-# Backoff for the exchange: 3, 6, 12, 24, 48 s (~90 s over 6 attempts). The old 1-2-4-8 s
-# schedule (15 s total) sat entirely inside HF's rate-limit window, so a 429 on the first
-# call was a 429 on all five (2026-09-01). Still far below the job's 15-min cap.
-_POST_ATTEMPTS = 6
+# Backoff for the exchange: 3, 6, 12, 24, 48, 60, 60 s (~3.5 min over 8 attempts). The old
+# 1-2-4-8 s schedule (15 s total) sat entirely inside HF's rate-limit window, so a 429 on
+# the first call was a 429 on all five (2026-09-01); and on 2026-09-02 a degraded Hub
+# aborted 5 exchanges in a row before the 6th landed, so 6 attempts was the bare minimum.
+# Worst case (every attempt hitting the 30 s request timeout) stays under the 600 s
+# `_net("auth", …)` watchdog and far under the job's 15-min cap.
+_POST_ATTEMPTS = 8
 _POST_BASE_DELAY_S = 3.0
+_POST_MAX_DELAY_S = 60.0
 
 
 def _hf_aborted(resp: httpx.Response) -> bool:
@@ -114,6 +118,7 @@ def _post_with_retry(
     *,
     attempts: int = _POST_ATTEMPTS,
     base_delay: float = _POST_BASE_DELAY_S,
+    max_delay: float = _POST_MAX_DELAY_S,
     **kwargs,
 ) -> httpx.Response:
     """POST, retrying transient faults with backoff: 429/5xx, connection errors, *and*
@@ -131,7 +136,7 @@ def _post_with_retry(
             last = e
             if i == attempts - 1:
                 break
-            delay = base_delay * 2**i
+            delay = min(base_delay * 2**i, max_delay)
             ui.warn(f"HF unreachable ({type(e).__name__}); retrying in {delay:.0f}s")
             time.sleep(delay)
             continue
@@ -140,7 +145,10 @@ def _post_with_retry(
         if (resp.status_code not in _RETRY_STATUS and not aborted) or i == attempts - 1:
             return resp
         retry_after = resp.headers.get("retry-after", "")
-        delay = float(retry_after) if retry_after.isdigit() else base_delay * 2**i
+        delay = min(
+            float(retry_after) if retry_after.isdigit() else base_delay * 2**i,
+            max_delay,
+        )
         why = (
             "aborted its own upstream call (400)"
             if aborted

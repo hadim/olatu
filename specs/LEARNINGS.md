@@ -32,7 +32,9 @@ by *what happened*, not by the code the other side chose.
 **Resolution.** `update._hf_aborted` recognises the aborted-upstream body and
 `_post_with_retry` treats it as transient alongside 429/5xx; a genuine `400` (bad claims,
 mis-configured trusted publisher) still returns at once so the log names the real cause.
-Backoff is now 3-6-12-24-48 s over 6 attempts (~90 s, versus the job's 15-min cap). Refs:
+Backoff is now 3-6-12-24-48-60-60 s over 8 attempts (~3.5 min, under the 600 s auth
+watchdog and the job's 15-min cap) — the first run with the fix needed **all six** of the
+original attempts before one exchange landed, so six was the floor, not a margin. Refs:
 `ingest/update.py`, [HISTORY](../docs/HISTORY.md#2026-09-02--the-oidc-exchange-rides-out-hfs-own-timeouts).
 
 ---
