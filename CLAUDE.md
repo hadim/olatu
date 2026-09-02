@@ -44,7 +44,7 @@ ingest/        Python (polars). NOT an installable package. All steps take --cam
   tides.py     fetch api-maree.fr water levels -> high/low extrema -> tides/<port>/data/tides.parquet (spec 0008; needs API_MAREE_KEY)
   wind.py      Météo-France wind per station -> buoy-style tiered dataset wind/<station>/ (spec 0012; one-shot hourly history keyless + forward 6-min live needs METEOFRANCE_API_KEY)
   build.py     CSV -> tiered Parquet/JSON (archive-preferred coalesce)
-  update.py    pull → scrape → tides → build → upload to the HF bucket (OIDC in CI) + daily reel snapshot; Typer CLI (-c repeatable)
+  update.py    pull → scrape → tides → build → upload to the HF bucket (HF_TOKEN secret in CI, OIDC fallback) + daily reel snapshot; Typer CLI (-c repeatable)
   ui.py        shared Rich console + helpers (banner/section/step/detail/summary_table); buoys=cyan, tides=blue; CI-safe plain (spec 0009)
   migrate_layout.py  one-shot bucket layout migration <campaign>/ -> buoys/<campaign>/ (copy | delete --yes; spec 0009)
 pixi.toml      Python env + frontend tasks (no pyproject; no Python library)
@@ -79,7 +79,7 @@ repo 2026-06-30 — buckets are mutable/overwrite-in-place, and a *public* bucke
 ## Commands
 
 ```bash
-pixi run update                      # pull → scrape → build → upload to HF (the usual refresh; OIDC in CI)
+pixi run update                      # pull → scrape → build → upload to HF (the usual refresh; HF_TOKEN secret in CI, OIDC fallback)
 pixi run update -c 06403 -c 06402    # refresh several buoys (repeat -c; typer, not argparse nargs)
 pixi run migrate copy                # one-shot: copy bucket <campaign>/ -> buoys/<campaign>/ (spec 0009)
 pixi run migrate delete --yes        # after the deployed site reads buoys/, drop the old root prefixes
@@ -295,8 +295,12 @@ webapp → units/settings + wind-UX polish → Current Conditions density → to
 → rain accumulation → instant load from the local tier cache (specs 0001–0019). The full feature-by-feature history is in
 **[docs/HISTORY.md](docs/HISTORY.md)**; the spec index + statuses are in [specs/README.md](specs/README.md).
 
-**Open owner TODO:** add the **`API_MAREE_KEY`** (tides) and **`METEOFRANCE_API_KEY`** (6-min
-live wind) GitHub secrets so both refresh in CI — the hourly wind history is keyless and already
-seeded to the bucket (2010→). **Next per roadmap:** a combined air+sea temperature chart panel + the
+**Open owner TODO:** CI authenticates to the bucket with the **`HF_TOKEN`** repo secret (the
+fine-grained HF token `olatu-gh-ci`, read+write scoped to `hadim/olatu` only) since 2026-09-02,
+because HF stopped matching the bucket's OIDC trusted publisher (`400 No trusted publisher
+configured … matching this OIDC token`, every run for a whole day). `update.resolve_token` takes
+the env var first and falls back to the OIDC exchange when it is unset, so **delete the secret
+to go back keyless** once HF matches the claims again — nothing else changes. `API_MAREE_KEY` and
+`METEOFRANCE_API_KEY` are set. **Next per roadmap:** a combined air+sea temperature chart panel + the
 map buoy↔station pairing **line** (station markers already shipped, spec 0013 §6), side-by-side buoy
 comparison, per-locale glossary JSON.

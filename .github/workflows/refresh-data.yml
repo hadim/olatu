@@ -8,9 +8,15 @@ name: Refresh data (buoys · tides · wind → HF bucket)
 # The webapp reads those tiers at runtime, so this NEVER rebuilds or redeploys the site —
 # it is a tiny Python-only job. See specs/0004 §6, 0005 §4, 0008, 0012.
 #
-# Auth is keyless via OIDC Trusted Publishers (no HF_TOKEN secret): the trusted publisher
-# is configured on the bucket hadim/olatu → Settings → Trusted Publishers with claims
-# repository = hadim/olatu  and  workflow_ref starts-with hadim/olatu/.github/workflows/refresh-data.yml@.
+# Auth: the HF_TOKEN secret (a fine-grained HF token, "olatu-gh-ci", scoped read+write to
+# the bucket hadim/olatu) when it is set — ingest/update.resolve_token takes it before
+# anything else. When the secret is ABSENT the job falls back to keyless OIDC Trusted
+# Publishers: the trusted publisher is configured on the bucket hadim/olatu → Settings →
+# Trusted Publishers with claims repository = hadim/olatu and workflow_ref starts-with
+# hadim/olatu/.github/workflows/refresh-data.yml@. The secret was added on 2026-09-02
+# because HF's OIDC exchange kept failing on their side (400 "operation was aborted",
+# 429s) and took the whole cron down with it; delete the secret to go back to OIDC —
+# nothing else needs to change (permissions.id-token stays on for that reason).
 
 on:
   schedule:
@@ -18,7 +24,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write # mint the OIDC token exchanged for a short-lived, bucket-scoped HF token
+  id-token: write # OIDC fallback: mint the id_token exchanged for a bucket-scoped HF token when HF_TOKEN is unset
   contents: read
 
 # Never let two refreshes race the bucket.
@@ -58,16 +64,19 @@ jobs:
       # exchange shared across campaigns (avoids the per-buoy 429s). update.py refreshes
       # each buoy independently and exits non-zero if any failed (fail-fast off).
       #
-      # Ingest-only secrets, both non-fatal if unset (the step logs + skips) and NEVER shipped
-      # to the webapp — only derived tiers are uploaded to the bucket:
+      # Ingest-only secrets, NEVER shipped to the webapp — only derived tiers are uploaded
+      # to the bucket:
+      #   HF_TOKEN             bucket read/write (see the auth note at the top); unset → OIDC
       #   API_MAREE_KEY        tide refresh (ingest/tides.py, spec 0008) -> tides/<port>/
       #   METEOFRANCE_API_KEY  6-min live wind (ingest/wind.py DPObs, spec 0012) -> wind/<station>/
+      # The last two are non-fatal if unset (the step logs + skips).
       # The hourly wind history needs no key (open Météo-France bulk files) and refreshes at
       # most ~once/day (gated in update._hourly_wind_due). Each buoy resolves to its nearest
       # port/station; the 3 buoys map to 3 distinct ones, so one run refreshes all with no
       # collision.
       - name: Refresh every buoy (pull → scrape → tides → wind → build → upload to HF)
         env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
           API_MAREE_KEY: ${{ secrets.API_MAREE_KEY }}
           METEOFRANCE_API_KEY: ${{ secrets.METEOFRANCE_API_KEY }}
         run: pixi run -e data update -c 06403 -c 06402 -c 03302

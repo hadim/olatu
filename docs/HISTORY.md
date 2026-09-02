@@ -9,6 +9,24 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-09-02 — CI authenticates with a stored bucket token; OIDC becomes the fallback
+
+The morning fix wasn't enough: from 11:16 UTC every `*/30` refresh died on the exchange with a
+*genuine* `400` — `No trusted publisher configured on 'buckets/hadim/olatu' matching this OIDC
+token` — a different failure from the "aborted" one, and one no retry can help: HF simply no
+longer matches the bucket's trusted-publisher claims (the 8-attempt backoff correctly fails at
+once on it). Nothing changed on our side; the owner's HF-side config is unchanged.
+
+- **`HF_TOKEN` repo secret** = the fine-grained HF token `olatu-gh-ci`, read+write scoped to the
+  bucket `hadim/olatu` only. `refresh-data.yml` passes it to the refresh step; `update.resolve_token`
+  already took the env var before anything else, so no Python change. The run's context line reads
+  `auth HF_TOKEN env`.
+- **OIDC is now the fallback, not removed.** `permissions.id-token: write` stays and an
+  absent/empty secret drops straight back into the trusted-publisher exchange — delete the secret
+  to return to keyless once HF matches the claims again.
+
+---
+
 ## 2026-09-02 — The OIDC exchange rides out HF's own timeouts
 
 Three consecutive crons failed on the HF token exchange with
