@@ -22,6 +22,11 @@ on:
   schedule:
     - cron: '*/30 * * * *'
   workflow_dispatch:
+    inputs:
+      keyless:
+        description: 'Ignore the HF_TOKEN secret for this run and authenticate via OIDC (tests the trusted publisher without deleting the secret)'
+        type: boolean
+        default: false
 
 permissions:
   id-token: write # OIDC fallback: mint the id_token exchanged for a bucket-scoped HF token when HF_TOKEN is unset
@@ -76,7 +81,11 @@ jobs:
       # collision.
       - name: Refresh every buoy (pull → scrape → tides → wind → build → upload to HF)
         env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          # Blank on a `keyless` dispatch so resolve_token falls through to the OIDC exchange.
+          # Written this way round on purpose: `inputs.keyless && '' || secrets.HF_TOKEN` looks
+          # equivalent but is not -- '' is FALSY in a GHA expression, so the `||` branch would
+          # win and hand the secret back. On `schedule`, inputs.keyless is null -> secret.
+          HF_TOKEN: ${{ inputs.keyless != true && secrets.HF_TOKEN || '' }}
           API_MAREE_KEY: ${{ secrets.API_MAREE_KEY }}
           METEOFRANCE_API_KEY: ${{ secrets.METEOFRANCE_API_KEY }}
         run: pixi run -e data update -c 06403 -c 06402 -c 03302
