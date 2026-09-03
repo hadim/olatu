@@ -7,6 +7,16 @@ spec and link it here.
 
 Format per entry: **date — title** · what we found · why it matters · resolution · refs.
 
+
+**Update 2026-09-03.** Still live, and now pinned down. The bogus-JWT probe returns the same body
+at **10.15 s, 3/3**, while GitHub's OIDC discovery + JWKS answer in ~0.32 s from the same laptop —
+so the abort is HF-side, not upstream. The *same* 10 s constant turns up on
+`POST /api/buckets/…/settings/trusted-publishers`, which 500s **6/6 at 10.15-10.20 s** on a payload
+that had succeeded 40 min earlier: one timeout, two endpoints, two different (wrong) status codes.
+Separately, the bucket's trusted publisher had simply **vanished** — the list came back empty,
+which is what "no trusted publisher matching" was literally telling us. Recreating it did not fix
+the exchange. Reported as [hub-docs#2757](https://github.com/huggingface/hub-docs/issues/2757).
+
 ---
 
 ## 2026-09-03 — A "last N minutes" poll turns any outage into a permanent hole

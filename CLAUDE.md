@@ -303,11 +303,18 @@ webapp → units/settings + wind-UX polish → Current Conditions density → to
 **[docs/HISTORY.md](docs/HISTORY.md)**; the spec index + statuses are in [specs/README.md](specs/README.md).
 
 **Open owner TODO:** CI authenticates to the bucket with the **`HF_TOKEN`** repo secret (the
-fine-grained HF token `olatu-gh-ci`, read+write scoped to `hadim/olatu` only) since 2026-09-02,
-because HF stopped matching the bucket's OIDC trusted publisher (`400 No trusted publisher
-configured … matching this OIDC token`, every run for a whole day). `update.resolve_token` takes
-the env var first and falls back to the OIDC exchange when it is unset, so **delete the secret
-to go back keyless** once HF matches the claims again — nothing else changes. `API_MAREE_KEY` and
-`METEOFRANCE_API_KEY` are set. **Next per roadmap:** a combined air+sea temperature chart panel + the
+fine-grained HF token `olatu-gh-ci`, read+write scoped to `hadim/olatu` only) since 2026-09-02.
+`update.resolve_token` takes the env var first and falls back to the OIDC exchange when it is
+unset, so **deleting the secret goes back keyless** — nothing else changes. Two things block that
+today (both HF-side, reported as **[hub-docs#2757](https://github.com/huggingface/hub-docs/issues/2757)**):
+the `/oauth/token` exchange still dies on a ~10 s server abort returned as `400 invalid_grant`
+(verified in CI 2026-09-03 with a matching publisher, all 8 retries), and
+`POST /api/buckets/…/settings/trusted-publishers` intermittently 500s on the same 10 s abort.
+Retest keyless in one command — `gh workflow run refresh-data.yml -f keyless=true` blanks
+`HF_TOKEN` for that run only, leaving the secret in place. ⚠️ The bucket's trusted publisher had
+**vanished** and was recreated 2026-09-03 with `repository == hadim/olatu` **only** — the
+`workflow_ref` prefix claim scoping it to `refresh-data.yml` could not be re-added while the
+endpoint 500s, so *any* workflow in the repo currently matches. Narrow it when HF is fixed
+(claim kinds are `eq` and `prefix`). `API_MAREE_KEY` and `METEOFRANCE_API_KEY` are set. **Next per roadmap:** a combined air+sea temperature chart panel + the
 map buoy↔station pairing **line** (station markers already shipped, spec 0013 §6), side-by-side buoy
 comparison, per-locale glossary JSON.
