@@ -42,8 +42,10 @@ import re
 import shutil
 import tempfile
 import time
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 import httpx
 import polars as pl
@@ -80,8 +82,16 @@ _TIER_COLS = list(WIND_UNITS.keys())
 DPOBS_BASE = "https://public-api.meteofrance.fr/public/DPObs/v2"
 ENV_KEY = "METEOFRANCE_API_KEY"
 LIVE_STEP_MIN = 6  # the DPObs infra-hourly cadence
-LIVE_LOOKBACK_MIN = 66  # routine per-run window: > 2x the 30-min cron gap (11 points)
+LIVE_LOOKBACK_MIN = 66  # tail ALWAYS re-probed (points publish late): 11 points
+LIVE_HEAL_HOURS = (
+    24  # ...plus any point still missing from the last 24 h (specs/0012 §3.1)
+)
+LIVE_HEAL_MAX_POINTS = 60  # ...at most 6 h of holes per station per run, newest first
 LIVE_SEED_HOURS = 12  # `--seed`: initial 6-min backfill so latest.json isn't empty
+DPOBS_RETENTION_H = (
+    96  # measured 2026-09-03: ~4 days served, older points are gone for good
+)
+DPOBS_RATE_PER_MIN = 90  # self-imposed budget under the documented 100 req/min
 DPOBS_PACE_S = 0.1  # polite spacing between DPObs calls
 DPOBS_RETRY_STATUS = frozenset(
     {429, 500, 502, 503, 504}
@@ -288,6 +298,26 @@ def _canon6(row: dict) -> dict:
     }
 
 
+_dpobs_calls: deque[float] = deque()
+
+
+def _dpobs_gate() -> None:
+    """Block until one more DPObs call fits in the 100 req/min budget.
+
+    A routine run asks for ~11 points, but a run that heals an outage asks for up to
+    `LIVE_HEAL_MAX_POINTS` more per station -- enough, across three stations, to trip the cap.
+    Pacing is cheaper than eating the 429s the retry loop would otherwise absorb.
+    """
+    while True:
+        now = time.monotonic()
+        while _dpobs_calls and now - _dpobs_calls[0] > 60.0:
+            _dpobs_calls.popleft()
+        if len(_dpobs_calls) < DPOBS_RATE_PER_MIN:
+            _dpobs_calls.append(now)
+            return
+        time.sleep(60.0 - (now - _dpobs_calls[0]) + 0.05)
+
+
 def _dpobs_row(
     key: str, num_poste: str, date_iso: str, *, attempts: int = 4
 ) -> dict | None:
@@ -298,6 +328,7 @@ def _dpobs_row(
     observations. 401/403 is a bad key -> raise. A 200 with an empty body -> None.
     """
     for i in range(attempts):
+        _dpobs_gate()
         r = httpx.get(
             f"{DPOBS_BASE}/station/infrahoraire-6m",
             params={"id_station": num_poste, "date": date_iso, "format": "csv"},
@@ -318,17 +349,71 @@ def _dpobs_row(
     return None
 
 
-def fetch_live(key: str, num_poste: str, minutes: int, *, label: str) -> pl.DataFrame:
-    """Poll the recent 6-min grid (now back `minutes`) and return canonical rows.
+class Targets(NamedTuple):
+    """The 6-min slots to request this run, and how many of them are backfill (holes)."""
+
+    points: list[datetime]
+    holes: int
+
+
+def _grid(start: datetime, end: datetime) -> list[datetime]:
+    """The 6-min grid points in `(start, end]`, newest first."""
+    pts: list[datetime] = []
+    d = _floor6(end)
+    while d > start:
+        pts.append(d)
+        d -= timedelta(minutes=LIVE_STEP_MIN)
+    return pts
+
+
+def live_targets(
+    known: pl.DataFrame,
+    *,
+    now: datetime | None = None,
+    heal_hours: int = LIVE_HEAL_HOURS,
+    cap: int | None = LIVE_HEAL_MAX_POINTS,
+) -> Targets:
+    """Which 6-min timestamps to ask DPObs for -- the recent tail PLUS the holes behind it.
+
+    A fixed "last N minutes" window is what turned a multi-hour pipeline outage into a PERMANENT
+    hole in the wind series (2026-09-02, specs/0012 §3.1). The buoy scraper self-heals because
+    CANDHIS republishes ~48 h on every fetch; DPObs serves exactly ONE observation per call, so a
+    point nobody asked for while the cron was down is never asked for again. The window therefore
+    has to be derived from what the accumulator actually holds, not from the clock alone:
+
+      * the last `LIVE_LOOKBACK_MIN` is re-probed unconditionally -- points publish a few minutes
+        late, so a slot that answered empty last run may hold data now;
+      * plus every point of the last `heal_hours` MISSING from `known`, newest first, capped at
+        `cap` per station per run so one long outage can't wedge the 30-min cron. Successive runs
+        chew backwards through what is left (`cap=None` lifts it, for `--seed`/`--backfill`).
+
+    Points older than `DPOBS_RETENTION_H` are never requested: the API no longer has them, so
+    that is exactly where a hole becomes permanent.
+    """
+    now = _floor6(now or datetime.now(timezone.utc).replace(tzinfo=None))
+    tail_from = now - timedelta(minutes=LIVE_LOOKBACK_MIN)
+    floor = now - timedelta(hours=min(heal_hours, DPOBS_RETENTION_H))
+    have = {d for d in known[DT].to_list() if d is not None} if known.height else set()
+    holes = [d for d in _grid(floor, tail_from) if d not in have]
+    if cap is not None:
+        holes = holes[:cap]
+    return Targets(_grid(tail_from, now) + holes, len(holes))
+
+
+def fetch_live(
+    key: str, num_poste: str, points: list[datetime], *, label: str
+) -> pl.DataFrame:
+    """Fetch the given 6-min grid points (newest first) and return canonical rows.
 
     One HTTP call per grid point (the API serves a single observation per date). The whole batch
-    runs under one watchdog; the most-recent points are often empty (H-latency) and just skipped.
+    runs under one watchdog, sized to the batch; the most-recent points are often empty
+    (H-latency) and just skipped.
     """
-    now = _floor6(datetime.now(timezone.utc)).replace(tzinfo=None)
+    if not points:
+        return _empty()
     rows: list[dict] = []
-    with ui.watchdog(NET_TIMEOUT_S, label):
-        for k in range(minutes // LIVE_STEP_MIN + 1):
-            d = now - timedelta(minutes=LIVE_STEP_MIN * k)
+    with ui.watchdog(max(NET_TIMEOUT_S, 3.0 * len(points)), label):
+        for d in points:
             row = _dpobs_row(key, num_poste, d.strftime("%Y-%m-%dT%H:%M:%SZ"))
             if row:
                 c = _canon6(row)
@@ -409,12 +494,31 @@ def append_live(wind_root: Path, sid: str, fresh: pl.DataFrame) -> int:
     return fresh.height
 
 
-def scrape_live(wind_root: Path, sid: str, key: str, *, minutes: int) -> int:
-    """Fetch the recent 6-min window for a station and append it to the live accumulator."""
-    fresh = fetch_live(
-        key, WIND_STATIONS[sid]["num_poste"], minutes, label=f"dpobs {sid}"
+def scrape_live(
+    wind_root: Path,
+    sid: str,
+    key: str,
+    *,
+    heal_hours: int = LIVE_HEAL_HOURS,
+    cap: int | None = LIVE_HEAL_MAX_POINTS,
+) -> tuple[int, int]:
+    """Fetch the tail + any recent holes for a station; append. Returns (rows, holes asked for).
+
+    Cheap when nothing is missing: the tail is 11 points and the heal window costs zero extra
+    calls once it is full. It only grows after the pipeline (or the station) has been down.
+    """
+    points, holes = live_targets(
+        read_live(wind_root, sid), heal_hours=heal_hours, cap=cap
     )
-    return append_live(wind_root, sid, fresh)
+    if holes:
+        ui.detail(
+            f"{sid}: {holes} missing 6-min point(s) in the last {heal_hours} h → backfilling",
+            style=ui.WIND,
+        )
+    fresh = fetch_live(
+        key, WIND_STATIONS[sid]["num_poste"], points, label=f"dpobs {sid}"
+    )
+    return append_live(wind_root, sid, fresh), holes
 
 
 # ------------------------------------------------------------------------- tiers
@@ -679,9 +783,19 @@ def upload_wind(
 
 
 def run(
-    station_ids: list[str], wind_root: Path, *, seed: bool, repo: str, do_upload: bool
+    station_ids: list[str],
+    wind_root: Path,
+    *,
+    seed: bool,
+    repo: str,
+    do_upload: bool,
+    backfill_hours: int | None = None,
 ) -> None:
-    """Refresh a set of stations end to end: (seed hist) → (pull) → scrape 6-min → build → upload."""
+    """Refresh a set of stations end to end: (seed hist) → (pull) → scrape 6-min → build → upload.
+
+    `backfill_hours` lifts the routine per-run hole cap so an operator can repair a long outage
+    in one pass (`--backfill`), up to what DPObs still serves (`DPOBS_RETENTION_H`).
+    """
     key = os.environ.get(ENV_KEY)
     token = None
     if do_upload:
@@ -698,11 +812,18 @@ def run(
     for sid in station_ids:
         if do_upload and not seed:
             pull_wind(wind_root, sid, repo, token)
-        n_live = 0
+        n_live = n_heal = 0
         if key:
-            minutes = LIVE_SEED_HOURS * 60 if seed else LIVE_LOOKBACK_MIN
+            if seed:
+                hours, cap = LIVE_SEED_HOURS, None
+            elif backfill_hours:
+                hours, cap = min(backfill_hours, DPOBS_RETENTION_H), None
+            else:
+                hours, cap = LIVE_HEAL_HOURS, LIVE_HEAL_MAX_POINTS
             try:
-                n_live = scrape_live(wind_root, sid, key, minutes=minutes)
+                n_live, n_heal = scrape_live(
+                    wind_root, sid, key, heal_hours=hours, cap=cap
+                )
             except WindError as e:
                 ui.warn(f"{sid} live failed ({e}) → keep existing")
         elif not seed:
@@ -716,13 +837,14 @@ def run(
                 WIND_STATIONS[sid]["label"],
                 f"{n:,}",
                 str(n_live),
+                str(n_heal) if n_heal else "—",
                 "✓" if (do_upload and n) else "—",
             ]
         )
 
     ui.summary_table(
         "Wind",
-        ["station", "label", "rows", "fresh 6-min", "uploaded"],
+        ["station", "label", "rows", "fresh 6-min", "backfilled", "uploaded"],
         rows,
         style=ui.WIND,
     )
@@ -770,6 +892,18 @@ def main() -> None:
         help="one-shot: fetch the full hourly history (2010→) + a 6-min backfill, then build",
     )
     p.add_argument(
+        "--backfill",
+        nargs="?",
+        type=int,
+        const=DPOBS_RETENTION_H,
+        default=None,
+        metavar="HOURS",
+        help=(
+            f"repair holes over a longer window than a routine run "
+            f"(default {DPOBS_RETENTION_H} h = all DPObs still serves), uncapped"
+        ),
+    )
+    p.add_argument(
         "--wind-root",
         type=Path,
         default=Path("hfdata") / "wind",
@@ -787,7 +921,9 @@ def main() -> None:
     ui.section(
         ui.ICON_WIND,
         "wind",
-        f"{'seed' if args.seed else 'refresh'} · {', '.join(station_ids)}",
+        f"{'seed' if args.seed else 'refresh'}"
+        f"{f' · backfill {args.backfill} h' if args.backfill else ''}"
+        f" · {', '.join(station_ids)}",
         style=ui.WIND,
     )
     run(
@@ -796,6 +932,7 @@ def main() -> None:
         seed=args.seed,
         repo=args.repo,
         do_upload=not args.no_upload,
+        backfill_hours=args.backfill,
     )
     ui.ok("wind done")
 

@@ -9,6 +9,27 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-09-03 — The wind refresh self-heals: a gap-aware 6-min window (spec 0012 §3.1)
+
+Yesterday's HF outage left a ~6 h hole in every station's 6-min series while the buoys came back
+whole — CANDHIS republishes ~48 h on each fetch, DPObs serves one observation per call and our
+refresh only ever asked for the last 66 minutes.
+
+- **`wind.live_targets`** now builds the request set from the accumulator: the 66-min tail
+  (re-probed unconditionally — points publish late) **plus** every 6-min slot missing from the
+  last **24 h**, newest first, capped at **60 per station per run**. Successive runs chew backwards,
+  so a 24 h outage is fully repaired in ~4 runs without ever lengthening one enough to wedge the
+  cron. A healthy run still costs 11 calls: a full heal window contributes none.
+- **`DPOBS_RETENTION_H = 96`** (measured by bisecting `date=`) bounds the ask — older points are
+  gone from the API, and that is now the only way a hole can become permanent.
+- **`_dpobs_gate`** — a rolling-window limiter at 90 req/min, since a healing run can ask for
+  71 points × 3 stations and the 429 retry shouldn't be the thing absorbing that.
+- **`pixi run wind --backfill [HOURS] --all`** lifts the cap for a one-shot operator repair
+  (default = the full 96 h). The 2026-09-02 hole was repaired with it: 302 points across the
+  three stations.
+
+---
+
 ## 2026-09-02 — CI authenticates with a stored bucket token; OIDC becomes the fallback
 
 The morning fix wasn't enough: from 11:16 UTC every `*/30` refresh died on the exchange with a

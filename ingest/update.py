@@ -528,10 +528,13 @@ def update(
                 if do_pull:
                     wind_mod.pull_wind(wroot, sid, repo, token)
                 if key:
-                    n_live = wind_mod.scrape_live(
-                        wroot, sid, key, minutes=wind_mod.LIVE_LOOKBACK_MIN
+                    # Not just "the last few minutes": the scrape re-probes the fresh tail AND
+                    # refills any 6-min hole left in the last 24 h, so a pipeline outage that
+                    # ends before DPObs drops those points self-heals (specs/0012 §3.1).
+                    n_live, n_heal = wind_mod.scrape_live(wroot, sid, key)
+                    status = f"live +{n_live}" + (
+                        f" ·healed {n_heal}" if n_heal else ""
                     )
-                    status = f"live +{n_live}"
                 else:
                     ui.detail(
                         f"no {wind_mod.ENV_KEY} → 6-min live skipped", style=ui.WIND

@@ -9,6 +9,42 @@ Format per entry: **date — title** · what we found · why it matters · resol
 
 ---
 
+## 2026-09-03 — A "last N minutes" poll turns any outage into a permanent hole
+
+**What we found.** The 2026-09-02 HF outage failed every refresh from 10:19 to 16:36 UTC. When it
+recovered, the **buoy** series had no gap and the **wind** series had a ~6 h one (Socoa 09:36 →
+15:33 UTC; hours 10-14 held *zero* of their 10 six-minute points). The two feeds are not equally
+forgiving, and nothing in the code said so:
+
+- **CANDHIS republishes the last ~48 h on every fetch.** The scraper coalesce-merges the whole
+  window, so it is *accidentally* self-healing — any outage shorter than 48 h costs nothing.
+- **DPObs serves exactly one observation per call**, addressed by timestamp. Our refresh asked for
+  a fixed 66-minute window (`LIVE_LOOKBACK_MIN`). Every point the cron was down for was simply
+  never asked for again.
+
+Two checks settled it in a minute, and both are worth repeating before assuming data is lost:
+requesting an hour inside the hole returned **10/10 points** (so the hole was ours, not upstream),
+and bisecting `date=` backwards found DPObs still serving **~96 h** of history (so it was still
+repairable — barely).
+
+**Why it matters.** The buoy feed's forgiveness masked the wind feed's fragility for six weeks:
+both pipelines "worked", both were monitored the same way, and the run that dropped the data
+reported success. Any per-timestamp API polled over a fixed recent window has this bug latent in
+it — and widening the window (the obvious fix, "take 24 h instead of 66 min") only moves the cliff
+and pays for the whole window on every healthy run.
+
+**Resolution.** The request set is derived from **what the accumulator holds**, not from the clock
+(`wind.live_targets`, spec [0012 §3.1](2026-07-24-0012-wind.md)): re-probe the 66-minute tail
+unconditionally, plus any 6-min slot missing from the last 24 h, newest first, **capped at 60 per
+station per run** so a long outage can't wedge the 30-min cron — successive runs chew backwards.
+A healthy run costs exactly what it did before (a full window contributes zero extra calls), and
+nothing older than the measured 96 h retention is ever requested, because that is the one place a
+hole is now genuinely permanent. `pixi run wind --backfill` lifts the cap for a manual repair.
+
+**Refs.** `ingest/wind.py` (`live_targets`, `Targets`, `_dpobs_gate`), spec 0012 §3.1.
+
+---
+
 ## 2026-09-02 — HF reports its own timeout as a `400 invalid_grant`; a status-only retry never fires
 
 **What we found.** Three consecutive `*/30` refreshes (04:42, 05:19, 05:40 UTC) died 10 s in,

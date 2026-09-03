@@ -167,7 +167,14 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   are **nullable** (some stations drop them). Station ≠ offshore — the UI must name the station +
   distance, never "wind at the buoy". Non-fatal; `update()` scrapes the 6-min feed + rebuilds
   tiers every run, while the **hourly history is a one-shot seed** (`pixi run wind --seed`), never
-  re-fetched — forward growth is 6-min only.
+  re-fetched — forward growth is 6-min only. ⚠️ **That 6-min window is gap-aware, never "the last
+  N minutes" (spec 0012 §3.1).** DPObs serves ONE observation per call, so a fixed window makes
+  every pipeline outage a *permanent* hole — CANDHIS republishes ~48 h and self-heals, DPObs does
+  not, and that asymmetry cost a 6 h hole on 2026-09-02. `wind.live_targets` re-probes the 66-min
+  tail **plus** any slot missing from the last 24 h, newest first, capped at 60/station/run (the
+  cap is what keeps a long outage from wedging the cron; successive runs chew backwards). Never
+  request past the measured ~96 h DPObs retention — that is the only place a hole is now
+  permanent. `pixi run wind --backfill [HOURS] --all` lifts the cap for a manual repair.
 - **Rain is an ACCUMULATION, not a state (spec 0018).** `precipitation_mm` is the only cumulative
   variable in the schema (`schema.WIND_ACCUM_VARS`) and it breaks every rule the others follow.
   It **sums** when down-sampling — `mean()` divided the daily rain by 24 (by ~240 in the 6-min era)
