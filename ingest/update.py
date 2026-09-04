@@ -25,8 +25,8 @@ non-versioned, so the forward-only reel has no rollback — hence snapshot_reel 
 dated recovery points. See specs/2026-06-27-0004-realtime-scraper.md §6.
 
 This orchestrator runs the same locally (`pixi run update`, your stored HF login) and
-in CI (the HF_TOKEN secret, a bucket-scoped fine-grained token; without it, the
-GitHub Actions OIDC trusted-publisher exchange — see resolve_token). Each run:
+in CI (keyless — the GitHub Actions OIDC trusted-publisher exchange; an HF_TOKEN env
+var, if set, wins over it — see resolve_token). Each run:
 
   1. pull the realtime accumulator (always) + archive (only if missing) from the bucket
      into a local working mirror (`./hfdata/<campaign>/raw`),

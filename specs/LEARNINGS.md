@@ -17,6 +17,19 @@ Separately, the bucket's trusted publisher had simply **vanished** — the list 
 which is what "no trusted publisher matching" was literally telling us. Recreating it did not fix
 the exchange. Reported as [hub-docs#2757](https://github.com/huggingface/hub-docs/issues/2757).
 
+**Update 2026-09-04 — resolved, and the lesson is the escape hatch, not the diagnosis.** The owner
+re-added the repo as a Trusted Publisher and the exchange came back: **first attempt, ~2 s**, where
+the day before all 8 retries died. Nothing on our side changed between the two — which is the whole
+point. What made a two-day HF-side outage a non-event was that `resolve_token` reads `HF_TOKEN`
+*before* trying OIDC, so switching credentials was **adding a secret, then deleting it** (both
+verified in CI with `-f keyless=true` first), with no code, no deploy and no spec change either
+way. Keep that ordering, and keep `permissions.id-token: write` on while a token is in use — the
+cost of the fallback is one `if` and it is the only reason the cron kept running. Two caveats on
+the way back: recreating a publisher can silently *narrow* it (ours came back with `repository`
+only, no `workflow_ref` prefix), and the old fine-grained token has to be revoked HF-side —
+deleting the GitHub secret does not. Refs: `ingest/update.py`,
+[HISTORY](../docs/HISTORY.md#2026-09-04--back-to-keyless-the-oidc-exchange-recovered-the-hf_token-secret-is-gone).
+
 ---
 
 ## 2026-09-03 — A "last N minutes" poll turns any outage into a permanent hole

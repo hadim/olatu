@@ -8,15 +8,15 @@ name: Refresh data (buoys · tides · wind → HF bucket)
 # The webapp reads those tiers at runtime, so this NEVER rebuilds or redeploys the site —
 # it is a tiny Python-only job. See specs/0004 §6, 0005 §4, 0008, 0012.
 #
-# Auth: the HF_TOKEN secret (a fine-grained HF token, "olatu-gh-ci", scoped read+write to
-# the bucket hadim/olatu) when it is set — ingest/update.resolve_token takes it before
-# anything else. When the secret is ABSENT the job falls back to keyless OIDC Trusted
-# Publishers: the trusted publisher is configured on the bucket hadim/olatu → Settings →
-# Trusted Publishers with claims repository = hadim/olatu and workflow_ref starts-with
-# hadim/olatu/.github/workflows/refresh-data.yml@. The secret was added on 2026-09-02
-# because HF's OIDC exchange kept failing on their side (400 "operation was aborted",
-# 429s) and took the whole cron down with it; delete the secret to go back to OIDC —
-# nothing else needs to change (permissions.id-token stays on for that reason).
+# Auth: keyless OIDC Trusted Publishers — no stored secret. `permissions.id-token: write`
+# mints the GitHub id_token that ingest/update.resolve_token exchanges at
+# huggingface.co/oauth/token for a short-lived token scoped to buckets/hadim/olatu. The
+# publisher lives on the bucket hadim/olatu → Settings → Trusted Publishers.
+# `resolve_token` still reads an HF_TOKEN env var *before* trying OIDC, so adding an
+# HF_TOKEN repo secret is the one-step escape hatch and needs no code change — that is
+# exactly how the 2026-09-02 → 09-03 HF outage was ridden out (hub-docs#2757). The secret
+# was deleted again on 2026-09-04, after recreating the bucket's trusted publisher made
+# the exchange healthy (verified keyless in CI, first attempt, ~2 s).
 
 on:
   schedule:
@@ -24,12 +24,12 @@ on:
   workflow_dispatch:
     inputs:
       keyless:
-        description: 'Ignore the HF_TOKEN secret for this run and authenticate via OIDC (tests the trusted publisher without deleting the secret)'
+        description: 'No-op in the normal keyless state — every run already uses OIDC. Kept for when HF_TOKEN is temporarily re-added: blanks it for one run to retest the trusted publisher.'
         type: boolean
         default: false
 
 permissions:
-  id-token: write # OIDC fallback: mint the id_token exchanged for a bucket-scoped HF token when HF_TOKEN is unset
+  id-token: write # mint the id_token exchanged for a bucket-scoped HF token (the normal auth path)
   contents: read
 
 # Never let two refreshes race the bucket.
@@ -71,7 +71,7 @@ jobs:
       #
       # Ingest-only secrets, NEVER shipped to the webapp — only derived tiers are uploaded
       # to the bucket:
-      #   HF_TOKEN             bucket read/write (see the auth note at the top); unset → OIDC
+      #   HF_TOKEN             normally UNSET → OIDC (see the auth note at the top); set → wins
       #   API_MAREE_KEY        tide refresh (ingest/tides.py, spec 0008) -> tides/<port>/
       #   METEOFRANCE_API_KEY  6-min live wind (ingest/wind.py DPObs, spec 0012) -> wind/<station>/
       # The last two are non-fatal if unset (the step logs + skips).

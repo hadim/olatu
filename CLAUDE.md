@@ -44,7 +44,7 @@ ingest/        Python (polars). NOT an installable package. All steps take --cam
   tides.py     fetch api-maree.fr water levels -> high/low extrema -> tides/<port>/data/tides.parquet (spec 0008; needs API_MAREE_KEY)
   wind.py      Météo-France wind per station -> buoy-style tiered dataset wind/<station>/ (spec 0012; one-shot hourly history keyless + forward 6-min live needs METEOFRANCE_API_KEY)
   build.py     CSV -> tiered Parquet/JSON (archive-preferred coalesce)
-  update.py    pull → scrape → tides → build → upload to the HF bucket (HF_TOKEN secret in CI, OIDC fallback) + daily reel snapshot; Typer CLI (-c repeatable)
+  update.py    pull → scrape → tides → build → upload to the HF bucket (keyless OIDC in CI) + daily reel snapshot; Typer CLI (-c repeatable)
   ui.py        shared Rich console + helpers (banner/section/step/detail/summary_table); buoys=cyan, tides=blue; CI-safe plain (spec 0009)
   migrate_layout.py  one-shot bucket layout migration <campaign>/ -> buoys/<campaign>/ (copy | delete --yes; spec 0009)
 pixi.toml      Python env + frontend tasks (no pyproject; no Python library)
@@ -79,7 +79,7 @@ repo 2026-06-30 — buckets are mutable/overwrite-in-place, and a *public* bucke
 ## Commands
 
 ```bash
-pixi run update                      # pull → scrape → build → upload to HF (the usual refresh; HF_TOKEN secret in CI, OIDC fallback)
+pixi run update                      # pull → scrape → build → upload to HF (the usual refresh; keyless OIDC in CI)
 pixi run update -c 06403 -c 06402    # refresh several buoys (repeat -c; typer, not argparse nargs)
 pixi run migrate copy                # one-shot: copy bucket <campaign>/ -> buoys/<campaign>/ (spec 0009)
 pixi run migrate delete --yes        # after the deployed site reads buoys/, drop the old root prefixes
@@ -302,19 +302,17 @@ webapp → units/settings + wind-UX polish → Current Conditions density → to
 → rain accumulation → instant load from the local tier cache (specs 0001–0019). The full feature-by-feature history is in
 **[docs/HISTORY.md](docs/HISTORY.md)**; the spec index + statuses are in [specs/README.md](specs/README.md).
 
-**Open owner TODO:** CI authenticates to the bucket with the **`HF_TOKEN`** repo secret (the
-fine-grained HF token `olatu-gh-ci`, read+write scoped to `hadim/olatu` only) since 2026-09-02.
-`update.resolve_token` takes the env var first and falls back to the OIDC exchange when it is
-unset, so **deleting the secret goes back keyless** — nothing else changes. Two things block that
-today (both HF-side, reported as **[hub-docs#2757](https://github.com/huggingface/hub-docs/issues/2757)**):
-the `/oauth/token` exchange still dies on a ~10 s server abort returned as `400 invalid_grant`
-(verified in CI 2026-09-03 with a matching publisher, all 8 retries), and
-`POST /api/buckets/…/settings/trusted-publishers` intermittently 500s on the same 10 s abort.
-Retest keyless in one command — `gh workflow run refresh-data.yml -f keyless=true` blanks
-`HF_TOKEN` for that run only, leaving the secret in place. ⚠️ The bucket's trusted publisher had
-**vanished** and was recreated 2026-09-03 with `repository == hadim/olatu` **only** — the
-`workflow_ref` prefix claim scoping it to `refresh-data.yml` could not be re-added while the
-endpoint 500s, so *any* workflow in the repo currently matches. Narrow it when HF is fixed
-(claim kinds are `eq` and `prefix`). `API_MAREE_KEY` and `METEOFRANCE_API_KEY` are set. **Next per roadmap:** a combined air+sea temperature chart panel + the
+**Open owner TODO:** CI is **keyless again** since 2026-09-04 — the bucket's trusted publisher
+was recreated, the `/oauth/token` exchange now lands on the first attempt (~2 s), and the
+`HF_TOKEN` repo secret was **deleted** (both a `-f keyless=true` and a plain dispatch logged
+`auth OIDC` + a green upload). `update.resolve_token` still reads an `HF_TOKEN` env var *before*
+OIDC, so **re-adding the secret is the one-step escape hatch** if HF breaks again — that is how
+the 2026-09-02 → 09-03 outage was ridden out (**[hub-docs#2757](https://github.com/huggingface/hub-docs/issues/2757)**),
+and it needs no code change. ⚠️ **Check the publisher's claims**: it was recreated with
+`repository == hadim/olatu` **only** (the `workflow_ref` prefix claim
+`hadim/olatu/.github/workflows/refresh-data.yml@` couldn't be added while that endpoint was
+500ing), so until it is narrowed *any* workflow in the repo can mint a bucket-scoped token.
+Also **revoke the now-unused fine-grained token `olatu-gh-ci`** on huggingface.co/settings/tokens.
+`API_MAREE_KEY` and `METEOFRANCE_API_KEY` are set. **Next per roadmap:** a combined air+sea temperature chart panel + the
 map buoy↔station pairing **line** (station markers already shipped, spec 0013 §6), side-by-side buoy
 comparison, per-locale glossary JSON.

@@ -9,6 +9,31 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-09-04 — Back to keyless: the OIDC exchange recovered, the `HF_TOKEN` secret is gone
+
+The owner re-added the GitHub repo as a Trusted Publisher on the bucket and the exchange that had
+failed **all 8 retries** the day before now lands on the **first attempt, in ~2 s**. Two dispatches
+confirmed it before anything was deleted: `gh workflow run refresh-data.yml -f keyless=true` (the
+secret still present but blanked for that run) and then a plain run — both logged
+`authenticated to buckets/hadim/olatu via OIDC trusted publisher` / `auth OIDC`, with no
+`invalid_grant`, no `aborted` body, no 429, and a green three-buoy upload.
+
+- **`HF_TOKEN` repo secret deleted.** `refresh-data.yml`'s expression already resolved an absent
+  secret to `''`, and `update.resolve_token` already fell through to OIDC on an empty env var, so
+  the switch back was the deletion alone — **zero code change**, exactly as 2026-09-02 promised.
+- **The env var stays the escape hatch.** `resolve_token` still reads `HF_TOKEN` before trying
+  OIDC and `permissions.id-token: write` stays on, so re-adding the secret is a one-step, no-deploy
+  recovery if HF's exchange breaks again. The `keyless` dispatch input is kept for that state (it
+  is a no-op while the secret is absent).
+- Docs re-pointed: the workflow's auth header, `update.py`'s module docstring, and CLAUDE.md now
+  describe keyless as the normal path again — spec 0004 §Auth never had to change.
+- **Still open:** the publisher was recreated with `repository == hadim/olatu` **only** (the
+  `workflow_ref` prefix claim couldn't be written while HF's settings endpoint was 500ing), so any
+  workflow in the repo matches it until that claim is added back; and the now-unused fine-grained
+  token `olatu-gh-ci` should be revoked HF-side.
+
+---
+
 ## 2026-09-03 — The wind refresh self-heals: a gap-aware 6-min window (spec 0012 §3.1)
 
 Yesterday's HF outage left a ~6 h hole in every station's 6-min series while the buoys came back
