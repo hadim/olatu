@@ -8,6 +8,13 @@ name: Refresh data (buoys · tides · wind → HF bucket)
 # The webapp reads those tiers at runtime, so this NEVER rebuilds or redeploys the site —
 # it is a tiny Python-only job. See specs/0004 §6, 0005 §4, 0008, 0012.
 #
+# Failure policy (spec 0020): all four sources belong to somebody else, and each of their
+# outages used to cost a red run + a notification every 30 min for hours, for something
+# nobody can act on and that nearly always fixes itself. So a failure that is *provably*
+# an external service being down (ingest/update exits 75 = EX_TEMPFAIL) only turns this
+# workflow red once the outage has lasted OUTAGE_GRACE_HOURS — see the gate step below and
+# .github/scripts/outage-gate.sh. Everything else still fails on the spot.
+#
 # Auth: keyless OIDC Trusted Publishers — no stored secret. `permissions.id-token: write`
 # mints the GitHub id_token that ingest/update.resolve_token exchanges at
 # huggingface.co/oauth/token for a short-lived token scoped to buckets/hadim/olatu. The
@@ -27,10 +34,15 @@ on:
         description: 'No-op in the normal keyless state — every run already uses OIDC. Kept for when HF_TOKEN is temporarily re-added: blanks it for one run to retest the trusted publisher.'
         type: boolean
         default: false
+      grace_hours:
+        description: 'Hours an external outage may last before the run goes red. Blank = the OUTAGE_GRACE_HOURS repo variable, else 6. Use 0 to fail immediately.'
+        type: string
+        default: ''
 
 permissions:
   id-token: write # mint the id_token exchanged for a bucket-scoped HF token (the normal auth path)
   contents: read
+  actions: read # the outage gate reads this workflow's own run history to time the outage
 
 # Never let two refreshes race the bucket.
 concurrency:
@@ -40,6 +52,16 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    env:
+      # How long an external service may be unavailable before a failed refresh actually
+      # turns this workflow red. Retune it WITHOUT touching this file by setting the repo
+      # variable `OUTAGE_GRACE_HOURS` (Settings → Secrets and variables → Actions →
+      # Variables); a `grace_hours` dispatch input overrides both for one run, and 0
+      # restores the old behaviour (every failure red, immediately).
+      OUTAGE_GRACE_HOURS: ${{ inputs.grace_hours || vars.OUTAGE_GRACE_HOURS || '6' }}
+      # The name of the marker step below. The gate looks it up BY NAME in past runs, so
+      # these two strings must stay in sync.
+      REFRESH_MARKER: Data refreshed
     # A refresh takes ~20-60s. Cap it well above that but far below the 6h default: when HF
     # stalls mid-read, the job would otherwise hang for hours AND — because the concurrency
     # group above never cancels in progress — queue every subsequent cron behind it, so one
@@ -80,6 +102,7 @@ jobs:
       # port/station; the 3 buoys map to 3 distinct ones, so one run refreshes all with no
       # collision.
       - name: Refresh every buoy (pull → scrape → tides → wind → build → upload to HF)
+        id: refresh
         env:
           # Blank on a `keyless` dispatch so resolve_token falls through to the OIDC exchange.
           # Written this way round on purpose: `inputs.keyless && '' || secrets.HF_TOKEN` looks
@@ -88,4 +111,27 @@ jobs:
           HF_TOKEN: ${{ inputs.keyless != true && secrets.HF_TOKEN || '' }}
           API_MAREE_KEY: ${{ secrets.API_MAREE_KEY }}
           METEOFRANCE_API_KEY: ${{ secrets.METEOFRANCE_API_KEY }}
-        run: pixi run -e data update -c 06403 -c 06402 -c 03302
+        # Capture the exit code instead of failing here — the gate below turns it into a
+        # verdict. 75 (EX_TEMPFAIL) = every failure was an external service being down;
+        # any other non-zero code is ours and goes red immediately. See ingest/outage.py.
+        run: |
+          set +e
+          pixi run -e data update -c 06403 -c 06402 -c 03302
+          echo "code=$?" >>"$GITHUB_OUTPUT"
+
+      # The health marker the gate reads on LATER runs: present with conclusion `success`
+      # only after a clean refresh, `skipped` otherwise. A run held green through an
+      # outage is still green, so the run *conclusion* cannot be that clock — this step
+      # is. Keep its name equal to REFRESH_MARKER above.
+      - name: Data refreshed
+        if: steps.refresh.outputs.code == '0'
+        run: echo "Buoys, tides and wind refreshed cleanly."
+
+      # Red now, or hold the alarm until the outage passes OUTAGE_GRACE_HOURS.
+      - name: Outage grace gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODE: ${{ steps.refresh.outputs.code }}
+          GRACE_HOURS: ${{ env.OUTAGE_GRACE_HOURS }}
+          MARKER: ${{ env.REFRESH_MARKER }}
+        run: .github/scripts/outage-gate.sh

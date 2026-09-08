@@ -45,12 +45,14 @@ ingest/        Python (polars). NOT an installable package. All steps take --cam
   wind.py      Météo-France wind per station -> buoy-style tiered dataset wind/<station>/ (spec 0012; one-shot hourly history keyless + forward 6-min live needs METEOFRANCE_API_KEY)
   build.py     CSV -> tiered Parquet/JSON (archive-preferred coalesce)
   update.py    pull → scrape → tides → build → upload to the HF bucket (keyless OIDC in CI) + daily reel snapshot; Typer CLI (-c repeatable)
+  outage.py    Outage + EXIT_OUTAGE=75 — the failures that are provably NOT ours (spec 0020)
   ui.py        shared Rich console + helpers (banner/section/step/detail/summary_table); buoys=cyan, tides=blue; CI-safe plain (spec 0009)
   migrate_layout.py  one-shot bucket layout migration <campaign>/ -> buoys/<campaign>/ (copy | delete --yes; spec 0009)
 pixi.toml      Python env + frontend tasks (no pyproject; no Python library)
 webapp/        the frontend (reads data tiers from the HF bucket at runtime)
 specs/         decisions        docs/  HISTORY.md + README assets (logo, screenshot)
 .github/workflows/  deploy.yml (Pages, on code changes) + refresh-data.yml (data, */30)
+.github/scripts/    outage-gate.sh — holds a red run through a short external outage (spec 0020)
 ```
 
 ### Data store (HF bucket, not git)
@@ -290,6 +292,21 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   touch. The one control is the per-panel **`.ts-band`** in the host's left gutter: pointer drag *and*
   the accessible/keyboard control (`role=button`, `tabindex`, ↑/↓, re-focused after the rebuild via
   `focusBandRef`). Only the hovered `.ts-unit` lights its band — don't light the whole stack.
+- **An external outage is not a bug (spec 0020).** The refresh reads four services we don't
+  own, and each of their multi-hour outages used to cost a red run + a notification every
+  30 min. `ingest/outage.py`'s `Outage` marks a failure as *theirs*; `update` exits **75**
+  (`EX_TEMPFAIL`) when every failure in a run was one, and `.github/scripts/outage-gate.sh`
+  keeps the run green until the outage passes `OUTAGE_GRACE_HOURS` (repo variable, default 6;
+  `grace_hours` dispatch input for one run; 0 = the old behaviour) — the same number is the
+  **re-alarm interval**, so a day-long outage goes red once per window, not every 30 min.
+  ⚠️ **Raise `Outage` only
+  where the other side is provably at fault** — a transport fault, a timeout, a 5xx/408/429, an
+  upstream error page. A 4xx, a changed table, a renamed column is OURS and must stay red now:
+  a wrong grace costs six hours of unnoticed breakage. The gate's clock is the **marker step**
+  `Data refreshed`, never the run conclusion — a held run is green by design, so that clock
+  would reset itself every 30 min and never fire (keep the step name and `REFRESH_MARKER` in
+  sync). A CANDHIS outage now **degrades** a buoy (`feed: unavailable`, last-good reel kept)
+  instead of aborting it before tides/wind/build/upload.
 - **Chart gap-breaks:** `TimeSeries.gapAware` must estimate the sampling cadence **causally (an EWMA of
   the normal deltas)**, never the global-minimum delta — a **mixed-cadence** source (the current-year
   wind file = a 6-min live tail on an hourly history) otherwise flags every hourly step as a gap and
@@ -299,7 +316,7 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
 
 Shipped and live at **olatu.io** — foundation → PWA → analytics/legal → wind ingest → wind in the
 webapp → units/settings + wind-UX polish → Current Conditions density → touch charts → mobile layout
-→ rain accumulation → instant load from the local tier cache (specs 0001–0019). The full feature-by-feature history is in
+→ rain accumulation → instant load from the local tier cache → CI outage tolerance (specs 0001–0020). The full feature-by-feature history is in
 **[docs/HISTORY.md](docs/HISTORY.md)**; the spec index + statuses are in [specs/README.md](specs/README.md).
 
 **Open owner TODO:** CI is **keyless again** since 2026-09-04 — the bucket's trusted publisher

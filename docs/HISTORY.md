@@ -9,6 +9,43 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-09-08 — Outage tolerance: an external service being down no longer cries wolf (spec 0020)
+
+Six red runs in two hours while `candhis.cerema.fr`'s TLS handshake timed out — the fourth
+such episode this quarter (HF's OIDC exchange 09-02, HF transport resets 07-13). None of them
+were actionable, all of them fixed themselves, and every one of them buried the signal a real
+failure would need. The refresh now separates **their** downtime from **our** bugs.
+
+- **`ingest/outage.py`** — `Outage(RuntimeError)` + `EXIT_OUTAGE = 75` (`EX_TEMPFAIL`). Raised
+  only where the other side is provably at fault: `scrape.FeedUnavailable` (transport fault,
+  timeout, 5xx/408/429, PHP error signature, implausible body) and the HF/GitHub-OIDC give-ups
+  in `update._net` / `_post_with_retry` / `resolve_token`.
+- **A 4xx from CANDHIS stays a hard failure**, and so does every structural check (table shape,
+  header names, timestamp grid). Those are ours, and a silent six-hour grace is exactly the
+  wrong answer to them. `update.main()` exits `75` only when *every* failure in the run was an
+  outage; one of ours makes it `1`.
+- **A feed outage now degrades a buoy instead of abandoning it.** `FeedUnavailable` used to
+  abort the campaign *before* tides, wind, build and upload, so a cerema.fr outage froze the
+  Air realm and the marée too. The scrape step catches it, keeps the last-good reel, marks the
+  buoy `feed: unavailable` (new column in the Buoys table) and runs everything else.
+- **`.github/scripts/outage-gate.sh`** — the refresh step captures its exit code, the gate turns
+  it into a verdict: on `75`, hold the alarm (a `::warning::` + job summary, run stays green)
+  until the outage passes `OUTAGE_GRACE_HOURS`; then go red. Configurable by the repo variable
+  `OUTAGE_GRACE_HOURS` (default **6**), overridable per run with the `grace_hours` dispatch
+  input, `0` restores the old behaviour.
+- **The window re-arms after it fires.** A 24 h outage should cost four notifications, not
+  forty-eight, so once the alarm has been raised inside a window the following runs are held
+  again until the next one — the same knob doubles as the re-alarm interval.
+- **Why a marker step and not the run conclusion:** a held run is green *by design*, so
+  "time since the last green run" would reset itself every 30 min and the alarm would never
+  fire. The gate looks for a step named `Data refreshed` that only runs after a clean refresh
+  (`success` vs `skipped`), falling back to the conclusion for runs that predate it. Verified
+  against the live outage: 3 h 23 m in, a 6 h window holds and a 2 h window fires.
+- The gate needs `permissions.actions: read` (its own run history) and fails loudly if the
+  GitHub API won't answer — an outage it cannot measure is not one it may tolerate.
+
+---
+
 ## 2026-09-04 — Back to keyless: the OIDC exchange recovered, the `HF_TOKEN` secret is gone
 
 The owner re-added the GitHub repo as a Trusted Publisher on the bucket and the exchange that had
