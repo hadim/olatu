@@ -42,7 +42,10 @@ failure would need. The refresh now separates **their** downtime from **our** bu
   (`success` vs `skipped`), falling back to the conclusion for runs that predate it. Verified
   against the live outage: 3 h 23 m in, a 6 h window holds and a 2 h window fires.
 - The gate needs `permissions.actions: read` (its own run history) and fails loudly if the
-  GitHub API won't answer — an outage it cannot measure is not one it may tolerate.
+  GitHub API won't answer — an outage it cannot measure is not one it may tolerate. An
+  **empty** listing holds instead: it happened for real on the first dispatch after the push
+  that added the gate (100 runs five minutes later), and a workflow with no history cannot be
+  six hours into an outage.
 
 ---
 

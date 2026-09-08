@@ -85,7 +85,9 @@ notifications, not forty-eight — going red every 30 min after hour six would r
 the wall of noise this exists to remove.
 
 If the GitHub API can't answer, the gate **fails loudly** — an unmeasurable outage is not a
-tolerable one.
+tolerable one. But an API that answers with an **empty run history** is a different case and
+holds: the listing really did come back empty for one run right after the push that first added
+the gate, and a workflow with no past runs cannot be six hours into an outage.
 
 ## 3. Configuration
 

@@ -69,9 +69,21 @@ if ! runs=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/$wf/
   exit 1
 fi
 
-echo "gate: workflow=$wf branch=$GITHUB_REF_NAME grace=${GRACE_HOURS}h now=$now"
-echo "gate: listed $(printf '%s' "$runs" | grep -c . || true) previous run(s)"
+listed=$(printf '%s' "$runs" | grep -c . || true)
+echo "gate: workflow=$wf branch=$GITHUB_REF_NAME grace=${GRACE_HOURS}h listed=$listed run(s)"
 printf '%s\n' "$runs" | head -3 | sed 's/^/gate:   /'
+
+# No history at all is not the same as "nothing worked lately": it is an unmeasurable
+# state, and it happens for real — the listing came back empty for one run right after
+# the push that first added this file (2026-09-08), which turned a 3 h outage into a
+# false alarm. A workflow with no past runs cannot be six hours into an outage, so hold.
+# (An API *error* still fails loudly above: that one we know we can't trust.)
+if [ "$listed" -eq 0 ]; then
+  echo "::warning::External outage, but this workflow has no run history to measure it against — holding."
+  summary "### ⚠️ External outage — no run history"
+  summary "Nothing to measure the outage against, so the alarm is held. It will fire on the next run if the outage persists."
+  exit 0
+fi
 
 last_ok=""
 last_ok_ts=0
