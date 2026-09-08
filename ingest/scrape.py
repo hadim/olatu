@@ -45,6 +45,7 @@ import polars as pl
 from lxml import html as lhtml
 
 from . import ui
+from .outage import EXIT_OUTAGE, Outage
 from .schema import CAMPAIGN_ID, REEL_MAP, SENTINEL_MIN
 
 BASE_URL = "https://candhis.cerema.fr/_public_/campagne.php"
@@ -81,6 +82,20 @@ class ScrapeError(RuntimeError):
     """A scrape that must abort *without* writing (keep the last-good file)."""
 
 
+class FeedUnavailable(ScrapeError, Outage):
+    """CANDHIS did not serve the report at all — down, timing out, or erroring.
+
+    Still a ScrapeError (every existing handler keeps working, and we still write
+    nothing), but tagged as an `Outage` so CI can hold the alarm for a while instead of
+    going red every 30 min through a cerema.fr outage — while a *format* change (a table
+    that moved, a column that vanished) stays a plain ScrapeError and fails now. See
+    ingest/outage.py.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, service="CANDHIS")
+
+
 # --------------------------------------------------------------------------- fetch
 
 
@@ -108,7 +123,16 @@ def fetch_html(url: str, *, retries: int = 3, timeout: float = 30.0) -> str:
                         f"fetch attempt {attempt} failed ({e}); retry in {backoff}s"
                     )
                     time.sleep(backoff)
-    raise ScrapeError(f"failed to fetch {url} after {retries} attempts: {last_err}")
+    why = f"failed to fetch {url} after {retries} attempts: {last_err}"
+    # A 4xx means the server understood us and said no — a moved page, a blocked
+    # User-Agent, a campaign that no longer exists. That is ours to fix, so it must go
+    # red now rather than sit inside CI's outage grace. 408/429 are the two that really
+    # do mean "later", and everything else here (timeout, reset, 5xx) is CANDHIS being
+    # down: no response object at all, or one we should just wait out.
+    status = getattr(getattr(last_err, "response", None), "status_code", None)
+    if status is not None and 400 <= status < 500 and status not in (408, 429):
+        raise ScrapeError(why)
+    raise FeedUnavailable(why)
 
 
 # --------------------------------------------------------------------------- parse
@@ -150,14 +174,18 @@ def parse_realtime_table(html_text: str) -> list[dict]:
     Fails loudly on any sign of a format change or an HTTP-200 error page, so a bad
     response can never silently overwrite a good file.
     """
+    # These two say "we were not served the report at all" — a truncated body, a
+    # maintenance stub, a PHP backend on fire. That is the site being down (FeedUnavailable,
+    # eligible for CI's outage grace), not the format changing under us. Everything below
+    # this point IS the format, and stays a hard ScrapeError.
     if "<table" not in html_text.lower() or len(html_text) < 5000:
-        raise ScrapeError(
+        raise FeedUnavailable(
             "response is not a plausible HTML page (too short / no table)"
         )
     low = html_text.lower()
     for sig in ("fatal error", "parse error", "<b>warning</b>", "<b>notice</b>"):
         if sig in low:
-            raise ScrapeError(f"response contains a PHP error signature: {sig!r}")
+            raise FeedUnavailable(f"response contains a PHP error signature: {sig!r}")
     if "veuillez sélectionner une campagne" in low:
         raise ScrapeError("campaign not selected (got the 'choose a campaign' page)")
 
@@ -466,7 +494,9 @@ def main() -> None:
         scrape(args.src, args.campaign)
     except ScrapeError as e:
         ui.err(f"scrape aborted: {e}")
-        sys.exit(1)
+        # Same exit-code contract as `update`: 75 = the feed is down (retry later),
+        # 1 = something here needs fixing. See ingest/outage.py.
+        sys.exit(EXIT_OUTAGE if isinstance(e, Outage) else 1)
     ui.ok("done")
 
 

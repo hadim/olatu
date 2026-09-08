@@ -54,6 +54,7 @@ from . import scrape as scrape_mod
 from . import tides as tides_mod
 from . import ui
 from . import wind as wind_mod
+from .outage import EXIT_OUTAGE, Outage
 from .schema import CAMPAIGN_ID, buoy, resolve_tide_port, resolve_wind_station
 
 DEFAULT_REPO = "hadim/olatu"  # HF bucket id
@@ -157,7 +158,10 @@ def _post_with_retry(
         )
         ui.warn(f"HF {why}; retrying in {delay:.0f}s")
         time.sleep(delay)
-    raise RuntimeError(f"HF unreachable after {attempts} attempts: {last!r}")
+    raise Outage(
+        f"token endpoint unreachable after {attempts} attempts: {last!r}",
+        service="Hugging Face",
+    )
 
 
 # --------------------------------------------------------------------- resilience
@@ -179,8 +183,9 @@ def _net(label: str, fn, *args, attempts: int = 3, **kwargs):
                 break
             except _TRANSIENT as e:
                 if i == attempts - 1:
-                    raise RuntimeError(
-                        f"{label} failed after {attempts} attempts: {type(e).__name__}: {e}"
+                    raise Outage(
+                        f"{label} failed after {attempts} attempts: {type(e).__name__}: {e}",
+                        service="Hugging Face",
                     ) from e
                 delay = 2.0**i
                 ui.warn(f"{label}: {type(e).__name__}: {e} — retrying in {delay:.0f}s")
@@ -207,15 +212,18 @@ def resolve_token(repo: str) -> str | None:
     if not (req_url and req_tok):
         return None  # not in GitHub Actions → fall back to the local login
     resource = f"buckets/{repo}"
-    id_token = (
-        httpx.get(
-            f"{req_url}&audience={HF_AUD}",
-            headers={"Authorization": f"Bearer {req_tok}"},
-            timeout=30,
+    try:
+        id_token = (
+            httpx.get(
+                f"{req_url}&audience={HF_AUD}",
+                headers={"Authorization": f"Bearer {req_tok}"},
+                timeout=30,
+            )
+            .raise_for_status()
+            .json()["value"]
         )
-        .raise_for_status()
-        .json()["value"]
-    )
+    except httpx.HTTPError as e:  # the Actions token service, not us
+        raise Outage(f"id_token request failed: {e}", service="GitHub OIDC") from e
     resp = _post_with_retry(
         f"{HF_AUD}/oauth/token",
         timeout=30,
@@ -227,9 +235,14 @@ def resolve_token(repo: str) -> str | None:
         },
     )
     if resp.status_code != 200:
-        raise RuntimeError(
-            f"OIDC token exchange failed ({resp.status_code}): {resp.text}"
-        )
+        why = f"OIDC token exchange failed ({resp.status_code}): {resp.text}"
+        # 429/5xx (and HF aborting its own upstream call) survived all 8 retries → the Hub
+        # is unwell, wait it out. A 401/403/400-invalid_grant means the trusted publisher
+        # or its claims are wrong: that is ours, and it must go red immediately — nothing
+        # about it gets better by retrying for six hours (2026-09-02, hub-docs#2757).
+        if resp.status_code in _RETRY_STATUS or _hf_aborted(resp):
+            raise Outage(why, service="Hugging Face")
+        raise RuntimeError(why)
     ui.detail(f"authenticated to {resource} via OIDC trusted publisher")
     return resp.json()["access_token"]
 
@@ -454,6 +467,9 @@ def update(
         "rows": None,
         "through": "—",
         "uploaded": do_upload,
+        # "live" | "unavailable" (CANDHIS down — tiers rebuilt from the last-good reel)
+        # | "—" (--no-scrape). Never a silent "everything is fine".
+        "feed": "live" if do_scrape else "—",
         "tide": None,
         "wind": None,
     }
@@ -479,7 +495,16 @@ def update(
         # --- scrape the live CANDHIS feed into the reel accumulator ---
         if do_scrape:
             ui.step(ui.ICON_SCRAPE, "scrape")
-            scrape_mod.scrape(raw, campaign)
+            try:
+                scrape_mod.scrape(raw, campaign)
+            except scrape_mod.FeedUnavailable as e:
+                # CANDHIS is down, not broken. Keep the last-good reel and carry on with
+                # this buoy's OTHER sources: raising here used to abandon the campaign
+                # before tides, wind, build and upload, so every cerema.fr outage froze
+                # the Air realm and the marée too — for no reason, they have their own
+                # feeds. The run still reports the degradation (and exits EXIT_OUTAGE).
+                ui.warn(f"{e} → keeping the last-good reel")
+                result["feed"] = "unavailable"
 
         # --- tides (distinct blue step): refresh the buoy's nearest port ---
         if do_tides and tide_port is not None:
@@ -616,13 +641,15 @@ def _summaries(results: list[dict]) -> None:
     """Buoy, tide and wind end-of-run tables, kept visually separate (specs 0009/0012)."""
     ui.summary_table(
         "Buoys",
-        ["campaign", "buoy", "rows", "through", "uploaded"],
+        ["campaign", "buoy", "rows", "through", "feed", "uploaded"],
         [
             [
                 r["campaign"],
                 r["name"],
                 f"{r['rows']:,}" if r["rows"] is not None else "—",
                 r["through"],
+                # `through` is a date, so a few hours of missing feed doesn't show there.
+                r.get("feed", "—"),
                 "✓" if r["uploaded"] else "—",
             ]
             for r in results
@@ -726,7 +753,7 @@ def main(
         token = _net("auth", resolve_token, repo) if (do_pull or do_upload) else None
     except RuntimeError as e:
         ui.err(f"update aborted: {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(EXIT_OUTAGE if isinstance(e, Outage) else 1)
 
     # One grep-able line of run context. When a refresh misbehaves this is the first thing
     # you want from the log: which client talked to which bucket, with which credential,
@@ -752,6 +779,7 @@ def main(
     # down) must not skip the others, but the run as a whole still reports failure.
     results: list[dict] = []
     failed: list[str] = []
+    fatal: list[str] = []  # failures that are OURS — those always exit 1
     for c in campaigns:
         try:
             results.append(
@@ -772,12 +800,31 @@ def main(
         except (scrape_mod.ScrapeError, RuntimeError) as e:
             ui.err(f"{c}: {e}")
             failed.append(c)
+            if not isinstance(e, Outage):
+                fatal.append(c)
 
     _summaries(results)
 
-    if failed:
+    # Exit code is a *classification*, not just a verdict (ingest/outage.py):
+    #   0  clean
+    #   75 every problem was somebody else's service being down (EX_TEMPFAIL). CI holds
+    #      the alarm for OUTAGE_GRACE_HOURS before turning red — most outages fix
+    #      themselves within an hour or two and a red run every 30 min through them is
+    #      noise nobody can act on.
+    #   1  at least one failure pointed at this repo → red now.
+    degraded = [r["campaign"] for r in results if r.get("feed") == "unavailable"]
+    if fatal:
         ui.err(f"done with failures: {', '.join(failed)}")
         raise typer.Exit(1)
+    if failed:
+        ui.err(f"done with outages: {', '.join(failed)} — external services are down")
+        raise typer.Exit(EXIT_OUTAGE)
+    if degraded:
+        ui.warn(
+            f"done, degraded: no live CANDHIS feed for {', '.join(degraded)} "
+            "(tiers rebuilt from the last-good reel; every other source still refreshed)"
+        )
+        raise typer.Exit(EXIT_OUTAGE)
     ui.ok("all done")
 
 
