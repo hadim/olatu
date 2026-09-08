@@ -69,6 +69,10 @@ if ! runs=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/$wf/
   exit 1
 fi
 
+echo "gate: workflow=$wf branch=$GITHUB_REF_NAME grace=${GRACE_HOURS}h now=$now"
+echo "gate: listed $(printf '%s' "$runs" | grep -c . || true) previous run(s)"
+printf '%s\n' "$runs" | head -3 | sed 's/^/gate:   /'
+
 last_ok=""
 last_ok_ts=0
 last_red=""  # the most recent run in the window that already raised the alarm
