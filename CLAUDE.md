@@ -234,10 +234,16 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   6-up — never a `max-w` cap or an over-wide column). Air packs six-up only because
   `cc_air_temp_short`/`cc_sea_temp_short` are printed; keep the full names in the popover title.
   **Freshness is per realm, never per card (spec 0015 §7)** — the badge lives in each `ZoneHeader`
-  (Mer reads the buoy tier, Air the station tier) and `stale` desaturates **its own zone**. The two
-  feeds fail independently (CANDHIS froze on all three buoys at once on 2026-08-21 while
-  Météo-France kept reporting), so never put a single buoy-fed badge back in the header row, and
-  never desaturate the card element. **Tile type is sized in `cqw`, never `vw`** — each tile is a `@container`, and the page is capped
+  (Mer reads the buoy tier, Air the station tier). The two feeds fail independently (CANDHIS froze
+  on all three buoys at once on 2026-08-21 while Météo-France kept reporting), so never put a single
+  buoy-fed badge back in the header row, and never treat the card element as one source. A `stale`
+  realm (> 6 h) is **dormant**, not merely desaturated (§8): it drops its realm identity — hatched
+  sunken ground, dashed neutral border, hollow tag, `grayscale` body — and its badge gets **louder**
+  (amber, alert glyph, the state in words). Two rules there, both learned the hard way: the filter
+  rides on the zone **body**, never the zone, or the alarm is greyed along with what it warns about;
+  and it is `grayscale` **without opacity** — the values are the last thing the buoy reported and
+  must stay readable (a `.65` dim put the hero values at ~2.2:1 on the light theme). Staleness is
+  derived from the DATA's timestamp, never from a pipeline flag. **Tile type is sized in `cqw`, never `vw`** — each tile is a `@container`, and the page is capped
   at `max-w-[1100px]` so viewport units stop tracking the box past ~1140px; the `clamp` bounds come
   from the widest string a tile must hold without wrapping (Air's "1 020 hPa"), so re-tune them if
   you change the column count. Values align by **`subgrid`** (tile spans two rows, label

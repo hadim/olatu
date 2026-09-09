@@ -9,6 +9,34 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-09-09 — A dormant realm looks dormant (spec 0015 §8)
+
+CANDHIS has been serving `503 Service Unavailable` since **2026-09-08 ~13:30 CEST**. Everything
+below the surface behaved: the scraper kept the last-good reel, the buoy degraded instead of
+aborting (0020), tides and wind kept refreshing, the per-realm badge (0015 §7) said "yesterday ·
+Sep 08, 13:30". And the card still looked alive — owner report: *"it's not super obvious that the
+sea data we're looking at is outdated."*
+
+Two structural reasons, not a wrong threshold: `saturate(0.55)` weakens the realm tint but the
+tint is the only thing that says "live", so a weaker one still says "live"; and the `stale` badge
+went **neutral**, i.e. the one element that should get louder got quieter — inside the same filter
+that softened everything else.
+
+- **`stale` is now a zone state, not a filter.** A dormant zone drops its realm identity outright:
+  sunken `--surface-2` ground under a faint diagonal hatch (`.cc-dormant`), a **dashed** neutral
+  border, a **hollow** realm tag, a `--text-3` source glyph, and `grayscale` over the body.
+- **The badge is the exception**, so the filter rides on the zone *body*: alert triangle + the
+  state **in words** (`cc_stale`) + age + clock, in amber. Not red — a quiet buoy is not an
+  emergency. New `--warning-ink` token: `--warning` as text is 2.7:1 on the light theme's wash.
+- **Greyscale only, no dimming.** An `opacity: .65` on top took the hero values to ~2.2:1 on light
+  (they are the accent colour, a mid-tone before they are grey). The zone reads as off through its
+  chrome; the last-known values stay readable, which is the whole point of still showing them.
+- **The offshore/onshore verdict follows the worst realm** — it read "cross-shore" from a live wind
+  and a day-old swell direction.
+- `cc_stale_help` (EN/FR/ES) now says the greying is deliberate and that the figures are the last
+  ones received; the badge's accessible name carries the state (an `aria-label` replaces the
+  content it wraps, so the new word would have been sighted-only).
+
 ## 2026-09-08 — Outage tolerance: an external service being down no longer cries wolf (spec 0020)
 
 Six red runs in two hours while `candhis.cerema.fr`'s TLS handshake timed out — the fourth

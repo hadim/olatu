@@ -29,7 +29,7 @@
   "cc_stale": "No recent reading",
   "cc_fresh_help": "The latest reading is under 2 hours old — this source is reporting normally.",
   "cc_aging_help": "The latest reading is 2–6 hours old, so this source is running a little behind.",
-  "cc_stale_help": "No reading in the last 6 hours. The figures in this zone may be out of date; check the timestamp.",
+  "cc_stale_help": "No reading in the last 6 hours. This zone is greyed out on purpose: the figures below are the last ones received, not current conditions.",
   "cc_cadence_sea": "The buoy reports every 30 minutes.",
   "cc_cadence_air": "The station reports every 6 minutes; Olatu refreshes every 30 minutes.",
   "cc_last30days": "Wave height · last 30 days",

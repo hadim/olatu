@@ -152,3 +152,81 @@ are distinguishable to a screen reader, and its popover title leads with the rea
 - The upstream freeze itself needs no code change: the scraper's coalesce-merge already handles it
   (it kept writing a valid, non-shrinking file throughout), so the series reconnects by itself
   whenever CEREMA republishes.
+
+## 8. Revision (2026-09-09) — a dormant realm looks dormant
+
+### 8.1 Why
+
+CANDHIS (cerema.fr) started serving `503 Service Unavailable` on **2026-09-08 around 13:30 CEST**
+and was still down 27 h later. §7 worked exactly as designed through it: the Mer zone carried its
+own badge reading *"yesterday · Sep 08, 13:30"*, the Air zone kept its own (21 minutes old), and
+only the Mer zone was desaturated.
+
+And it still read as a working card. Owner report, with a screenshot:
+
+> there's the info that the buoy is from yesterday, but it's not super obvious that the sea data
+> we're looking at is outdated.
+
+Two reasons, both structural rather than a threshold being wrong:
+
+1. **`saturate(0.55)` is not a state, it is a mood.** The realm *tint* is the only thing on this
+   card that says "live"; a slightly weaker version of that same tint still says "live". Side by
+   side, a 27 h-old teal zone and a 21-minute-old amber one differed by an amount you can only see
+   if you already know to look.
+2. **The alarm was greyed with the thing it was alarming about.** The `stale` badge went *neutral*
+   — grey dot, grey border, muted text — so the one element that should have got louder got
+   quieter, and it sat inside the filter that softened everything else.
+
+There is also a reading-cost problem: a timestamp is something you have to do arithmetic on before
+you can be alarmed by it. "yesterday, 13:30" is a fact; "no recent reading" is a verdict.
+
+### 8.2 Decision
+
+The `stale` state stops being a filter and becomes a **zone state — dormant**. A zone whose source
+has stopped reporting gives up its realm identity, and says so in words:
+
+| | live (`fresh` / `aging`) | dormant (`stale`, > 6 h) |
+|---|---|---|
+| ground | realm tint over `--surface` | `--surface-2` (sunken) + a faint diagonal hatch (`.cc-dormant`) |
+| border | realm tint, solid | neutral `--text-3` mix, **dashed** |
+| realm tag | filled teal / amber pill | **hollow** — outlined in `--text-3`, no fill |
+| body | full colour | `grayscale` — dial, values, glyphs |
+| badge | dot + age + clock, muted | **alert triangle + `cc_stale` in words** + age + clock, amber |
+| source glyph | realm-coloured | `--text-3` |
+
+Kept from §7 unchanged: the thresholds (2 h / 6 h), the per-realm modelling, the badge's placement
+and popover, `cc_cadence_{sea,air}`.
+
+Three points that decide the details:
+
+- **The badge is the exception to the greyscale.** It is the only element of a dormant zone that
+  gets *louder*, so the filter rides on the zone **body**, never the zone — and the badge's tone
+  (border + ground + ink) is one bundle per state, so the stale one cannot inherit the muted ink.
+  **Amber, not red**: a buoy going quiet is not an emergency, and `--danger` on a card people read
+  before dawn cries wolf. This needs a new token — `--warning-ink` — because `--warning` as *text*
+  is only 2.7:1 on the light theme's warm wash; on dark the two are the same value.
+- **Greyscale only, no dimming.** The values stay on screen (they are the last thing the buoy
+  actually reported) and must stay readable: an `opacity: .65` on top of the drain took the hero
+  values to ~2.2:1 on light, because they are the accent colour — a mid-tone before they are grey
+  at all. Greyscale alone keeps every reading at or above its live contrast tier (values are large
+  text; the `--text-3` labels stay ≥ 4.5:1). The zone reads as off through its **chrome**, not by
+  being hard to read.
+- **The cross-realm verdict follows the worst realm.** The offshore/onshore pill is the card's one
+  synthesis of both zones, so one dormant realm makes it stale whole — on 2026-09-09 it read
+  "cross-shore" from a live wind and a swell direction a day old. It wears the same grey as the
+  zone it can no longer speak for.
+
+`cc_stale_help` now says the greying is deliberate and that the figures are the last ones received,
+so the visual and the words explain each other.
+
+### 8.3 Notes
+
+- Display-only again: no tier, manifest or ingest change. The webapp keeps deriving "is this
+  source alive" from **the data's own timestamp**, never from a pipeline status flag — `update()`
+  does mark a buoy `feed: unavailable` (spec 0020) but that never reaches the browser, and a
+  timestamp cannot lie about what is actually on screen.
+- The accessible name of the badge now carries the state as well as the realm (`Reading freshness ·
+  Sea · No recent reading`): the trigger has an `aria-label`, which *replaces* its content for a
+  screen reader, so the newly-added word would otherwise have been visible only to sighted readers.
+- Nothing about this is CANDHIS-specific. The Air zone gets the identical treatment when
+  Météo-France is the one that goes quiet.

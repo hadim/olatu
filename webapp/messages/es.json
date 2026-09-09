@@ -29,7 +29,7 @@
   "cc_stale": "Sin lectura reciente",
   "cc_fresh_help": "La última lectura tiene menos de 2 horas — esta fuente transmite con normalidad.",
   "cc_aging_help": "La última lectura tiene entre 2 y 6 horas: esta fuente va algo retrasada.",
-  "cc_stale_help": "Sin lecturas en las últimas 6 horas. Los valores de esta zona pueden estar desactualizados; revisa la marca de tiempo.",
+  "cc_stale_help": "Sin lecturas en las últimas 6 horas. Esta zona aparece atenuada a propósito: los valores de abajo son los últimos recibidos, no las condiciones actuales.",
   "cc_cadence_sea": "La boya transmite cada 30 minutos.",
   "cc_cadence_air": "La estación transmite cada 6 minutos; Olatu se actualiza cada 30 minutos.",
   "cc_last30days": "Altura de las olas · últimos 30 días",

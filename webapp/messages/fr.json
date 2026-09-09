@@ -29,7 +29,7 @@
   "cc_stale": "Pas de mesure récente",
   "cc_fresh_help": "La dernière mesure a moins de 2 heures — cette source transmet normalement.",
   "cc_aging_help": "La dernière mesure a entre 2 et 6 heures : cette source est un peu en retard.",
-  "cc_stale_help": "Aucune mesure depuis 6 heures. Les valeurs de cette zone peuvent être dépassées ; vérifiez l’horodatage.",
+  "cc_stale_help": "Aucune mesure depuis 6 heures. Cette zone est volontairement grisée : les valeurs ci-dessous sont les dernières reçues, pas les conditions actuelles.",
   "cc_cadence_sea": "La bouée transmet toutes les 30 minutes.",
   "cc_cadence_air": "La station transmet toutes les 6 minutes ; Olatu se rafraîchit toutes les 30 minutes.",
   "cc_last30days": "Hauteur des vagues · 30 derniers jours",

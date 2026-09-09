@@ -17,7 +17,7 @@ import { useUnits, formatKeyValue, keySuffix } from '../lib/units';
 import { useNow } from '../lib/useNow';
 import {
   WaveHeightIcon, MaxWaveIcon, PeriodIcon, DirectionIcon, TempIcon,
-  WindIcon, StationIcon, RainIcon, HumidityIcon, PressureIcon,
+  WindIcon, StationIcon, RainIcon, HumidityIcon, PressureIcon, AlertIcon,
 } from './icons';
 import { BuoyMark } from './brands';
 import InfoPopover from './InfoPopover';
@@ -154,17 +154,38 @@ const ZONE: Record<Realm, string> = {
   air: 'border-[color-mix(in_oklab,var(--c-wind)_24%,var(--hairline))] bg-[color-mix(in_oklab,var(--c-wind)_7%,var(--surface))]',
 };
 
+/** A realm whose source has stopped reporting (spec 0015 §8) gives up its realm identity: the
+ *  teal/amber card becomes neutral, dashed and hatched. The realm TINT is what says "live" here,
+ *  so §7's *desaturated* tint could never say the opposite loudly enough — on 2026-09-09 CANDHIS
+ *  had been down 27 h and the Mer zone still read as a working card next to a 21-minute-old Air
+ *  one. Grey-and-dashed beside amber needs no reading at all. */
+const ZONE_OFF = 'cc-dormant border-dashed border-[color-mix(in_oklab,var(--text-3)_40%,var(--hairline))] bg-surface-2';
+/** …and its readings become a record rather than a reading: colour fully drained. This rides on
+ *  the zone BODY, never the whole zone — the header carries the alert badge, and greying the
+ *  warning along with what it warns about is how §7 lost the signal in the first place.
+ *  Greyscale ONLY, no dimming: the point is that the last-known values stay readable, and an
+ *  opacity on top of the drain took the hero values to ~2.2:1 on the light theme (they are the
+ *  accent colour, i.e. mid-tone before they are grey at all). The zone reads as off through its
+ *  chrome — sunken ground, dashed border, hatch, hollow tag — not by being hard to read. */
+const ZONE_OFF_BODY = 'grayscale';
+
 /** Zone header: a coloured realm tag + a source chip (buoy or station attribution), and — since
  *  spec 0015 §7 — that realm's own freshness badge, pushed to the trailing edge. Each realm
  *  answers for its own source: the buoy and the station fail independently (CANDHIS can freeze
  *  for hours while Météo-France keeps reporting), so one shared badge could only ever be right
  *  about one of them. `min-[720px]:ml-auto` rather than a plain `ml-auto` — below 720px the whole
  *  header centres (spec 0017) and an auto margin would break that. */
-function ZoneHeader({ realm, tag, badge, children }: { realm: Realm; tag: string; badge?: ReactNode; children: ReactNode }) {
+function ZoneHeader({ realm, tag, badge, off = false, children }: { realm: Realm; tag: string; badge?: ReactNode; off?: boolean; children: ReactNode }) {
   const bg = realm === 'sea' ? 'var(--accent)' : 'var(--c-wind)';
+  // A dormant realm's tag goes hollow — outlined in the muted ink instead of filled with the
+  // realm colour. (Hollow, not a grey fill: a filled pill has to keep its dark label legible,
+  // and every grey light enough for that reads as another live colour.)
+  const tagStyle = off
+    ? { color: 'var(--text-3)', boxShadow: 'inset 0 0 0 1px color-mix(in oklab, var(--text-3) 45%, transparent)' }
+    : { background: bg, color: '#08201a' };
   return (
     <div className="mb-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 max-[720px]:justify-center max-[720px]:text-center">
-      <span className="rounded-md px-2 py-[0.1rem] font-display text-[0.72rem] font-bold uppercase tracking-[0.05em]" style={{ background: bg, color: '#08201a' }}>
+      <span className="rounded-md px-2 py-[0.1rem] font-display text-[0.72rem] font-bold uppercase tracking-[0.05em]" style={tagStyle}>
         {tag}
       </span>
       <span className="inline-flex items-center gap-1.5 font-mono text-[0.72rem] text-muted">{children}</span>
@@ -192,11 +213,15 @@ function DialCaption({ label, defKey, icon, children }: { label: string; defKey:
 // `flex-wrap` + `max-w-full`: the pill holds two nowrap spans ("il y a 31 minutes" · "10 août,
 // 18:00") that together are ~310px — wider than a 320px phone, and it overflowed the page rather
 // than breaking between them (spec 0017 §2).
-const STATUS_BADGE = 'inline-flex max-w-full flex-wrap items-center justify-center gap-x-[0.45rem] rounded-full border bg-surface-2 px-[0.7rem] py-[0.32rem] font-mono text-[0.78rem] text-muted cursor-pointer transition-colors hover:border-accent hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
-const STATUS_BORDER: Record<Freshness, string> = {
-  fresh: 'border-[color-mix(in_oklab,var(--accent)_45%,var(--hairline))]',
-  aging: 'border-[color-mix(in_oklab,var(--warning)_50%,var(--hairline))]',
-  stale: 'border-[color-mix(in_oklab,var(--text-3)_45%,var(--hairline))]',
+const STATUS_BADGE = 'inline-flex max-w-full flex-wrap items-center justify-center gap-x-[0.45rem] rounded-full border px-[0.7rem] py-[0.32rem] font-mono text-[0.78rem] cursor-pointer transition-colors hover:border-accent hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
+// Each state owns border + ground + ink together (no shared base to fight): the stale one is the
+// ONE element of a dormant zone that gets louder rather than quieter, so it must not inherit the
+// muted ink. Amber, not red — the buoy being silent is not an emergency, and `--danger` on a card
+// people read at dawn cries wolf.
+const STATUS_TONE: Record<Freshness, string> = {
+  fresh: 'bg-surface-2 text-muted border-[color-mix(in_oklab,var(--accent)_45%,var(--hairline))]',
+  aging: 'bg-surface-2 text-muted border-[color-mix(in_oklab,var(--warning)_50%,var(--hairline))]',
+  stale: 'bg-[color-mix(in_oklab,var(--warning)_10%,var(--surface))] text-warning-ink border-[color-mix(in_oklab,var(--warning)_55%,var(--hairline))]',
 };
 const STATUS_DOT: Record<Freshness, string> = {
   fresh: 'bg-accent motion-safe:animate-[pulse_2.4s_ease-out_infinite]',
@@ -214,11 +239,17 @@ function StalenessBadge({ realm, fresh, stampMs, tz, now }: { realm: Realm; fres
   const help = `${m[`cc_${fresh}_help` as MessageKey]()} ${m[`cc_cadence_${realm}` as MessageKey]()}`;
   const body = stampMs != null ? `${help} · ${m.cc_updated()} ${clock}` : help;
   const realmLabel = realm === 'sea' ? m.cc_realm_sea() : m.cc_realm_air();
+  const off = fresh === 'stale';
   return (
-    <InfoPopover title={`${realmLabel} · ${m[`cc_${fresh}` as MessageKey]()}`} body={body} align="end" triggerClassName={`${STATUS_BADGE} ${STATUS_BORDER[fresh]}`} triggerLabel={`${m.cc_freshness()} · ${realmLabel}`}>
-      <span className={`h-[9px] w-[9px] rounded-full ${STATUS_DOT[fresh]}`} aria-hidden="true" />
+    <InfoPopover title={`${realmLabel} · ${m[`cc_${fresh}` as MessageKey]()}`} body={body} align="end" triggerClassName={`${STATUS_BADGE} ${STATUS_TONE[fresh]}`} triggerLabel={`${m.cc_freshness()} · ${realmLabel} · ${m[`cc_${fresh}` as MessageKey]()}`}>
+      {/* A dormant zone spells the state out in words: a timestamp alone is something you have to
+          *do arithmetic on* to be alarmed by, and "yesterday, 13:30" read as an ordinary reading
+          for a whole day (2026-09-09). The dot survives for the two live states, where the pulse
+          is the point. */}
+      {off ? <AlertIcon size={13} className="shrink-0" /> : <span className={`h-[9px] w-[9px] rounded-full ${STATUS_DOT[fresh]}`} aria-hidden="true" />}
+      {off && <span className="font-semibold">{m.cc_stale()}</span>}
       {ago && <span className="whitespace-nowrap">{ago}</span>}
-      {clock && <span className="whitespace-nowrap text-faint">· {clock}</span>}
+      {clock && <span className={`whitespace-nowrap ${off ? 'opacity-75' : 'text-faint'}`}>· {clock}</span>}
     </InfoPopover>
   );
 }
@@ -320,6 +351,9 @@ export default function CurrentConditions({
   const seaFresh = seaStampMs != null ? freshness(now - seaStampMs) : 'stale';
   const airStampMs = wl ? latestTimestamp(wl) : null;
   const airFresh = airStampMs != null ? freshness(now - airStampMs) : 'stale';
+  // "This source has stopped reporting" — the state the whole zone dresses for (spec 0015 §8).
+  const seaOff = seaFresh === 'stale';
+  const airOff = airFresh === 'stale';
 
   const kind = wind ? stationInfo(wind.station)?.kind : undefined;
   const kindLabel = kind ? m[`station_kind_${kind.replaceAll('-', '_')}` as MessageKey]() : '';
@@ -338,19 +372,22 @@ export default function CurrentConditions({
           <span className="text-muted"> · {manifest.buoy.name}</span>
         </span>
         {wind && (
-          <div className="max-[860px]:order-3 max-[860px]:basis-full">
+          // The verdict is the card's one CROSS-realm claim, so a single dormant realm makes it
+          // stale whole: on 2026-09-09 it read "cross-shore" from a live wind and a swell
+          // direction a day old. It wears the same grey as the zone it can no longer speak for.
+          <div className={`max-[860px]:order-3 max-[860px]:basis-full ${seaOff || airOff ? ZONE_OFF_BODY : ''}`}>
             <ShoreBridge swellDeg={dir?.value ?? null} windDeg={windDir?.value ?? null} locale={locale} />
           </div>
         )}
       </div>
 
       {/* ---- MER (buoy) zone ---- */}
-      <div className={`rounded-xl border p-2.5 sm:p-3.5 ${ZONE.sea} ${seaFresh === 'stale' ? 'saturate-[0.55]' : ''}`}>
-        <ZoneHeader realm="sea" tag={m.cc_realm_sea()} badge={<StalenessBadge realm="sea" fresh={seaFresh} stampMs={seaStampMs} tz={tz} now={now} />}>
-          <BuoyMark size={15} className="text-accent" />
+      <div className={`rounded-xl border p-2.5 sm:p-3.5 ${seaOff ? ZONE_OFF : ZONE.sea}`}>
+        <ZoneHeader realm="sea" tag={m.cc_realm_sea()} off={seaOff} badge={<StalenessBadge realm="sea" fresh={seaFresh} stampMs={seaStampMs} tz={tz} now={now} />}>
+          <BuoyMark size={15} className={seaOff ? 'text-faint' : 'text-accent'} />
           {m.cc_buoy()} {manifest.buoy.campaign_id} · {manifest.buoy.network}
         </ZoneHeader>
-        <div className={ZONE_GRID}>
+        <div className={`${ZONE_GRID} ${seaOff ? ZONE_OFF_BODY : ''}`}>
           <div className="flex flex-col items-center gap-1.5">
             <CompassDial deg={dir?.value ?? null} spread={spread?.value ?? null} locale={locale} />
             <DialCaption label={m.cc_direction()} defKey="def_direction" icon={<DirectionIcon className={LABEL_ICON} style={{ color: 'var(--c-dir)' }} />}>
@@ -373,12 +410,12 @@ export default function CurrentConditions({
 
       {/* ---- AIR (station) zone ---- */}
       {wind ? (
-        <div className={`rounded-xl border p-2.5 sm:p-3.5 ${ZONE.air} ${airFresh === 'stale' ? 'saturate-[0.55]' : ''}`}>
-          <ZoneHeader realm="air" tag={m.cc_realm_air()} badge={<StalenessBadge realm="air" fresh={airFresh} stampMs={airStampMs} tz={tz} now={now} />}>
-            <StationIcon size={15} style={{ color: 'var(--c-wind)' }} />
+        <div className={`rounded-xl border p-2.5 sm:p-3.5 ${airOff ? ZONE_OFF : ZONE.air}`}>
+          <ZoneHeader realm="air" tag={m.cc_realm_air()} off={airOff} badge={<StalenessBadge realm="air" fresh={airFresh} stampMs={airStampMs} tz={tz} now={now} />}>
+            <StationIcon size={15} style={{ color: airOff ? 'var(--text-3)' : 'var(--c-wind)' }} />
             {m.cc_station()} {wind.manifest.station.label} <span className="text-faint">· {fmtNumber(wind.distanceKm, locale, 1)} km{kindLabel ? ` · ${kindLabel}` : ''} · {wind.manifest.source.provider}</span>
           </ZoneHeader>
-          <div className={ZONE_GRID}>
+          <div className={`${ZONE_GRID} ${airOff ? ZONE_OFF_BODY : ''}`}>
             <div className="flex flex-col items-center gap-1.5">
               <CompassDial deg={windDir?.value ?? null} spread={null} second={gustDir?.value ?? null} locale={locale} />
               <DialCaption label={m.cc_wind_dir()} defKey="def_wind" icon={<WindIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)' }} />}>

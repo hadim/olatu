@@ -28,6 +28,9 @@
   --warm: #ff8a5b;
   --danger: #ff5c7a;
   --warning: #ffc857;
+  /* Warning as TEXT. On dark the plain --warning already clears AA on every surface, so the two
+     are the same value; on light they cannot be (see the light block). Spec 0015 §8. */
+  --warning-ink: #ffc857;
   --calm: #5fd0a6;
   --c-height: #38e1c6;
   --c-max: #8fe9dc;
@@ -54,6 +57,7 @@
   --warm: #e85c2b;
   --danger: #d63a5a;
   --warning: #c7860a;
+  --warning-ink: #8a5d00; /* --warning as text is only 2.7:1 on a light wash — darkened for AA */
   --calm: #2e9e7b;
   --c-height: #0e8c7a;
   --c-max: #4fb3a4;
@@ -87,6 +91,7 @@
   --color-warm: var(--warm);
   --color-danger: var(--danger);
   --color-warning: var(--warning);
+  --color-warning-ink: var(--warning-ink);
   --color-calm: var(--calm);
   --color-wave: var(--c-height);
   --color-max: var(--c-max);
@@ -188,6 +193,18 @@
 
 /* ---- kept rules: things utilities can't express, or DOM injected by uPlot/MapLibre.
    Everything else lives as Tailwind utilities in the components (spec 0006 §2). ---- */
+
+/* A Current Conditions realm zone whose source has stopped reporting (spec 0015 §8). The faint
+   diagonal hatch is the part no utility expresses: it reads as "out of service" from across the
+   room, before a word or a colour is processed, and it survives the greyscale the zone body
+   wears. Kept very low-contrast — the last-known values sit on top of it and must stay legible. */
+.cc-dormant {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    color-mix(in oklab, var(--text-3) 9%, transparent) 0 1px,
+    transparent 1px 8px
+  );
+}
 
 /* The chart host's padding lives here as a custom property (spec 0017 §2) because three other
    things must line up with it exactly: the day-separator overlay (inset so overlay-x matches each
