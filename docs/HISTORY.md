@@ -9,6 +9,33 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-09-10 — The CANDHIS campaign picker counts as an outage (spec 0020 §5)
+
+Owner report: CI fails every 30 min while CANDHIS is broken. It did — since 14:17 UTC the three
+buoys all failed with `campaign not selected (got the 'choose a campaign' page)`, which was a
+plain `ScrapeError`: **ours**, so exit 1, so no grace, so a red run and a notification every
+half hour for something no code of ours can fix.
+
+Two costs, and the second was the bigger one. A hard `ScrapeError` aborts the campaign **before**
+tides, wind, build and upload — the abort that spec 0020 §2.2 had already removed for
+`FeedUnavailable` — so the site was not merely noisy, it had stopped refreshing entirely. The
+first run after this change healed **24 missing 6-min wind points**.
+
+The signature now raises `FeedUnavailable`, because our half of that request is a constant: the
+same base64 `camp=<id>` URL, byte for byte, that got the table 40 min earlier. A page that serves
+the report at 13:37 and the picker at 14:17 changed on *their* side. Checked by hand first —
+picker on 6/6 attempts, with and without a PHP session cookie, so there was no request to write
+instead. Everything below it in `parse_realtime_table` (table count, the 8 headers, `TU`,
+date and plausibility guards) is still the format and still fails on the spot.
+
+What makes the call safe rather than optimistic: if CANDHIS one day really does change the URL
+scheme, the symptom is identical but permanent — and a permanent one still goes red, six hours
+later and **every six hours after that**. The grace delays the alarm, it never cancels it. Which
+is also the answer to the request: one notification per `OUTAGE_GRACE_HOURS`, not 12.
+
+Verified end to end locally (`--no-pull --no-upload`): buoy `feed: unavailable`, tide and wind
+tables `up to date`/`live`, tiers rebuilt from the last-good reel, `EXIT=75`.
+
 ## 2026-09-10 — Basemap off CARTO (it started stamping its free tiles)
 
 Owner report: the locator map works but says "API key required". It did — CARTO now watermarks

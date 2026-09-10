@@ -319,7 +319,13 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   ⚠️ **Raise `Outage` only
   where the other side is provably at fault** — a transport fault, a timeout, a 5xx/408/429, an
   upstream error page. A 4xx, a changed table, a renamed column is OURS and must stay red now:
-  a wrong grace costs six hours of unnoticed breakage. The gate's clock is the **marker step**
+  a wrong grace costs six hours of unnoticed breakage. The one borderline call is CANDHIS's
+  **'choose a campaign' page**, which is *theirs* (spec 0020 §5): our half of that request is a
+  constant, so the same URL serving the table at 13:37 and the picker at 14:17 changed on their
+  side. Test a borderline symptom by what the benign reading costs when wrong — here, red six
+  hours later and every six hours after, because the grace delays an alarm and never cancels it.
+  ⚠️ Misclassifying **costs data, not just noise**: a hard `ScrapeError` abandons the campaign
+  before tides/wind/build/upload, so it freezes every *other* source too. The gate's clock is the **marker step**
   `Data refreshed`, never the run conclusion — a held run is green by design, so that clock
   would reset itself every 30 min and never fire (keep the step name and `REFRESH_MARKER` in
   sync). A CANDHIS outage now **degrades** a buoy (`feed: unavailable`, last-good reel kept)

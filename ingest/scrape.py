@@ -174,10 +174,11 @@ def parse_realtime_table(html_text: str) -> list[dict]:
     Fails loudly on any sign of a format change or an HTTP-200 error page, so a bad
     response can never silently overwrite a good file.
     """
-    # These two say "we were not served the report at all" — a truncated body, a
-    # maintenance stub, a PHP backend on fire. That is the site being down (FeedUnavailable,
-    # eligible for CI's outage grace), not the format changing under us. Everything below
-    # this point IS the format, and stays a hard ScrapeError.
+    # These three say "we were not served the report at all" — a truncated body, a
+    # maintenance stub, a PHP backend on fire, a campaign the site would not select. That
+    # is the site being down (FeedUnavailable, eligible for CI's outage grace), not the
+    # format changing under us. Everything below this point IS the format, and stays a
+    # hard ScrapeError.
     if "<table" not in html_text.lower() or len(html_text) < 5000:
         raise FeedUnavailable(
             "response is not a plausible HTML page (too short / no table)"
@@ -186,8 +187,19 @@ def parse_realtime_table(html_text: str) -> list[dict]:
     for sig in ("fatal error", "parse error", "<b>warning</b>", "<b>notice</b>"):
         if sig in low:
             raise FeedUnavailable(f"response contains a PHP error signature: {sig!r}")
+    # The campaign picker instead of the report. This one *looks* like "the payload wasn't
+    # what we expect" — the case spec 0020 says must stay ours — and it is not, because our
+    # side of it is a constant: the same base64 `camp=<id>` URL, byte for byte, that the
+    # previous run used. When it serves the table at 13:37 and the picker at 14:17 (real,
+    # 2026-09-10), what changed is CANDHIS losing its own selection, and no request we can
+    # write fixes it — verified by hand that day: picker on every attempt, with and without
+    # a PHP session cookie. Should they ever really change the scheme, the symptom is
+    # identical but permanent — and a permanent one still goes red, six hours later and
+    # every six hours after that. The grace delays this alarm; it never cancels it.
     if "veuillez sélectionner une campagne" in low:
-        raise ScrapeError("campaign not selected (got the 'choose a campaign' page)")
+        raise FeedUnavailable(
+            "campaign not selected (got the 'choose a campaign' page)"
+        )
 
     doc = lhtml.fromstring(html_text)
     tables = [

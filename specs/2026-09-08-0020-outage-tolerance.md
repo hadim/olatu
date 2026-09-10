@@ -112,3 +112,28 @@ flagged the same morning.
   red on the first occurrence — those are ours.
 - **No new state anywhere.** The clock is the workflow's own run history; nothing is written
   to the bucket or the repo, so the mechanism can't itself break the pipeline.
+
+## 5. Revision 2026-09-10 — the campaign picker is theirs, not ours
+
+**What happened.** From 14:17 UTC the three buoys failed every 30 min with
+`campaign not selected (got the 'choose a campaign' page)` — a plain `ScrapeError`, so exit 1,
+so **red every 30 min**, exactly the wall §1 exists to remove. Worse than the noise: a hard
+`ScrapeError` aborts the campaign *before* tides, wind, build and upload (the thing §2.2 fixed
+for `FeedUnavailable` only), so the whole site stopped refreshing — the next run after this
+change healed **24 missing 6-min wind points**.
+
+**Why it is reclassified as `FeedUnavailable`.** §2.1 says a payload that isn't what we expect
+is ours. This one reads that way and isn't, because our half of it is a **constant**: the same
+base64 `camp=<id>` URL, byte for byte, that the run 40 min earlier used to get the table. A page
+that serves the report at 13:37 and the picker at 14:17 changed on *their* side — the site lost
+its own campaign selection. Verified by hand that day: picker on 6/6 attempts, with and without
+a PHP session cookie, so there is no request we could write instead.
+
+**The safety margin that makes this safe to do.** If CANDHIS ever really does change the URL
+scheme, the symptom is identical but *permanent* — and a permanent one still goes red, six hours
+later and every six hours after that. The grace delays this alarm; it never cancels it. That is
+the general test for a borderline symptom: ask what it costs when the benign reading is wrong.
+
+**Scope.** Only this signature moves. Everything below it in `parse_realtime_table` — the table
+count, the 8 headers, the `TU` check, the date/plausibility guards — is still the format, and
+still fails on the spot.

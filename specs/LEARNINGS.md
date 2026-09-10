@@ -8,6 +8,29 @@ spec and link it here.
 Format per entry: **date — title** · what we found · why it matters · resolution · refs.
 
 
+**2026-09-10 — the failure classification decides whether the *other* feeds refresh at all.**
+*What we found.* CANDHIS started serving its "choose a campaign" page instead of the report, and
+CI went red every 30 min. The obvious cost was the noise. The real one was hidden: that signature
+raised a hard `ScrapeError`, and a hard `ScrapeError` propagates out of `update()` — abandoning
+the campaign **before** tides, wind, build and upload. So a CANDHIS problem silently froze the
+marée and the Air realm too. The first run after reclassifying it healed 24 missing 6-min wind
+points that nobody had noticed were missing. Spec 0020 §2.2 had already fixed exactly this for
+`FeedUnavailable`; the lesson is that the fix only reaches the failures you classify correctly.
+
+*Why it matters.* "Ours vs theirs" reads like a notification-routing decision and is not — it is
+also a **blast-radius** decision. When weighing a borderline symptom, the question is not only
+"whose bug is this" but "what else stops if I get it wrong".
+
+*How to tell an ambiguous symptom apart.* The picker page looks like the case spec 0020 forbids
+granting grace to (a payload that isn't what we expect). It isn't, because **our half of the
+request is a constant**: the same base64 `camp=<id>` URL, byte for byte, that got the table 40 min
+earlier. A page that answers differently to identical bytes changed on their side. Confirmed by
+hand before touching the code — picker on 6/6 attempts, with and without a PHP session cookie.
+
+*The margin that makes it safe.* If they ever really change the scheme, the symptom is the same
+but permanent — and permanent still goes red, six hours later and every six hours after that. A
+grace window delays an alarm; it never cancels one. Ref: spec 0020 §5.
+
 **2026-09-10 — two silent basemap failures in a row, neither of which raised anything.**
 *What we found.* (1) CARTO started watermarking its keyless tiles: the tile still returned **HTTP
 200 with a valid PNG**, watermark baked in, so no check we had could see it — it took the owner
