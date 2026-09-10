@@ -1,4 +1,6 @@
 import { useLocale } from '@/lib/i18n';
+import { fmtDay } from '@/lib/format';
+import type { Manifest } from '@/lib/data';
 import { m } from '@/paraglide/messages';
 import { GitHubMark, BuoyMark } from './brands';
 import { TideIcon, WindIcon } from './icons';
@@ -29,10 +31,19 @@ function Sep() {
   );
 }
 
-export default function Footer() {
+/** `manifest` is null on the legal pages and before the first tier lands — the credit still
+ *  renders, it just carries no date yet. */
+export default function Footer({ manifest = null }: { manifest?: Manifest | null }) {
   const { locale } = useLocale();
   const hasBuild = __COMMIT_HASH__ !== 'dev' && __COMMIT_DATE__ !== '';
   const built = __COMMIT_DATE__ ? formatCommitDate(__COMMIT_DATE__, locale) : '';
+
+  // The Licence Ouverte grants redistribution *provided* the reuse names the source AND the
+  // date the reused information was last updated — so this is a licence term, not a nicety.
+  // It is the newest READING (span.end), not the build clock: an upstream feed that froze days
+  // ago is still rebuilt every 30 min, and must not be credited with today's date.
+  const updated = manifest ? fmtDay(Date.parse(manifest.span.end), locale, manifest.timezone) : '';
+  const credit = manifest?.source?.credit ?? m.footer_data_title();
 
   return (
     <footer className="mt-10 flex flex-col gap-2.5 border-t border-line pt-5 text-[0.86rem] text-faint">
@@ -46,10 +57,15 @@ export default function Footer() {
           {m.footer_report_bug()}
         </a>
         <Sep />
-        <a className={LINK} href={CANDHIS_URL} target="_blank" rel="noopener noreferrer">
+        <a className={LINK} href={CANDHIS_URL} target="_blank" rel="noopener noreferrer" title={credit}>
           <BuoyMark size={16} />
-          <span>{m.footer_data_by()} Cerema / CANDHIS</span>
+          <span>{m.footer_data_by()} Candhis</span>
         </a>
+        {updated && (
+          <span className="text-faint/80">
+            · {m.footer_updated()} {updated}
+          </span>
+        )}
         <Sep />
         <a className={LINK} href={WIND_URL} target="_blank" rel="noopener noreferrer" title="Météo-France · Licence Ouverte 2.0 (Etalab)">
           <WindIcon size={15} />

@@ -73,6 +73,44 @@ repo, so this resolves the pushed commit that triggered the Pages deploy. The da
 formatted in the active locale from a fixed UTC-noon `Date` (never a bare
 `new Date(iso)`), so the displayed day never tz-shifts.
 
+### 1.7 Attribution that actually satisfies the licence (amendment, 2026-09-10)
+1.5 made attribution *coherent*; it did not make it *compliant*. Reading Candhis's own
+[Conditions d'utilisation des données](https://candhis.cerema.fr/doc/01_Utilisation.fr.pdf)
+(Cerema, V1 2025-05-27) closed three gaps at once.
+
+**The grant.** Candhis data is published under the **Licence Ouverte / Etalab v2.0**, which
+names redistribution and commercial use explicitly. That is the legal basis for mirroring the
+tiers on the public HF bucket — worth recording, because it is the question that keeps coming
+back. It is conditional on naming **the source** *and* **the date the reused information was
+last updated**, and we were doing neither properly.
+
+- **The date is a licence term.** The footer credit now carries `· mise à jour du <jour>`,
+  formatted in the buoy's zone (`fmtDay`) from **`manifest.span.end`** — the newest reading
+  actually redistributed, *not* the build clock. Those two diverge exactly when it matters:
+  the refresh rebuilds every 30 min through an upstream outage, so a `generated_at`-keyed
+  credit would have claimed today's date over data frozen days ago.
+- **The data now carries its own licence.** `manifest.source` (new, top-level — mirroring
+  where a wind station's manifest keeps its `source`, spec 0012 §5, while `tide`/`wind` are
+  pointers at *other* datasets and carry theirs inside) holds provider, partners, licence +
+  licence URL, terms URL, last-update date and a paste-ready `credit` sentence, built by
+  `schema.candhis_source(campaign, updated=…)`. Until now the parquet travelled the bucket
+  naked: anyone pulling it directly, rather than through the webapp footer, had nothing to
+  attribute it with. A webapp footer does not attribute a bucket.
+- **"Cerema" was the wrong credit.** The conditions credit each campaign to the organisations
+  behind it, and ours are not Cerema: **06403 → Département 64** (no Cerema at all), 06402 →
+  Université de Pau / Cerema / Région Nouvelle-Aquitaine / CA Pays Basque / Port de Bayonne,
+  03302 → Université de Bordeaux / Cerema / Shom. `BUOYS[...]["partners"]` holds them, and the
+  station-facts strip is now **Position · Sensor · Partners**. `operator` stays and still means
+  Cerema — it is the *network* operator, a different fact, not a shorter spelling of the same one.
+- The legal page's IP section now states all three licences (Licence Ouverte for Candhis **and**
+  Météo-France, CC-BY for the tides) and says plainly that Olatu redistributes them with source
+  and last-update date. `footer_data_by` dropped its `©`: a bare copyright mark next to an
+  open-licensed dataset framed the relationship wrongly.
+
+**Cache-compat.** `Buoy.partners` and `Manifest.source` are typed **optional**: spec 0019 paints
+from an IndexedDB manifest that may predate this, so both read defensively (partners fall back to
+the operator fact, the date falls back to `span.end`, which has always existed).
+
 ## 2. i18n
 New lowercase-snake keys in `messages/{en,fr,es}.json` (parity kept): `app_headline`,
 `nav_home`, `footer_build`, `footer_build_title`. The `map_*`, `station_depth` /

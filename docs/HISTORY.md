@@ -9,6 +9,42 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-09-10 — Attribution that satisfies the licence, not just the eye (spec 0007 §1.7)
+
+Prompted by a question with a simple answer we had never actually checked: is mirroring Candhis
+data on a public HF bucket legitimate? Candhis's own
+[Conditions d'utilisation](https://candhis.cerema.fr/doc/01_Utilisation.fr.pdf) (Cerema, V1
+2025-05-27) says yes, in as many words — **Licence Ouverte / Etalab v2.0**, redistribution and
+commercial use granted explicitly. But the grant is conditional on naming the source **and the
+date the reused information was last updated**, and reading it closely turned up three gaps.
+
+- **The last-update date is a licence term, and it was missing.** The footer credit now reads
+  `Données : Candhis · mise à jour du <jour>`, formatted in the buoy's zone by a new
+  `fmtDay(ms, locale, tz)`. It comes from **`manifest.span.end`**, never `generated_at`: the
+  refresh rebuilds every 30 min straight through an upstream outage, so a build-clock date would
+  have stamped today onto data frozen days ago — which is precisely the claim the licence is
+  asking you not to make. `Footer` now takes the manifest (`null` on the legal pages).
+- **The bucket copy now carries its own licence.** New top-level `manifest.source`, built by
+  `schema.candhis_source(campaign, updated=span_end)` — provider, partners, licence + licence URL,
+  terms URL, last-update date, and a paste-ready `credit` sentence in the form the conditions
+  give. Top-level because that is where a wind station's manifest keeps its `source` (0012 §5),
+  while `tide`/`wind` are pointers at *other* datasets and carry theirs inside. Before this the
+  parquet travelled the bucket naked; a webapp footer does not attribute a bucket.
+- **"Cerema" was simply the wrong credit.** The conditions credit each campaign to the
+  organisations behind it: **06403 is Département 64, with no Cerema at all** — plus 06402 →
+  Université de Pau / Cerema / Région Nouvelle-Aquitaine / CA Pays Basque / Port de Bayonne, and
+  03302 → Université de Bordeaux / Cerema / Shom. Now in `BUOYS[...]["partners"]`, and the
+  station-facts strip reads **Position · Sensor · Partners**. `operator` stays and still says
+  Cerema: it is the *network* operator, a genuinely different fact — the two are not synonyms,
+  which is exactly how the wrong one got shown for three years.
+- Legal page IP section now states all three licences (Licence Ouverte for Candhis **and**
+  Météo-France, CC-BY for tides) and that Olatu redistributes with source + date.
+  `footer_data_by` lost its `©` — a copyright mark beside an open-licensed dataset misframes it.
+
+`Buoy.partners` and `Manifest.source` are typed **optional** on purpose: 0019 paints from an
+IndexedDB manifest that can predate this, so partners fall back to the operator fact and the date
+falls back to `span.end`, which has always existed.
+
 ## 2026-09-09 — A dormant realm looks dormant (spec 0015 §8)
 
 CANDHIS has been serving `503 Service Unavailable` since **2026-09-08 ~13:30 CEST**. Everything

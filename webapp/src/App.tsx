@@ -52,11 +52,11 @@ const WIND_HISTORY_COLUMNS = [
 // 0017 §2): the cards inside it shrink their own padding instead of stacking a third inset.
 const PAGE = 'mx-auto max-w-[1100px] px-3 pb-12 pt-5 sm:px-5';
 
-function Fact({ label, children }: { label: string; children: ReactNode }) {
+function Fact({ label, children, mono = true }: { label: string; children: ReactNode; mono?: boolean }) {
   return (
     <div className="flex flex-col gap-[0.2rem]">
       <dt className="text-[0.76rem] uppercase tracking-[0.06em] text-faint">{label}</dt>
-      <dd className="m-0 font-mono text-[0.95rem] text-fg">{children}</dd>
+      <dd className={`m-0 text-fg ${mono ? 'font-mono text-[0.95rem]' : 'text-[0.9rem] leading-snug'}`}>{children}</dd>
     </div>
   );
 }
@@ -70,7 +70,13 @@ function StationFacts({ manifest }: { manifest: Manifest }) {
     <dl className="mt-6 m-0 grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] content-center gap-4 rounded-2xl border border-line px-[1.3rem] py-[1.1rem]">
       <Fact label={m.station_position()}>{b.lat.toFixed(4)}°N, {Math.abs(b.lon).toFixed(4)}°W</Fact>
       <Fact label={m.station_sensor()}>{b.sensor}</Fact>
-      <Fact label={m.station_operator()}>{b.operator}</Fact>
+      {/* Partners, not the network operator: Candhis's own conditions of use credit each
+          campaign to the organisations behind it, and 06403 is Département 64 with no Cerema
+          — so "Opérateur: Cerema" here was not a shorthand, it was wrong. Falls back to the
+          operator for a manifest cached before `partners` shipped (spec 0019). */}
+      <Fact label={b.partners ? m.station_partners() : m.station_operator()} mono={!b.partners}>
+        {(b.partners ?? [b.operator]).join(' · ')}
+      </Fact>
     </dl>
   );
 }
@@ -456,7 +462,7 @@ export default function App() {
         )}
       </main>
 
-      <Footer />
+      <Footer manifest={ready?.manifest ?? null} />
       <ConsentBanner />
     </div>
   );

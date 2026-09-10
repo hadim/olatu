@@ -129,6 +129,17 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   (`build.read_archive` returns None, history accumulates forward). Drop archive CSVs into the
   campaign's `raw/` later to backfill (they coalesce) — this is how Cap Ferret went from
   realtime-only to full history from 2010.
+- **Attribution is a licence term, not decoration (spec 0007 §1.7).** CANDHIS data is
+  **Licence Ouverte / Etalab v2.0** ([conditions](https://candhis.cerema.fr/doc/01_Utilisation.fr.pdf),
+  Cerema V1 2025-05-27) — that grant, which names redistribution and commercial use explicitly, is
+  what makes the public HF bucket legitimate, *provided* every copy names the source **and the date
+  the reused information was last updated**. So: the footer date comes from **`manifest.span.end`**,
+  never `generated_at` (the refresh rebuilds every 30 min through an outage — a build-clock date
+  would stamp today onto frozen data); and `manifest.source` (`schema.candhis_source`) must keep
+  travelling with the tiers, because a webapp footer does not attribute a bucket. **`operator` and
+  `partners` are different facts**: `operator` is who runs the *network* (Cerema), `partners` are the
+  organisations behind *that campaign* — **06403 is Département 64, with no Cerema** — and the licence
+  asks for the latter. Never re-collapse them, and don't put a `©` next to an open-licensed dataset.
 - **Analytics/consent (spec 0011)** is consent-gated: `webapp/src/lib/analytics.ts` injects
   gtag (GA4 `G-XWQEVH6TD8`) **only after an explicit Accept** — never load a tracker before
   consent, and keep Consent Mode ad signals denied. The gtag shim pushes the raw `arguments`

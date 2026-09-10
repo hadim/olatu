@@ -44,7 +44,12 @@ export interface Buoy {
   campaign_id: string;
   name: string;
   network: string;
+  /** Who runs the NETWORK (Cerema, for Candhis) — not who runs this campaign. */
   operator: string;
+  /** The organisations behind THIS campaign, per Candhis's own attribution table — for 06403
+   *  that is Département 64, with no Cerema. Optional because a manifest cached before this
+   *  shipped (spec 0019 paints from IndexedDB first) has no such field. */
+  partners?: string[];
   lat: number;
   lon: number;
   coast: string;
@@ -68,6 +73,14 @@ export interface SourceMeta {
   license: string;
   credit: string;
   url: string;
+  /** Buoy source only (ingest/schema.candhis_source): the campaign's partner organisations,
+   *  the licence/terms URLs, and the last-update date the Licence Ouverte requires alongside
+   *  the source name. */
+  operator?: string;
+  partners?: string[];
+  license_url?: string;
+  terms_url?: string;
+  updated?: string;
 }
 
 /** The buoy manifest's `wind` **pointer** (ingest/build.py): which station to pair, how far,
@@ -109,6 +122,10 @@ export interface WindManifest {
 
 export interface Manifest {
   buoy: Buoy;
+  /** This buoy data's own Licence Ouverte attribution (`tide`/`wind` below point at *other*
+   *  datasets and carry theirs inside). Optional for the same cached-manifest reason as
+   *  `Buoy.partners` — read it defensively and fall back to `span.end` for the date. */
+  source?: SourceMeta;
   /** Nearest tide port for this buoy (ingest/build.py), or null if none within range. */
   tide: TideMeta | null;
   /** Nearest wind station for this buoy (ingest/build.py), or null if none within range. */

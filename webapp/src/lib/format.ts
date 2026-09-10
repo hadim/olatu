@@ -67,6 +67,13 @@ export function fmtDateTime(ms: number, locale: Locale, timeZone: string, clock:
   }).format(new Date(ms));
 }
 
+/** Calendar day only, in the given zone — e.g. "8 sept. 2026". Used for the Licence Ouverte
+ *  "date de dernière mise à jour" credit, which is a day, not an instant. Zone matters: a
+ *  23:40 UTC reading is already the next day in Europe/Paris. */
+export function fmtDay(ms: number, locale: Locale, timeZone: string): string {
+  return new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short', year: 'numeric', timeZone }).format(new Date(ms));
+}
+
 /** Locale-aware axis tick label whose detail scales with the tick spacing (seconds).
  *  On sub-day windows the ticks are hours, but a bare "08:00 16:00 00:00…" loses the
  *  day/month — so ticks that land on local midnight show the date instead, anchoring
