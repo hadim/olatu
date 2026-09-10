@@ -9,6 +9,31 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-09-10 — Basemap moved to OpenFreeMap (CARTO started stamping its free tiles)
+
+Owner report: the locator map works but says "API key required". It did — CARTO now watermarks
+its keyless basemap tiles with **API KEY REQUIRED** on the diagonal. Nothing broke on our side
+and nothing failed loudly: the tile still came back **HTTP 200 with a valid PNG**, watermark
+baked in. A monitoring blind spot worth remembering — a degraded third-party asset can be
+perfectly well-formed.
+
+Swapped to **OpenFreeMap** (`positron` light / `dark` dark): keyless, no quota, OSM data on
+their own servers. Those two styles *are* the CARTO Positron / Dark Matter designs, so the map
+looks exactly as before, minus the stamp — and vector instead of `@2x` raster is sharper at any
+zoom, with MapLibre already the renderer.
+
+- **The credit had to be re-added by hand.** CARTO's style declared `attribution` on its source;
+  OpenFreeMap's declares none, so the OSM + OpenFreeMap credit now goes through MapLibre's
+  `customAttribution`. Miss that and the map ships OSM data crediting nobody.
+- The style JSON (~100–170 KB) is fetched once at map init — after first paint, since the whole
+  component is dynamic-imported, so the banner-first budget (0001 §7.3) is untouched.
+- The `[theme]` effect already rebuilt the map on a theme switch; only the style *source*
+  changed, from an inline raster object to a URL.
+- Considered and rejected: **VersaTiles** (the only keyless option with a dark style is
+  `eclipse`, whose land is amber `hsl(33,48%,5%)` — it would fight the Air realm's amber, spec
+  0013, and the cool `#0f2233` dark surface); **Esri Gray Canvas** (keyless programmatic use is
+  a grey area in their terms, and labels ride a second overlay layer).
+
 ## 2026-09-10 — Attribution that satisfies the licence, not just the eye (spec 0007 §1.7)
 
 Prompted by a question with a simple answer we had never actually checked: is mirroring Candhis

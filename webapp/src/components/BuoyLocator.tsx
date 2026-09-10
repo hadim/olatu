@@ -4,7 +4,7 @@
 // MapLibre (~200 KB) is dynamic-imported inside the effect so it code-splits and loads
 // AFTER first paint, behind a themed placeholder — the banner-first paint is never
 // taxed (spec 0001 §7.3). The always-instant, accessible selector is the segmented
-// control in the station bar; this map is the visual companion. CARTO raster tiles
+// control in the station bar; this map is the visual companion. OpenFreeMap vector tiles
 // (keyless), theme-aware (rebuilt on theme change), same look as the detail map.
 
 import { useEffect, useRef } from 'react';
@@ -16,21 +16,26 @@ import { m } from '@/paraglide/messages';
 import { BUOYS, buoyInfo } from '../lib/buoys';
 import { STATIONS } from '../lib/stations';
 
-function rasterStyle(theme: string): unknown {
-  const base = theme === 'dark' ? 'dark_all' : 'light_all';
-  return {
-    version: 8,
-    sources: {
-      carto: {
-        type: 'raster',
-        tiles: [`https://basemaps.cartocdn.com/${base}/{z}/{x}/{y}@2x.png`],
-        tileSize: 256,
-        attribution: '© OpenStreetMap contributors © CARTO',
-      },
-    },
-    layers: [{ id: 'carto', type: 'raster', source: 'carto' }],
-  };
+// Basemap: OpenFreeMap (keyless, no quota, OSM data on their own servers). We were on
+// CARTO's keyless raster tiles until they started stamping "API KEY REQUIRED" diagonally
+// across every tile — the tiles still returned HTTP 200 with a valid PNG, so nothing broke
+// loudly; the watermark simply appeared. `positron` / `dark` here ARE the CARTO Positron /
+// Dark Matter designs, so the map looks the same as it always did, minus the stamp.
+//
+// Vector, not raster: sharper at any zoom, and MapLibre (already the renderer) consumes a
+// style URL natively. The style JSON is ~100-170 KB fetched once at map init — which is
+// after first paint, since the whole component is dynamic-imported.
+function styleUrl(theme: string): string {
+  return `https://tiles.openfreemap.org/styles/${theme === 'dark' ? 'dark' : 'positron'}`;
 }
+
+// OpenFreeMap's style JSON declares no `attribution` on its sources (CARTO's did), so the
+// credit has to be passed to the control explicitly — drop this and the map silently ships
+// OSM data with nothing crediting it.
+const MAP_ATTRIBUTION = [
+  '<a href="https://openfreemap.org" target="_blank" rel="noopener noreferrer">OpenFreeMap</a>',
+  '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>',
+];
 
 export default function BuoyLocator({
   selected,
@@ -52,7 +57,7 @@ export default function BuoyLocator({
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
 
-  // Build the map once per theme (raster tiles differ dark/light), add a marker per buoy.
+  // Build the map once per theme (the style URL differs dark/light), add a marker per buoy.
   useEffect(() => {
     let map: MlMap | undefined;
     const created: MlMarker[] = [];
@@ -66,11 +71,10 @@ export default function BuoyLocator({
       const here = buoyInfo(selected);
       map = new maplibre.Map({
         container: mapEl.current,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        style: rasterStyle(theme) as any,
+        style: styleUrl(theme),
         center: [here.lon, here.lat],
         zoom: 9.5,
-        attributionControl: { compact: true },
+        attributionControl: { compact: true, customAttribution: MAP_ATTRIBUTION },
         dragRotate: false,
         pitchWithRotate: false,
       });
