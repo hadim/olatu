@@ -24,12 +24,20 @@ SENTINEL_MIN = 999.99
 # data dialect is identical across campaigns, so only this table differs per buoy.
 # Tide config is NOT here: a tide is a property of a PORT, not a buoy (see TIDE_PORTS +
 # resolve_tide_port below and specs/0008 §8.2). Each buoy resolves to its nearest port.
+#
+# `operator` and `partners` are NOT the same thing and one is not a shorter spelling of the
+# other. `operator` is who runs the NETWORK (Cerema runs Candhis and publishes every campaign);
+# `partners` are the organisations behind THIS campaign, copied from the attribution table in
+# Candhis's own "Conditions d'utilisation des données" -- and for 06403 that is Département 64
+# with no Cerema at all. The licence asks reusers to name the latter (see candhis_source), so
+# crediting "Cerema" for Saint-Jean-de-Luz is not a shorthand, it is wrong.
 BUOYS = {
     "06403": {
         "campaign_id": "06403",
         "name": "Saint-Jean-de-Luz",
         "network": "CANDHIS",
         "operator": "Cerema",
+        "partners": ["Département 64"],
         "lat": 43.408333,
         "lon": -1.681667,
         "coast": "Atlantic / Basque coast (Bay of Biscay)",
@@ -43,6 +51,13 @@ BUOYS = {
         "name": "Anglet",
         "network": "CANDHIS",
         "operator": "Cerema",
+        "partners": [
+            "Université de Pau",
+            "Cerema",
+            "Région Nouvelle-Aquitaine",
+            "Communauté d'agglomération Pays Basque",
+            "Port de Bayonne",
+        ],
         "lat": 43.5322,
         "lon": -1.6150,
         "coast": "Atlantic / Basque coast (Anglet, Adour estuary)",
@@ -58,6 +73,7 @@ BUOYS = {
         "name": "Cap Ferret",
         "network": "CANDHIS",
         "operator": "Cerema",
+        "partners": ["Université de Bordeaux", "Cerema", "Shom"],
         "lat": 44.6525,
         "lon": -1.44667,
         "coast": "Atlantic coast (Gironde, off Cap Ferret / Arcachon)",
@@ -67,6 +83,55 @@ BUOYS = {
         "timezone": "Europe/Paris",
     },
 }
+
+# ------------------------------------------------------------------- CANDHIS attribution
+#
+# Candhis data is published under the **Licence Ouverte / Etalab v2.0**: reproducing,
+# adapting, redistributing, publishing and even *commercially* exploiting it are all granted
+# explicitly ("Conditions d'utilisation des données", Cerema V1 2025-05-27 --
+# https://candhis.cerema.fr/doc/01_Utilisation.fr.pdf). That grant is what makes mirroring the
+# tiers on the public HF bucket legitimate. But it is conditional, and the condition has two
+# halves that both have to actually happen:
+#
+#   1. Name the source -- "a minima : Candhis", ideally the organisations behind the campaign
+#      (BUOYS[...]["partners"], see the note above).
+#   2. Name **the date the reused information was last updated**. This is the half that is easy
+#      to drop, and it is why this is a function and not a WIND_SOURCE-style constant: the date
+#      is per build, so build.py bakes it into the manifest and the copy sitting on the bucket
+#      carries a complete, paste-ready attribution right next to the data it attributes --
+#      rather than relying on a webapp footer that a bucket consumer never sees.
+CANDHIS_LICENSE = "Licence Ouverte 2.0 (Etalab)"
+CANDHIS_LICENSE_URL = "https://www.etalab.gouv.fr/wp-content/uploads/2017/04/ETALAB-Licence-Ouverte-v2.0.pdf"
+CANDHIS_URL = "https://candhis.cerema.fr"
+CANDHIS_TERMS_URL = "https://candhis.cerema.fr/doc/01_Utilisation.fr.pdf"
+
+
+def candhis_source(campaign: str, *, updated: str) -> dict:
+    """Licence Ouverte attribution for one campaign's data (mirror of WIND_SOURCE/TIDE_SOURCE).
+
+    `updated` is an ISO timestamp. Pass the **span end** -- the newest reading actually being
+    redistributed -- not the build clock: the licence asks for the last-update date of the
+    *information reused*, and those two diverge exactly when it matters (an upstream feed that
+    froze days ago still gets rebuilt every 30 min, and must not claim today's date).
+    """
+    meta = BUOYS[campaign]
+    day = updated[:10]
+    return {
+        "provider": "Candhis",
+        "operator": meta["operator"],
+        "partners": list(meta["partners"]),
+        "dataset": f"Candhis — campagne {campaign} {meta['name']}",
+        "license": CANDHIS_LICENSE,
+        "license_url": CANDHIS_LICENSE_URL,
+        "terms_url": CANDHIS_TERMS_URL,
+        "updated": day,
+        "credit": (
+            f"{' / '.join(meta['partners'])} — Données originales téléchargées sur "
+            f"{CANDHIS_URL}/, mise à jour du {day}."
+        ),
+        "url": CANDHIS_URL,
+    }
+
 
 # ------------------------------------------------------------------------- tides / ports
 #

@@ -40,6 +40,7 @@ from .schema import (
     UNITS,
     WIND_SOURCE,
     buoy,
+    candhis_source,
     resolve_tide_port,
     resolve_wind_station,
     variable_source,
@@ -328,16 +329,22 @@ def build(src: Path, out: Path, campaign: str = CAMPAIGN_ID) -> None:
         if station is not None
         else None
     )
+    span_start = merged[DT].min().replace(tzinfo=timezone.utc).isoformat()
+    span_end = merged[DT].max().replace(tzinfo=timezone.utc).isoformat()
     manifest = {
         "buoy": meta,
+        # The buoy data's OWN Licence Ouverte attribution -- top level, exactly where a wind
+        # station's manifest carries its `source` (spec 0012 §5), while `tide`/`wind` below are
+        # pointers to *other* datasets and carry theirs inside. Without this the tiers travelled
+        # the bucket with no licence and no last-update date attached, so anyone who pulled the
+        # parquet directly (rather than through the webapp footer) had nothing to attribute it
+        # with. Keyed on the span end, not the build clock -- see schema.candhis_source.
+        "source": candhis_source(campaign, updated=span_end),
         "tide": tide_block,
         "wind": wind_block,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "timezone": meta["timezone"],
-        "span": {
-            "start": merged[DT].min().replace(tzinfo=timezone.utc).isoformat(),
-            "end": merged[DT].max().replace(tzinfo=timezone.utc).isoformat(),
-        },
+        "span": {"start": span_start, "end": span_end},
         "rows": merged.height,
         "variables": [
             {
