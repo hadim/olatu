@@ -46,12 +46,6 @@ disabled, static bounds). Now:
   first render still opens on the all-buoys overview (a `firstSelect` ref guards the
   initial effect run), so the picker context is shown before the user commits.
 
-**Basemap provider (2026-09-10):** the keyless CARTO raster tiles were replaced by
-**OpenFreeMap** vector styles (`positron` / `dark`) after CARTO began stamping "API KEY
-REQUIRED" across every free tile. Same design — those styles *are* Positron / Dark Matter —
-so the map is unchanged to look at. OpenFreeMap declares no `attribution` on its sources, so
-the OSM + OpenFreeMap credit is passed to MapLibre as `customAttribution`.
-
 ### 1.4 Bottom station-location block: drop the static map & water depth
 The bottom block had a **static PNG mini-map that never changed per buoy** (it always
 showed the same committed image) plus a fact grid. With 1.3 making the *top* map live and
