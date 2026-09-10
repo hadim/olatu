@@ -8,6 +8,32 @@ spec and link it here.
 Format per entry: **date — title** · what we found · why it matters · resolution · refs.
 
 
+**2026-09-10 — two silent basemap failures in a row, neither of which raised anything.**
+*What we found.* (1) CARTO started watermarking its keyless tiles: the tile still returned **HTTP
+200 with a valid PNG**, watermark baked in, so no check we had could see it — it took the owner
+looking at the map. (2) Moving to OpenFreeMap vector tiles, MapLibre fetched the style, the
+TileJSON and the sprite, painted the background at a correct 508x317 canvas — and requested
+**zero tiles**, from the vector *and* the raster source inside that same style, with **zero
+console errors**.
+
+*Why it matters.* A third-party asset can be perfectly well-formed and still be broken, and
+MapLibre can decline to load tiles without complaining. Neither is reachable by a build-time
+check: verifying the bundle contained the right URL proved nothing about what a user sees. **A
+basemap change cannot be validated by grep — open the page.** It was shipped that way once and
+had to be reverted from production.
+
+*What isolated the cause.* A bare page with the same MapLibre build loaded the same OpenFreeMap
+style fine (2 `.pbf` tiles), with both a fixed-pixel and an `aspect-ratio` container — clearing
+the style, the provider, MapLibre v6 and the sizing. Back in the app, our **inline** style object
+requests tiles normally (24 Esri tiles) while a **fetched style URL** yields none. So the split is
+inline-object vs URL inside this app, not vector vs raster. Root cause still open; suspect the
+MapLibre worker under our Vite build (no worker resource is ever loaded).
+
+*Resolution.* Stay on the raster path that has always worked here, with **Esri Canvas** replacing
+CARTO (keyless, light/dark, OSM+Esri credit). Note in passing: the keyless world has moved to
+vector, so a keyless raster pair is now scarce — Esri is essentially the last one. Ref: spec 0007
+§1.3.
+
 **Update 2026-09-03.** Still live, and now pinned down. The bogus-JWT probe returns the same body
 at **10.15 s, 3/3**, while GitHub's OIDC discovery + JWKS answer in ~0.32 s from the same laptop —
 so the abort is HF-side, not upstream. The *same* 10 s constant turns up on

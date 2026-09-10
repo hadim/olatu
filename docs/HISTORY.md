@@ -9,6 +9,28 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-09-10 — Basemap off CARTO (it started stamping its free tiles)
+
+Owner report: the locator map works but says "API key required". It did — CARTO now watermarks
+its keyless tiles, and the tile still comes back **HTTP 200 with a valid PNG**, watermark baked
+in. Nothing failed loudly.
+
+Now on **Esri Canvas** (`World_{Light,Dark}_Gray_Base` + `_Reference`): keyless, light/dark pair,
+credited "© OpenStreetMap contributors, © Esri". Esri splits land from labels, so the style carries
+two raster layers, and its tile path is `{z}/{y}/{x}` — row before column, unlike every other
+provider.
+
+**OpenFreeMap vector was tried first, shipped, and reverted the same hour.** In the app MapLibre
+loaded the style, TileJSON and sprite, painted the background on a correct 508x317 canvas, and
+requested **no tiles at all** — vector *and* raster sources inside that same style — with zero
+console errors. A bare page with the same MapLibre build renders that style fine. Our inline style
+object requests tiles normally; a fetched style URL does not. Root cause open, suspect the MapLibre
+worker under Vite. Full write-up in [LEARNINGS](../specs/LEARNINGS.md).
+
+The real lesson is the shipping one: the change was validated by grepping the deployed bundle for
+the right URL, which proves nothing about what renders. A basemap change has to be opened in a
+browser.
+
 ## 2026-09-10 — Attribution that satisfies the licence, not just the eye (spec 0007 §1.7)
 
 Prompted by a question with a simple answer we had never actually checked: is mirroring Candhis

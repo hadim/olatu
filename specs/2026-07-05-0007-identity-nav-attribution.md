@@ -46,6 +46,12 @@ disabled, static bounds). Now:
   first render still opens on the all-buoys overview (a `firstSelect` ref guards the
   initial effect run), so the picker context is shown before the user commits.
 
+**Basemap provider (2026-09-10):** CARTO began stamping "API KEY REQUIRED" across its keyless
+tiles, so the basemap moved to **Esri Canvas** (`World_{Light,Dark}_Gray_{Base,Reference}`) —
+still keyless raster, still a light/dark pair, credited "© OpenStreetMap contributors, © Esri".
+Esri splits land from labels, so the style now carries two raster layers, and its tile path is
+`{z}/{y}/{x}` (row before column). Vector was tried first and backed out — see LEARNINGS.
+
 ### 1.4 Bottom station-location block: drop the static map & water depth
 The bottom block had a **static PNG mini-map that never changed per buoy** (it always
 showed the same committed image) plus a fact grid. With 1.3 making the *top* map live and

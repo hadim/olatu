@@ -16,19 +16,35 @@ import { m } from '@/paraglide/messages';
 import { BUOYS, buoyInfo } from '../lib/buoys';
 import { STATIONS } from '../lib/stations';
 
+// Basemap: Esri Canvas (keyless raster). We were on CARTO's keyless tiles until they began
+// stamping "API KEY REQUIRED" diagonally across every one — the tile still returned HTTP 200
+// with a valid PNG, so nothing failed loudly, the watermark simply appeared.
+//
+// Raster on purpose. The keyless world has moved to vector (OpenFreeMap, VersaTiles), and
+// OpenFreeMap's styles work perfectly in a bare page — but inside THIS app MapLibre resolves
+// the style, the TileJSON and the sprite, paints the background, and then requests no tiles
+// at all, from either the vector or the raster source in that same style, with zero console
+// errors. Unresolved (suspect: the MapLibre worker not loading under our Vite build). Until
+// that is understood, stay on the raster path that has always worked here.
+//
+// Esri splits base from labels, so this is two layers: a "Base" (land/water only) with a
+// "Reference" (place names, road labels) on top. Note the tile path is {z}/{y}/{x} — row
+// before column — not the {z}/{x}/{y} every other provider uses.
 function rasterStyle(theme: string): unknown {
-  const base = theme === 'dark' ? 'dark_all' : 'light_all';
+  const variant = theme === 'dark' ? 'Dark' : 'Light';
+  const esri = (service: string) =>
+    `https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_${variant}_Gray_${service}/MapServer/tile/{z}/{y}/{x}`;
+  const attribution = '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, © Esri';
   return {
     version: 8,
     sources: {
-      carto: {
-        type: 'raster',
-        tiles: [`https://basemaps.cartocdn.com/${base}/{z}/{x}/{y}@2x.png`],
-        tileSize: 256,
-        attribution: '© OpenStreetMap contributors © CARTO',
-      },
+      base: { type: 'raster', tiles: [esri('Base')], tileSize: 256, maxzoom: 16, attribution },
+      labels: { type: 'raster', tiles: [esri('Reference')], tileSize: 256, maxzoom: 16 },
     },
-    layers: [{ id: 'carto', type: 'raster', source: 'carto' }],
+    layers: [
+      { id: 'base', type: 'raster', source: 'base' },
+      { id: 'labels', type: 'raster', source: 'labels' },
+    ],
   };
 }
 
