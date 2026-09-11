@@ -78,6 +78,9 @@ jobs:
           cache: true
           environments: data
 
+      # Bump the key whenever a *_arch.csv is re-seeded in the bucket: pull() only fetches
+      # an archive that is missing, so a stale cache would rebuild the tiers from the old
+      # one (spec 0004 §7). v2 = the 2026 archives re-seeded through 2026-08-31.
       - name: Cache the immutable archives (so we don't re-download them each run)
         uses: actions/cache@v6
         with:
@@ -85,7 +88,7 @@ jobs:
             hfdata/06403/raw
             hfdata/06402/raw
             hfdata/03302/raw
-          key: candhis-raw-v1
+          key: candhis-raw-v2
 
       # All buoys in one job: one checkout, one env, and crucially ONE OIDC token
       # exchange shared across campaigns (avoids the per-buoy 429s). update.py refreshes
