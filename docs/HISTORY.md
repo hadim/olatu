@@ -9,6 +9,28 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-09-11 — The 2026 archives re-seeded through 2026-08-31 (spec 0004 §7)
+
+Owner report: CANDHIS is back. The report page is (the picker went away between 13:40 and 14:07
+UTC), but its realtime window still ends **2026-09-08 12:00 UTC** on all three buoys — the page
+itself declares `06/09 → 08/09` — so the scrape gained one row and the live tail stays frozen
+upstream. Nothing on our side can fill 09-08 → now until CANDHIS publishes it.
+
+The missing days that *were* ours to fill were older: the hole between each hand-seeded
+`*_2026_arch.csv` and the first reel scrape. CANDHIS's Archives export now runs to 2026-08-31:
+
+- **06402** +2,729 rows — 2026-04-30 → 06-26 closed; 2026 has no gap > 2 h left.
+- **06403** +970 rows — 06-05 → 06-25 recovered; 05-13 → 06-05 is missing from CANDHIS's own
+  archive too (buoy silent).
+- **03302** no new timestamps (its archive gaps are exactly the reel's), but QC'd values now
+  supersede the realtime quick-look for 06-30 → 08-31.
+
+Each file was checked as a strict superset of the one it replaced (no timestamp lost, 0 differing
+cells on the overlap, same 73 columns), then pushed alone with `sync_bucket`. The CI cache key
+went `candhis-raw-v1 → v2`: `pull()` never re-fetches an archive it already has, so the next cron
+would otherwise have rebuilt the tiers from the cached, gappy one. How the export works is in
+LEARNINGS 2026-09-11.
+
 ## 2026-09-10 — The CANDHIS campaign picker counts as an outage (spec 0020 §5)
 
 Owner report: CI fails every 30 min while CANDHIS is broken. It did — since 14:17 UTC the three

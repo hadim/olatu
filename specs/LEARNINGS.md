@@ -8,6 +8,27 @@ spec and link it here.
 Format per entry: **date — title** · what we found · why it matters · resolution · refs.
 
 
+**2026-09-11 — the CANDHIS Archives export is a form + `teleFic.php`, and the year is a per-campaign index.**
+*What we found.* The 2026-06-27 entry guessed the export was a `?datA=` date-range URL. It is a
+form, driven in one PHP session (plain `httpx`, no browser): GET the base64 campaign URL → POST
+`BtnTeleArch=` (opens the form) → POST `LisAct`, `LisStr`, `LisAnn`, `BtnForm=` → GET
+`/_privC_/teleFic.php`, which returns the whole year as `Candhis_<id>_<YEAR>_arch.csv` in the
+same 73-column dialect. `LisAct` (activity) and `LisStr` (structure type) are required but
+anonymous — without them the page says "Formulaire incomplet" and Télécharger stays disabled. We
+send `8` (Autre) / `2` (Particulier). No name, no email.
+
+*The trap.* `LisAnn` is an option **index**, not a year, and each campaign's list starts at its
+own first year (06402: 2009, so 2026 = 17; 06403: 2013 → 13; 03302: 2001 → 25). The same index
+17 silently served 03302's **2018** and failed 06403's form. Parse the options, pick by label,
+and check the `Content-Disposition` filename before trusting the body.
+
+*Why it matters.* This is the only way to fill anything older than the ~48 h realtime window, and
+CANDHIS keeps extending the archive with QC'd data (to 08-31 by 09-11), which is what closed the
+April→June holes left between the hand seed and the first scrape.
+
+*Resolution.* Re-seeded the three 2026 archives (superset-checked first) and bumped the CI cache
+key — see spec 0004 §7 and HISTORY 2026-09-11.
+
 **2026-09-10 — the failure classification decides whether the *other* feeds refresh at all.**
 *What we found.* CANDHIS started serving its "choose a campaign" page instead of the report, and
 CI went red every 30 min. The obvious cost was the noise. The real one was hidden: that signature

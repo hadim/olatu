@@ -212,9 +212,13 @@ runs can't race. A non-advancing newest timestamp logs a staleness warning.
 
 - **Archive refresh.** The dataset's `*_arch.csv` are seeded once and treated as
   immutable (CI caches them). CANDHIS extends the archive ~6-weekly with QC'd values;
-  re-seed periodically (`update --seed-src <local arch dir>`, bump the CI cache key) so
-  the archive's authoritative values supersede the realtime quick-look for that span
-  (the archive-preferred coalesce in §4 then does the right thing).
+  re-seed periodically so the archive's authoritative values supersede the realtime
+  quick-look for that span (the archive-preferred coalesce in §4 then does the right
+  thing). It is also the only way to fill a hole older than the ~48 h realtime window.
+  Recipe (done by hand on 2026-09-11): download the year through the Archives form
+  (`teleFic.php`, year picked **by label** — LEARNINGS 2026-09-11), check the new file is
+  a superset of the old, push that one file with `sync_bucket`, and **bump the CI cache
+  key** (`candhis-raw-vN` in `refresh-data.yml`), or CI keeps building from the old copy.
 - **Buckets when ready.** Move `raw/` (mutable working data) to a HF **bucket** once its
   S3/HTTP access supports browser reads; the tiers stay in the dataset (browser-served).
 - **Multi-buoy.** The dataset and `update.py` are campaign-prefixed; the local raw dir is
