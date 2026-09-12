@@ -12,7 +12,7 @@ import { useRoute } from '@/lib/route';
 import { initAnalytics } from '@/lib/analytics';
 import { useLocale } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
-import { loadEager, loadManifest, loadLatest, loadRecent, loadTidesForManifest, loadWindEager, loadWindLatest, type Eager, type Manifest, type Series, type WindData, type WindManifest } from './lib/data';
+import { loadEager, loadManifest, loadLatest, loadRecent, loadTidesForManifest, loadWindEager, loadWindLatest, loadWindManifest, latestTimestamp, type Eager, type Manifest, type Series, type WindData, type WindManifest } from './lib/data';
 import type { Tides } from './lib/tides';
 import { loadParquetTier, loadWindParquetTier, type Columnar } from './lib/parquet';
 import { initialCampaign, persistCampaign, campaignUrl, buoyInfo } from './lib/buoys';
@@ -209,11 +209,19 @@ export default function App() {
       setData({ campaign: c, manifest, latest, recent });
       // Refresh the paired station's live readings on the same cadence (the 6-min feed grows
       // every run); best-effort, campaign+station-guarded so a switch mid-flight can't cross data.
+      // The MANIFEST comes along (spec 0021 §5): `latest` alone kept the Air realm's
+      // Current-Conditions tiles moving while the charts stood still — `windYearFiles` is
+      // memoized on the manifest, so an unchanging manifest reference meant the station's
+      // year tile was never refetched for the whole session.
       const st = stationRef.current;
       if (st) {
-        const wl = await loadWindLatest(st).catch(() => null);
-        if (wl && st === stationRef.current && c === campaignRef.current) {
-          setWind((w) => (w && w.station === st && w.campaign === c ? { campaign: c, station: st, data: { ...w.data, latest: wl } } : w));
+        const [wl, wm] = await Promise.all([loadWindLatest(st).catch(() => null), loadWindManifest(st).catch(() => null)]);
+        if ((wl || wm) && st === stationRef.current && c === campaignRef.current) {
+          setWind((w) => {
+            if (!w || w.station !== st || w.campaign !== c) return w;
+            if (wm && wm.generated_at === w.data.manifest.generated_at && !wl) return w;
+            return { campaign: c, station: st, data: { ...w.data, latest: wl ?? w.data.latest, manifest: wm ?? w.data.manifest } };
+          });
         }
       }
     } catch (e) {
@@ -276,6 +284,14 @@ export default function App() {
     () => (ready ? Math.floor(Date.parse(ready.manifest.span.end) / 1000) : 0),
     [ready?.manifest],
   );
+  // The Air realm's own freshest instant (spec 0021 §3.1). Read from `latest.json` FIRST: the
+  // 5-min poll refreshes it on every tick, whereas the station manifest only moves when the
+  // 30-min build does — and the charts need to know which realm is silent, not which build ran.
+  const windLastT = useMemo(() => {
+    if (!windData) return 0;
+    const ms = latestTimestamp(windData.latest);
+    return Math.max(ms ? Math.floor(ms / 1000) : 0, Math.floor(Date.parse(windData.manifest.span.end) / 1000) || 0);
+  }, [windData]);
   const windYearFiles = useMemo(
     () => Object.fromEntries((windData?.manifest.years ?? []).map((y) => [y.year, y.file])),
     [windData?.manifest],
@@ -440,6 +456,7 @@ export default function App() {
                 data={histCols}
                 tz={ready.manifest.timezone}
                 lastT={lastT}
+                windLastT={windLastT}
                 yearFiles={yearFiles}
                 hourlyFiles={hourlyFiles}
                 tides={tideData}

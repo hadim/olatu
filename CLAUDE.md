@@ -286,6 +286,19 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   HAS it** — the stale parquet/tide parse is async while the hash compare is instant, so
   `loadParquetTierFrom`/`loadTidesForManifest` await the stale paint before returning the unchanged
   sentinel. See the 2026-08-27 LEARNINGS entry.
+- **The chart x-axis is a CLOCK, not a feed (spec 0021).** Its right edge is `now`, always — pinning
+  it to the buoy made a dead feed draw exactly like a live one and put four days of live wind past
+  the clamp of every gesture. Four bounds, never conflated: `seaTN`/`airTN` (each realm's freshest
+  reading — what the silence bands measure), **`dataTN` = max of the two** (per-year tile-cache
+  invalidation; taking one realm froze the other's tiles), and **`TN` = max(now, dataTN)** (the x
+  domain). Never key the cache to the clock, never key the axis to the data. A silent realm gets a
+  hatched band from its last reading to the edge, keyed to `freshness()`'s own steps (texture at
+  2 h, caption at 6 h) so the chart and the CC badges can't disagree; measured from the realm's
+  freshest reading, **never from the plotted tier** (it would flicker as tiers swap under a zoom).
+  Keep `nowSec` OUT of the render effect's deps (depend on the derived `seaSilentAt`/`airSilentAt`,
+  which are stable) and out of the window-follow path: new **data** slides the window at once, the
+  **clock** only past `edgeTol` — every slide destroys and re-creates all the uPlots. The window
+  never rewinds itself; an empty one gets a notice + a one-tap jump.
 - **Rebuilding the chart stack must not move the page.** `TimeSeries`'s render effect destroys every
   uPlot and re-appends the panels, so the host collapses and the browser clamps the scroll to the top.
   The cleanup **pins `host.style.minHeight`** before `destroy()`, and the rebuild releases it in a
@@ -339,7 +352,8 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
 
 Shipped and live at **olatu.io** — foundation → PWA → analytics/legal → wind ingest → wind in the
 webapp → units/settings + wind-UX polish → Current Conditions density → touch charts → mobile layout
-→ rain accumulation → instant load from the local tier cache → CI outage tolerance (specs 0001–0020). The full feature-by-feature history is in
+→ rain accumulation → instant load from the local tier cache → CI outage tolerance → chart axis on the clock
+(specs 0001–0021). The full feature-by-feature history is in
 **[docs/HISTORY.md](docs/HISTORY.md)**; the spec index + statuses are in [specs/README.md](specs/README.md).
 
 **Open owner TODO:** CI is **keyless again** since 2026-09-04 — the bucket's trusted publisher

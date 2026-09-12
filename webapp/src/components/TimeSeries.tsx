@@ -22,12 +22,13 @@ import { useTheme } from '../lib/theme';
 import { useLocale, type MessageKey } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
 import { cn } from '@/lib/utils';
-import { compass, dirColor, fmtNumber, fmtDateTime, fmtAxisTick } from '../lib/format';
+import { compass, dirColor, fmtNumber, fmtDateTime, fmtAxisTick, relativeAgo } from '../lib/format';
 import { useUnits, measureKind, measureSuffix, keySuffix, formatKeyValue, convertMeasure } from '../lib/units';
 import { loadParquetTier, loadWindParquetTier, type Columnar } from '../lib/parquet';
 import { reconstructCurve, extremaSeries, tideHeightAt, type TideEvent, type Tides } from '../lib/tides';
 import { iconSvg, type IconName } from './icons';
 import { touchZoomPlugin } from '../lib/uplotTouch';
+import { useNow } from '../lib/useNow';
 import HeatRibbon from './HeatRibbon';
 import DatePicker from './DatePicker';
 
@@ -36,6 +37,23 @@ const DAY = 86_400;
 const HOUR = 3_600;
 // Tightest window the presets / a drag-zoom may resolve to (sub-day is allowed now — spec 0013 rev).
 const MIN_SPAN = HOUR;
+
+// The axis is a CLOCK (spec 0021 §2). It ticks on its own so the "now" rule glides; the window
+// itself follows the clock only lazily (see the follow effect) — every slide rebuilds the stack.
+const CLOCK_TICK_MS = 60_000;
+// A realm whose freshest reading is older than this has stopped reporting: its panels get a
+// hatched silence band. Same boundary as `freshness()`'s fresh→aging step, deliberately — the
+// chart and the Current-Conditions badges must not disagree about who is alive (spec 0021 §3.3).
+const SILENT_AFTER = 2 * HOUR;
+// ...and past this one the band is captioned. `freshness()`'s aging→stale step, i.e. the age at
+// which Current Conditions dresses the whole realm as dormant (0015 §8).
+const SILENT_LABEL_AFTER = 6 * HOUR;
+/** How far the right edge may lag the clock before the window slides — and the slack `atEnd`
+ *  allows, which must be the same number or the ' >' button reads as disabled between slides.
+ *  Proportional to the window (2 % is ~16 px on a desktop plot) with a 5-minute floor, because a
+ *  slide destroys and re-creates every uPlot. New DATA bypasses it entirely (spec 0021 §3.2).
+ *  Capped at a day so a multi-year window doesn't call itself "at the end" a week short of it. */
+const edgeTol = (span: number) => Math.min(Math.max(5 * 60, span * 0.02), DAY);
 
 const CHIP_BASE =
   'inline-flex shrink-0 items-center justify-center font-mono text-[0.78rem] rounded-[0.5rem] border px-[0.7rem] py-[0.32rem] cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-35 disabled:cursor-default disabled:pointer-events-none max-md:min-h-11';
@@ -142,6 +160,50 @@ function gapAware(src: Columnar): { gxs: number[]; gcols: Record<string, (number
     for (const k of keys) gcols[k].push((src[k] as (number | null)[])[i]);
   }
   return { gxs, gcols };
+}
+
+/** "This realm has stopped reporting": a hatched band from its last reading to the right edge
+ *  (spec 0021 §3.3). Painted in `drawClear`, so the grid and the series land on top of it — it is
+ *  ground, not ink. The texture carries the meaning on every affected panel; the caption is
+ *  printed on ONE panel per realm (the topmost that can hold it), and only when it fits. */
+function drawSilenceBand(u: uPlot, from: number, labels: string[], dpr: number, color: string, ink: string) {
+  const { left, top, width, height } = u.bbox;
+  const x0 = Math.max(left, u.valToPos(from, 'x', true));
+  const x1 = left + width;
+  if (x1 - x0 < 2) return;
+  const ctx = u.ctx;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x0, top, x1 - x0, height);
+  ctx.clip();
+  ctx.globalAlpha = 0.07;
+  ctx.fillStyle = color;
+  ctx.fillRect(x0, top, x1 - x0, height);
+  // 45° hatch, stepped in DEVICE px so the texture stays even at any dpr.
+  ctx.globalAlpha = 0.24;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(1, dpr * 0.7);
+  ctx.beginPath();
+  for (let x = x0 - height; x < x1; x += 7 * dpr) {
+    ctx.moveTo(x, top + height);
+    ctx.lineTo(x + height, top);
+  }
+  ctx.stroke();
+  ctx.restore();
+  if (!labels.length) return;
+  ctx.save();
+  ctx.font = `${11 * dpr}px IBM Plex Mono, monospace`;
+  // Longest wording that fits, in order — on a phone the band is ~220 px, which holds the age
+  // ("4 days ago") but not the realm-qualified sentence. Never clip or overhang: a band too
+  // narrow even for the short form just stays textured.
+  const fits = labels.find((t) => ctx.measureText(t).width + 18 * dpr <= x1 - x0);
+  if (fits) {
+    ctx.fillStyle = ink;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(fits, (x0 + x1) / 2, top + height / 2);
+  }
+  ctx.restore();
 }
 
 // Tide extrema markers: ▲ above each high, ▼ below each low, riding the reconstructed
@@ -526,6 +588,7 @@ export default function TimeSeries({
   yearFiles,
   hourlyFiles,
   lastT,
+  windLastT,
   tides,
   windStation = null,
   windHistory = null,
@@ -538,6 +601,8 @@ export default function TimeSeries({
   yearFiles: Record<number, string>;
   hourlyFiles: Record<number, string>;
   lastT?: number;
+  /** The paired station's freshest instant (spec 0021 §3.1) — the Air realm's own clock. */
+  windLastT?: number;
   tides: Tides | null;
   windStation?: string | null;
   windHistory?: Columnar | null;
@@ -556,6 +621,9 @@ export default function TimeSeries({
   // Assigned by the render effect (it owns the uPlot instances); called by the bar's dismiss button.
   const dismissScrubRef = useRef<() => void>(() => {});
   const resetCardRef = useRef<() => void>(() => {});
+  // Same pattern for the "now" rule: the clock tick repositions it through this handle, WITHOUT
+  // rebuilding the stack (spec 0021 §3.2) — the marker glides while the panels stay put.
+  const nowLineRef = useRef<() => void>(() => {});
   // Live uPlot instances + their base x-scale (used for immediate visual reset).
   const plotsRef = useRef<uPlot[]>([]);
   const baseScaleRef = useRef<{ min: number; max: number } | null>(null);
@@ -579,10 +647,28 @@ export default function TimeSeries({
 
   const xs = data.t;
   const T0 = xs.length ? xs[0] : 0;
-  // `data` is the daily tier — its last point is today's *daily bucket* (~00:00 UTC),
-  // not the freshest 30-min reading. Bound the chart by the real latest timestamp
-  // (manifest span end, same value the banner uses) so short windows reach "now".
-  const TN = Math.max(xs.length ? xs[xs.length - 1] : 0, lastT ?? 0);
+  // Four bounds, and conflating any two of them is a bug (spec 0021 §3.1).
+  //
+  // `seaTN` / `airTN` — each realm's freshest instant. `data` is the daily tier, whose last point
+  // is today's *daily bucket* (~00:00 UTC), not the freshest 30-min reading, so the manifest span
+  // end (the value the banner uses) is what actually reaches now. These are what the silence
+  // bands measure, and they are read PER REALM because the two feeds stall independently.
+  // `dataTN` — the max of the two. It invalidates the per-year tile caches (spec 0019 §8), and it
+  // takes BOTH realms because a buoy-only trigger froze the station's tiles for a whole session
+  // whenever CANDHIS stalled.
+  // `TN` — the AXIS, i.e. the clock. The x-window is a clock window: its right edge is now,
+  // whatever the feeds did or did not deliver up to it. Pinning it to a feed is what made a dead
+  // buoy render exactly like a live one, and put four days of live wind out of reach.
+  const seaTN = Math.max(xs.length ? xs[xs.length - 1] : 0, lastT ?? 0);
+  const airTN = windLastT ?? 0;
+  const dataTN = Math.max(seaTN, airTN);
+  const nowSec = Math.floor(useNow(CLOCK_TICK_MS) / 1000);
+  const TN = Math.max(nowSec, dataTN);
+  // A realm is "silent" once it passes the badges' fresh→aging step. The value is that realm's
+  // frozen last instant, or null while it is healthy — both STABLE, which is what lets the render
+  // effect depend on these instead of on the clock (it would otherwise rebuild every tick).
+  const seaSilentAt = seaTN > 0 && nowSec - seaTN > SILENT_AFTER ? seaTN : null;
+  const airSilentAt = airTN > 0 && nowSec - airTN > SILENT_AFTER ? airTN : null;
 
   const [mode, setMode] = useState<string>(() => `p:${storedPreset()}`);
   const [range, setRange] = useState<{ min: number; max: number }>(() => presetRange(mode.slice(2), T0, TN));
@@ -718,32 +804,47 @@ export default function TimeSeries({
   // Seed the Reset target from the initial preset (once — the guard makes it render-safe).
   if (presetBaseRef.current === null) presetBaseRef.current = { min: range.min, max: range.max, mode };
 
-  // Follow the latest reading as it advances.
-  //
-  // `range` is SEEDED from TN at mount, but TN keeps moving afterwards: the 5-min manifest poll
-  // brings a fresh build, and (spec 0019) the charts now mount on the CACHED daily tier, so the
-  // very first TN is as old as your last visit. Nothing here used to react to that — the x-window
-  // and the in-memory tiles stayed pinned to the instant the stack was mounted with, which is why
-  // "now" was no longer the right edge even though Current Conditions was up to date.
-  //
-  // Two things have to move with it:
-  //   1. the per-year tile caches for the year(s) TN crossed — older years never grow, but the
-  //      current one just did, so its cached tile stops short of the new readings;
-  //   2. the x-window, but ONLY when it was sitting on the latest reading (the `atEnd` test). A
-  //      window the user navigated to stays exactly where they put it.
-  const tnRef = useRef(TN);
+  // 1. New DATA invalidates the in-memory per-year tiles for the year(s) it crossed — older years
+  //    never grow, but the current one just did, so its cached tile stops short of the new
+  //    readings (spec 0019 §8). Keyed on `dataTN`, never on the axis: wiring this to a CLOCK
+  //    would drop and refetch the current year's tile on every tick. It takes both realms, which
+  //    is what unfreezes the station's tiles while the buoy is stalled (spec 0021 §3.1).
+  const dataTnRef = useRef(dataTN);
   useEffect(() => {
-    const prev = tnRef.current;
-    tnRef.current = TN;
-    if (TN <= prev) return;
-    for (let y = new Date(prev * 1000).getUTCFullYear(); y <= new Date(TN * 1000).getUTCFullYear(); y++) {
+    const prev = dataTnRef.current;
+    dataTnRef.current = dataTN;
+    if (dataTN <= prev) return;
+    for (let y = new Date(prev * 1000).getUTCFullYear(); y <= new Date(dataTN * 1000).getUTCFullYear(); y++) {
       detailCache.current.delete(y);
       hourlyCache.current.delete(y);
       windDetailCache.current.delete(y);
       windHourlyCache.current.delete(y);
     }
+  }, [dataTN]);
+
+  // 2. Follow the right edge (spec 0021 §3.2, revising 0019 §8).
+  //
+  // `range` is SEEDED from TN at mount and TN keeps moving: the clock ticks, the 5-min poll brings
+  // a fresh build, and (spec 0019) the charts mount on the CACHED daily tier, so the very first TN
+  // can be as old as your last visit. A window sitting at the edge follows it; a window the reader
+  // panned to stays exactly where they put it.
+  //
+  // New DATA slides it at once — that is the point of the chart. The CLOCK alone slides it only
+  // once the drift would actually show (`edgeTol`), which is free to defer: when only the clock is
+  // moving, nothing is being withheld by waiting, and a 2-hour window would otherwise destroy and
+  // re-create every uPlot once a minute.
+  const axisTnRef = useRef(TN);
+  const followDataRef = useRef(dataTN);
+  useEffect(() => {
+    const prevAxis = axisTnRef.current;
+    const prevData = followDataRef.current;
+    axisTnRef.current = TN;
+    followDataRef.current = dataTN;
+    if (TN <= prevAxis) return;
     setRange((r) => {
-      if (r.max < prev - 1) return r; // parked on an older window — don't yank it forward
+      const tol = edgeTol(r.max - r.min);
+      if (r.max < prevAxis - tol) return r; // parked on an older window — don't yank it forward
+      if (dataTN <= prevData && TN - r.max < tol) return r; // clock-only drift, not yet worth a rebuild
       // A preset re-derives (so "All" keeps reaching T0); anything else keeps its width and slides.
       const next = mode.startsWith('p:')
         ? presetRange(mode.slice(2), T0, TN)
@@ -751,10 +852,10 @@ export default function TimeSeries({
       if (next.min === r.min && next.max === r.max) return r;
       // Keep ⟲ Reset pointing at the window it was pointing at, not the one it was pinned to.
       const base = presetBaseRef.current;
-      if (base && base.max >= prev - 1) presetBaseRef.current = { ...next, mode: base.mode };
+      if (base && base.max >= prevAxis - tol) presetBaseRef.current = { ...next, mode: base.mode };
       return next;
     });
-  }, [TN, T0, mode]);
+  }, [TN, dataTN, T0, mode]);
 
   // Time-navigation controls: pan by half a window, zoom by ~1.6×, both clamped to the
   // series bounds. They navigate (load the matching tier) but pass isZoom so ⟲ Reset
@@ -773,7 +874,14 @@ export default function TimeSeries({
     apply(c - half, c + half, 'custom', true);
   };
   const atStart = range.min <= T0 + 1;
-  const atEnd = range.max >= TN - 1;
+  // Same slack as the follow gate above — with a strict test the ' > ' button would light up
+  // between two clock-driven slides even though the window IS at the edge.
+  const atEnd = range.max >= TN - edgeTol(range.max - range.min);
+  // The window starts after the last reading of BOTH realms: measured data cannot be in it. Only
+  // reachable when the outage outlasts the window (a 2 h view during a 4-day freeze). The stack
+  // says so and offers one tap back — it never rewinds itself, which would put a chart of last
+  // Tuesday where the reader asked for the last two hours (spec 0021 §3.4).
+  const windowEmpty = dataTN > 0 && range.min > dataTN;
   // Square at every width: with only `min-h-11` from CHIP_BASE these were 44px tall and 28px wide
   // on touch — a tall sliver rather than a target (spec 0017 §6).
   const navBtn = 'grid h-7 w-7 place-items-center px-0 leading-none disabled:opacity-40 disabled:pointer-events-none max-md:h-11 max-md:w-11';
@@ -967,7 +1075,35 @@ export default function TimeSeries({
     dayOverlay.className = 'pointer-events-none absolute left-[var(--ts-pad)] right-[var(--ts-pad)] top-3 bottom-[var(--ts-pad)] z-0';
     dayOverlay.setAttribute('aria-hidden', 'true');
     host.appendChild(dayOverlay);
+    // The "now" rule (spec 0021 §3.3): ONE line across the whole stack, in its own host-wide layer
+    // for the same reason the day separators have one — a per-canvas line breaks at every heading
+    // and every gap between panels. Unlike them it is NOT span-guarded: it draws at every zoom,
+    // which is what gives the trailing space a meaning instead of leaving it a blank. It sits
+    // above the canvases (z-1) because it is a reference mark, not background.
+    const nowWrap = document.createElement('div');
+    nowWrap.className = 'pointer-events-none absolute left-[var(--ts-pad)] right-[var(--ts-pad)] top-3 bottom-[var(--ts-pad)] z-[1]';
+    nowWrap.setAttribute('aria-hidden', 'true');
+    host.appendChild(nowWrap);
     const dpr = window.devicePixelRatio || 1;
+    const renderNowLine = () => {
+      nowWrap.replaceChildren();
+      const u0 = plots[0];
+      if (!u0) return;
+      const t = Date.now() / 1000;
+      const mn = u0.scales.x.min;
+      const mx = u0.scales.x.max;
+      if (mn == null || mx == null || t < mn || t > mx) return;
+      const line = document.createElement('div');
+      line.style.cssText = `position:absolute;top:0;bottom:0;left:${u0.valToPos(t, 'x', true) / dpr}px;border-left:1px solid color-mix(in oklab, var(--text-2) 62%, transparent);`;
+      // The caption goes to the LEFT of the rule: the only room on its right is the 4 % scale pad.
+      const tag = document.createElement('span');
+      tag.textContent = m.ts_now();
+      tag.style.cssText =
+        'position:absolute;top:-1px;right:6px;white-space:nowrap;font:500 0.6rem/1 var(--font-mono);letter-spacing:0.06em;text-transform:uppercase;color:var(--text-3);';
+      line.appendChild(tag);
+      nowWrap.appendChild(line);
+    };
+    nowLineRef.current = renderNowLine;
     const renderDayOverlay = (u0: uPlot) => {
       dayOverlay.replaceChildren();
       const mn = u0.scales.x.min;
@@ -1007,7 +1143,24 @@ export default function TimeSeries({
         : extremaSeries(tideEvents, xmin, xmax)
       : { t: [] as number[], h: [] as (number | null)[] };
     const tideColor = cssVar('--c-tide');
-    const tideInWindow = tideEvents.some((e) => e.t / 1000 >= xmin && e.t / 1000 <= xmax);
+    // "Is there a curve here", NOT "is there an EXTREMUM here": a window shorter than half a tide
+    // cycle contains no PM/BM at all, and the panel used to claim it had no tide data while
+    // plotting a perfectly good curve through it. Now visible on every sub-6 h preset, since those
+    // windows end at the clock rather than at the buoy's last point (spec 0021).
+    const tideInWindow = tideCurve.h.some((v) => v != null);
+
+    // Silence bands (spec 0021 §3.3). `Date.now()` is read HERE and is deliberately not a
+    // dependency of this effect: the band's geometry runs from a frozen realm TN to the plot's
+    // right edge, so only the caption's wording drifts between rebuilds — by minutes, on a figure
+    // that reads "4 days ago". `seaSilentAt`/`airSilentAt` are the stable deps that do belong.
+    const silentNow = Date.now() / 1000;
+    const silentAtOf = (realm: 'sea' | 'air') => (realm === 'air' ? airSilentAt : seaSilentAt);
+    const labelAge = (at: number) => relativeAgo(at * 1000, locale, silentNow * 1000);
+    const wantsLabel = (at: number) => silentNow - at > SILENT_LABEL_AFTER;
+    // One caption per realm, on the topmost panel that can hold it — ten of them would be noise.
+    const labelled: Record<'sea' | 'air', boolean> = { sea: false, air: false };
+    const bandColor = cssVar('--warning');
+    const bandInk = cssVar('--warning-ink');
 
     // Insert null break-points across real outages so the line never bridges a gap
     // (daily.parquet omits empty days). gxs/gcols are the gap-aware arrays the charts AND the
@@ -1614,6 +1767,7 @@ export default function TimeSeries({
             for (const o of plots) if (o !== u && min != null && max != null) o.setScale('x', { min, max });
             syncing = false;
             renderDayOverlay(u); // reposition the day lines on zoom/pan
+            renderNowLine();
           },
         ],
       };
@@ -1623,6 +1777,21 @@ export default function TimeSeries({
       }
       if (panel.tide && tideNarrow && tideEvents.length) {
         hooks.draw = [(u) => drawTideMarkers(u, tideEvents, tideColor, DPR)];
+      }
+      // The tide panel is never banded — it is a prediction, complete by construction.
+      const silentAt = panel.tide ? null : silentAtOf(panel.realm);
+      if (silentAt != null) {
+        let captions: string[] = [];
+        // The arrow row is ~a line tall: it can carry the texture but not the words, so the
+        // caption falls through to the next panel of that realm rather than being clipped.
+        if (!labelled[panel.realm] && !panel.glyph && wantsLabel(silentAt)) {
+          labelled[panel.realm] = true;
+          const realm = panel.realm === 'air' ? m.cc_realm_air() : m.cc_realm_sea();
+          const age = labelAge(silentAt);
+          captions = [`${realm} · ${m.ts_last_reading()} ${age}`, `${realm} · ${age}`, age];
+        }
+        // `drawClear`, not `draw`: the band is GROUND. Grid, series and glyphs land on top of it.
+        hooks.drawClear = [(u) => drawSilenceBand(u, silentAt, captions, DPR, bandColor, bandInk)];
       }
 
       const opts: uPlot.Options = {
@@ -1689,7 +1858,10 @@ export default function TimeSeries({
       u.over.appendChild(bubble);
       cursorVal.el = bubble;
 
-      if (panel.emptyKey && !hasData) {
+      // A panel whose window is entirely inside a silence band is already explained by the band;
+      // a second "no data for this period" overlay on top of the caption is just noise.
+      const bandCoversWindow = silentAt != null && silentAt <= xmin;
+      if (panel.emptyKey && !hasData && !bandCoversWindow) {
         const overlay = document.createElement('div');
         overlay.className = 'chart-empty';
         overlay.style.bottom = isLast ? '38px' : '0';
@@ -1750,6 +1922,7 @@ export default function TimeSeries({
     }
     baseScaleRef.current = { min: xmin - xpad, max: xmax + xpad };
     if (plots[0]) renderDayOverlay(plots[0]);
+    renderNowLine();
 
     // A finished drag/pinch zoom lives only in uPlot's x-scale (transient — see the
     // touch plugin + uPlot's own drag). Commit the narrowed window to `range` so the
@@ -1776,6 +1949,7 @@ export default function TimeSeries({
       // grow the panels back, not just widen them.
       plots.forEach((p, i) => p.setSize({ width: w, height: panelHeight(plotPanels[i], w) }));
       if (plots[0]) renderDayOverlay(plots[0]); // widths changed → recompute line x
+      renderNowLine();
     });
     ro.observe(host);
 
@@ -1791,11 +1965,18 @@ export default function TimeSeries({
       host.removeEventListener('mouseup', commitGesture);
       host.removeEventListener('touchend', commitGesture);
       ro.disconnect();
+      nowLineRef.current = () => {};
       for (const p of plots) p.destroy();
       plotsRef.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, detail, windHistory, windDetail, windStation, visibleFlat, theme, locale, units, range.min, range.max, smooth, tz, tides]);
+  }, [data, detail, windHistory, windDetail, windStation, visibleFlat, theme, locale, units, range.min, range.max, smooth, tz, tides, seaSilentAt, airSilentAt]);
+
+  // The clock tick moves only the "now" rule (spec 0021 §3.2) — no rebuild, so a reader's hover
+  // and the panels' scroll position survive it.
+  useEffect(() => {
+    nowLineRef.current();
+  }, [nowSec]);
 
   return (
     <section className="mt-6">
@@ -1930,6 +2111,7 @@ export default function TimeSeries({
 
       <HeatRibbon
         t={xs}
+        tn={TN}
         hs={data.significant_wave_height_m as (number | null)[]}
         min={range.min}
         max={range.max}
@@ -1982,6 +2164,20 @@ export default function TimeSeries({
           </>
         )}
       </div>
+      {windowEmpty && (
+        <div
+          className="mb-[0.7rem] flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[0.7rem] border border-[color-mix(in_oklab,var(--warning)_50%,var(--hairline))] bg-[color-mix(in_oklab,var(--warning)_10%,var(--surface))] px-[0.85rem] py-[0.5rem] text-[0.82rem] text-warning-ink"
+          role="status"
+        >
+          <span>{m.ts_window_empty()}</span>
+          <span className="font-mono text-[0.76rem]">
+            {m.ts_last_reading()} {fmtDateTime(dataTN * 1000, locale, tz, units.clock)}
+          </span>
+          <button type="button" className={cn(chipCls(false), 'ml-auto')} onClick={() => apply(dataTN - (range.max - range.min), dataTN, 'custom')}>
+            {m.ts_goto_last()}
+          </button>
+        </div>
+      )}
       <div className="relative">
         {/* Pinned touch readout (spec 0016 §2). Fixed to the VIEWPORT, not sticky inside the section:
           the panel stack is ~1700px tall on a phone, so anything anchored to the section scrolls

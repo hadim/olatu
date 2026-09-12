@@ -8,6 +8,27 @@ spec and link it here.
 Format per entry: **date — title** · what we found · why it matters · resolution · refs.
 
 
+**2026-09-12 — a cache keyed to ONE realm freezes the other, and `latest` is not the manifest.**
+*What we found.* Chasing the chart's right edge during the CANDHIS freeze turned up two bugs that
+had nothing to do with the anchor and everything to do with the same blind spot — *the buoy stands
+in for the whole page*. (1) The in-memory per-year tile caches are dropped when `TN` advances, and
+`TN` was the **buoy's**; with CANDHIS frozen it never advanced, so the *station's* year tile was
+never dropped either and the wind charts stopped growing for the whole session. (2) The 5-min poll
+refreshed the wind **`latest.json`** but not the wind **manifest**, and `windYearFiles` is memoized
+on that manifest — so even with the cache dropped, the effect that fetches the tile never re-ran.
+
+*Why it matters.* Both are invisible while the two feeds advance together, which is 99 % of the
+time: the buoy's refresh silently carried the station's. Neither would ever show up in testing, and
+neither produced an error — the wind panels just quietly stopped at the moment the page loaded.
+It is the same shape as the 2026-09-10 blast-radius finding one layer up: a per-source failure
+policy is worthless if a shared trigger couples the sources back together.
+
+*Resolution.* `dataTN = max(seaTN, airTN)` drives the invalidation, the poll pulls the wind
+manifest alongside `latest`, and the axis bound is now a separate quantity entirely (a clock).
+Rule of thumb this leaves behind: **when two independent feeds share a mechanism, ask what happens
+when exactly one of them stalls** — that is the only state the mechanism was never exercised in.
+Ref: spec 0021 §3.1, HISTORY 2026-09-12.
+
 **2026-09-11 — the CANDHIS Archives export is a form + `teleFic.php`, and the year is a per-campaign index.**
 *What we found.* The 2026-06-27 entry guessed the export was a `?datA=` date-range URL. It is a
 form, driven in one PHP session (plain `httpx`, no browser): GET the base64 campaign URL → POST

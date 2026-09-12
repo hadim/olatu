@@ -9,6 +9,52 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-09-12 — The chart x-axis became a clock (spec 0021)
+
+Owner report, four days into the CANDHIS freeze: the charts' most recent point sat on the buoy's
+last reading even though the wind was live. Confirmed upstream first — all three buoys frozen at
+**2026-09-08 12:00 UTC**, CANDHIS's own realtime table stopping there too, the three stations
+reporting normally (Socoa 14:06 UTC).
+
+`TN` was `max(last daily point, buoy manifest.span.end)` and *every* navigation clamped to it, so
+**four days of 6-min wind were in the tier and unreachable** — not just off-screen, but past the
+clamp of the presets, `panBy`, the date picker and a drag-zoom. And a dead feed drew exactly like
+a live one, while Current Conditions right above it said *dormant*.
+
+The axis now ends at **now**, for every panel, and the gap is drawn rather than hidden:
+
+- **Four bounds instead of one.** `seaTN` / `airTN` per realm, `dataTN = max` of the two for the
+  per-year tile-cache invalidation, `TN = max(now, dataTN)` for the x domain. Two live bugs fell
+  out of that split: the tile caches were dropped only when the **buoy** advanced (so a frozen
+  buoy froze the station's tiles too), and the 5-min poll refreshed the wind `latest` but never
+  the wind **manifest** — `windYearFiles` kept its identity, so the station's year tile was never
+  refetched for a whole session. Both fixed.
+- **A "now" rule** across the whole stack, in the shared day-line overlay, captioned `maintenant`
+  on its left. Repositioned on a 60 s tick through a handle the render effect publishes — **no
+  rebuild**, so a reader's hover survives it. Measured against the day separators in the browser:
+  974.5 px → 16:54 Paris, exact.
+- **Silence bands.** A realm past the badges' 2 h `fresh` boundary gets a hatched band from its
+  last reading to the right edge on every one of its panels; past 6 h (`stale`) the topmost one is
+  captioned, with a fallback ladder — `Mer · dernier relevé il y a 4 jours` on desktop,
+  `Mer · il y a 4 jours` in a ~220 px phone band, texture only when even that won't fit. Measured
+  from the realm's freshest reading, never from the plotted tier, or the band would flicker as the
+  daily/hourly/30-min tiers swap under a zoom. The tide panel is never banded.
+- **The window follows data at once, the clock lazily** (`max(5 min, 2 % of the window)`), because
+  a slide destroys and re-creates every uPlot. During an outage nothing is withheld by waiting.
+- **No silent rewind.** A window that starts after both realms' last reading shows
+  *"Aucune donnée sur cette période · dernier relevé 8 sept. 14:00"* + a `Y aller` button.
+
+Two adjacent defects fixed on the way: the tide panel's empty-state asked "is there an EXTREMUM in
+this window" (false for any window shorter than half a cycle — it claimed no tide data while
+plotting a perfectly good curve, newly visible now that sub-6 h presets end at the clock), and a
+panel entirely inside a silence band no longer stacks a second "no data for this period" overlay on
+the caption. The heat ribbon takes the axis bound so its right drag handle stops being clipped away.
+
+Verified in a browser against the live outage: light + dark, 1280 px and 400 px (no horizontal
+overflow), the `Y aller` jump, and the empty-window branch with the Air realm forced silent.
+
+---
+
 ## 2026-09-11 — The 2026 archives re-seeded through 2026-08-31 (spec 0004 §7)
 
 Owner report: CANDHIS is back. The report page is (the picker went away between 13:40 and 14:07

@@ -26,20 +26,24 @@ const AXIS_LOCK_PX = 8;
 
 interface Props {
   t: number[]; // epoch seconds, ascending
+  /** Right end of the track (spec 0021): the charts' axis bound — the CLOCK, which runs past the
+   *  daily tier's last bucket. Without it the right drag handle sat beyond 100 % and was clipped
+   *  away by the track's `overflow-hidden` whenever the feed lagged. Defaults to the last day. */
+  tn?: number;
   hs: (number | null)[];
   min: number;
   max: number;
   onChange: (min: number, max: number) => void;
 }
 
-export default function HeatRibbon({ t, hs, min, max, onChange }: Props) {
+export default function HeatRibbon({ t, tn, hs, min, max, onChange }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [width, setWidth] = useState(0);
 
   const T0 = t[0];
-  const TN = t[t.length - 1];
+  const TN = Math.max(tn ?? 0, t[t.length - 1]);
   const span = Math.max(1, TN - T0);
   const MINW = Math.min(DAY, span); // smallest window a handle drag can shrink to
 
@@ -78,6 +82,7 @@ export default function HeatRibbon({ t, hs, min, max, onChange }: Props) {
     ro.observe(wrap);
     return () => ro.disconnect();
   }, [t, hs, T0, span]);
+
 
   const pxToTime = (clientX: number) => {
     const rect = wrapRef.current!.getBoundingClientRect();
