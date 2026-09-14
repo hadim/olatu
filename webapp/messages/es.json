@@ -31,7 +31,7 @@
   "cc_aging_help": "La última lectura tiene entre 2 y 6 horas: esta fuente va algo retrasada.",
   "cc_stale_help": "Sin lecturas en las últimas 6 horas. Esta zona aparece atenuada a propósito: los valores de abajo son los últimos recibidos, no las condiciones actuales.",
   "cc_cadence_sea": "La boya transmite cada 30 minutos.",
-  "cc_cadence_air": "La estación transmite cada 6 minutos; Olatu se actualiza cada 30 minutos.",
+  "cc_cadence_air": "La estación transmite cada 6 minutos; Olatu se actualiza cada 15 minutos.",
   "cc_last30days": "Altura de las olas · últimos 30 días",
   "def_wave_height": "Altura significativa (Hs): la altura media del tercio más alto de las olas (~33 % más altas) — el «tamaño» del estado del mar que siente un surfista. La boya mide todo el estado del mar, marejada de viento y mar de fondo juntos.",
   "def_max_wave": "La mayor ola individual del registro de 30 minutos — aproximadamente 1,6–2× la altura de las olas. La que hay que vigilar.",

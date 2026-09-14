@@ -31,7 +31,7 @@
   "cc_aging_help": "The latest reading is 2–6 hours old, so this source is running a little behind.",
   "cc_stale_help": "No reading in the last 6 hours. This zone is greyed out on purpose: the figures below are the last ones received, not current conditions.",
   "cc_cadence_sea": "The buoy reports every 30 minutes.",
-  "cc_cadence_air": "The station reports every 6 minutes; Olatu refreshes every 30 minutes.",
+  "cc_cadence_air": "The station reports every 6 minutes; Olatu refreshes every 15 minutes.",
   "cc_last30days": "Wave height · last 30 days",
   "def_wave_height": "Significant wave height (Hs): the mean height of the highest one-third (~top 33%) of waves — the classic \"sea state\" size a surfer feels. The buoy measures the whole sea state, wind-chop and swell combined.",
   "def_max_wave": "The single biggest individual wave in the 30-minute record — roughly 1.6–2× the wave height. The one to watch out for.",
