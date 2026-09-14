@@ -3,7 +3,7 @@
 # Decide whether a failed data refresh turns this run red *now*, or is held as somebody
 # else's service being down for a while.
 #
-# Why: the refresh cron runs every 30 min and reads four services this project does not
+# Why: the refresh cron runs every 15 min and reads four services this project does not
 # own (CANDHIS, Hugging Face, api-maree.fr, Météo-France). Each of their outages used to
 # produce a red run + a notification every half hour for hours, none of them actionable —
 # and they nearly always fix themselves. But an outage that is STILL going after a few
@@ -23,7 +23,7 @@
 #
 # Once the window is exhausted the run goes red — and the window then RE-ARMS: the next
 # runs are held again until another GRACE_HOURS has passed. A 24 h outage should cost four
-# notifications, not forty-eight; going red every 30 min after hour six would rebuild
+# notifications, not ninety-six; going red on every run after hour six would rebuild
 # exactly the wall of noise this exists to remove.
 #
 # Env: CODE, GRACE_HOURS (integer; 0 disables the grace entirely), MARKER, GH_TOKEN.

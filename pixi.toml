@@ -22,6 +22,11 @@ migrate = "python -m ingest.migrate_layout"
 # Lower-level steps (the working mirror is ./hfdata/<campaign>/{raw,data}):
 #   scrape the live feed into the local reel accumulator
 scrape = "python -m ingest.scrape --src hfdata/06403/raw"
+#   read CANDHIS from its API (spec 0022; needs CANDHIS_API_KEY, shared daily quota):
+#   pixi run candhis -c 06403                    # realtime, gap-aware live window
+#   pixi run candhis --all --since 2021-01-01    # realtime history backfill (1 req/buoy/year)
+#   pixi run candhis --all --archive             # this year's QC'd archive (TD)
+candhis = "python -m ingest.candhis_api"
 #   build the tiers from the local raw CSVs
 ingest = "python -m ingest.build --src hfdata/06403/raw --out hfdata/06403/data"
 # Wind (spec 0012): Météo-France -> one buoy-style tiered dataset per station (wind/<station>/).

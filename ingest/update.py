@@ -1,5 +1,5 @@
-"""End-to-end data refresh: pull → scrape → tides → wind → build → upload, with the HF
-bucket as the single source of truth. Each run refreshes all three sources per buoy — the
+"""End-to-end data refresh: pull → feed → archive → tides → wind → build → upload, with the
+HF bucket as the single source of truth. Each run refreshes all three sources per buoy — the
 CANDHIS buoy feed, the nearest port's tides (api-maree.fr), and the nearest station's wind
 (Météo-France) — not just the buoy (specs 0008, 0012).
 
@@ -28,13 +28,17 @@ This orchestrator runs the same locally (`pixi run update`, your stored HF login
 in CI (keyless — the GitHub Actions OIDC trusted-publisher exchange; an HF_TOKEN env
 var, if set, wins over it — see resolve_token). Each run:
 
-  1. pull the realtime accumulator (always) + archive (only if missing) from the bucket
-     into a local working mirror (`./hfdata/<campaign>/raw`),
-  2. scrape the live CANDHIS feed and coalesce-merge it into the accumulator,
-  3. build the tiers into `./hfdata/<campaign>/data`,
-  4. upload the tiers + the updated accumulator back to the bucket (+ a daily reel snapshot).
+  1. pull the realtime accumulator + the current year's archive (always) and the past
+     archive (only if missing) from the bucket into a local working mirror
+     (`./hfdata/<campaign>/raw`),
+  2. fetch the live CANDHIS feed — the API on its slots, the HTML table otherwise or when
+     the API fails (spec 0022) — and coalesce-merge it into the accumulator,
+  3. once a UTC day, refresh the current year's QC'd archive from the API,
+  4. build the tiers into `./hfdata/<campaign>/data`,
+  5. upload the tiers + the updated accumulator (+ any refreshed archive) back to the
+     bucket (+ a daily reel snapshot).
 
-HF is canonical, so pulling before scraping means a local run can never regress the
+HF is canonical, so pulling before fetching means a local run can never regress the
 forward-growing series the cron has already advanced.
 """
 
@@ -43,6 +47,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
@@ -50,6 +55,7 @@ import httpx
 import typer
 
 from . import build as build_mod
+from . import candhis_api as api_mod
 from . import scrape as scrape_mod
 from . import tides as tides_mod
 from . import ui
@@ -294,18 +300,37 @@ def pull(work: Path, campaign: str, repo: str, token: str | None) -> None:
     raw.mkdir(parents=True, exist_ok=True)
     src = f"hf://buckets/{repo}/{_buoy_prefix(campaign)}/raw"
     # The forward-growing reel changes every run → always pull the freshest copy (HF
-    # canonical) so a local run can't regress what the cron advanced.
-    sync_bucket(src, str(raw), include=["*_reel.csv"], token=token, quiet=True)
+    # canonical) so a local run can't regress what the cron advanced. Same for the state
+    # saying when the API last refreshed the archive (spec 0022).
+    sync_bucket(
+        src,
+        str(raw),
+        include=["*_reel.csv", api_mod.ARCHIVE_STATE],
+        token=token,
+        quiet=True,
+    )
     truncated = _truncated_archives(raw)
     for f in truncated:
         ui.warn(f"{f.name} is empty (truncated download) — re-fetching")
         f.unlink()
-    # The archive is immutable → pull only if we don't already have it (CI caches it). But
-    # re-sync whenever we just dropped a truncated file: "some *_arch.csv exists" is not
-    # "the archive is complete", and skipping here would silently leave those years out of
-    # the build — a *quieter* bug than the crash it replaced.
+    # Past archive years are immutable → pull only if we don't already have them (CI caches
+    # them). But re-sync whenever we just dropped a truncated file: "some *_arch.csv exists"
+    # is not "the archive is complete", and skipping here would silently leave those years
+    # out of the build — a *quieter* bug than the crash it replaced.
     if truncated or not list(raw.glob("*_arch.csv")):
         sync_bucket(src, str(raw), include=["*_arch.csv"], token=token, quiet=True)
+    # The years the API still refreshes are NOT immutable (spec 0022): re-sync them every
+    # run, or CI's cached copy would rebuild the tiers from a stale archive. Only after the
+    # full pull above — synced first, this year's file alone would satisfy "some archive
+    # exists" on a fresh mirror and the past years would never come down.
+    today = datetime.now(timezone.utc).date()
+    sync_bucket(
+        src,
+        str(raw),
+        include=[f"*_{y}_arch.csv" for y in api_mod.archive_years(today)],
+        token=token,
+        quiet=True,
+    )
     n_arch = len(list(raw.glob("*_arch.csv")))
     n_reel = len(list(raw.glob("*_reel.csv")))
     ui.detail(f"pulled raw: {n_arch} archive + {n_reel} reel file(s) → {raw}")
@@ -338,21 +363,41 @@ def upload(work: Path, campaign: str, repo: str, token: str | None) -> None:
 
     sync_bucket compares size+mtime, so the immutable year parquets and an unchanged
     reel are skipped — only modified files are sent. `include` restricts the sync to the
-    tiers + the reel; the immutable *_arch.csv is never matched, and `delete` stays off
-    so nothing else in the campaign prefix (archive, backups) is touched.
+    tiers, the reel and the API state; *_arch.csv is never matched (a refreshed archive
+    goes up through upload_archive), and `delete` stays off so nothing else in the
+    campaign prefix (archive, backups) is touched.
     """
     from huggingface_hub import sync_bucket
 
     sync_bucket(
         str(work / campaign),
         f"hf://buckets/{repo}/{_buoy_prefix(campaign)}",
-        include=["data/**", "raw/*_reel.csv"],  # never the immutable archive
+        include=["data/**", "raw/*_reel.csv", f"raw/{api_mod.ARCHIVE_STATE}"],
         token=token,
         quiet=True,
     )
     ui.detail(
         f"uploaded {_buoy_prefix(campaign)}/{{data, raw/*_reel.csv}} → buckets/{repo}"
     )
+
+
+def upload_archive(
+    campaign: str, repo: str, token: str | None, paths: list[Path]
+) -> None:
+    """Push the archive CSVs the API just refreshed (spec 0022) — those files, by name.
+
+    Never a glob sync of raw/*_arch.csv: CI restores the archives from a cache, and a sync
+    would weigh those restored copies against the bucket's by size+mtime and could push a
+    stale one back over a newer archive.
+    """
+    from huggingface_hub import batch_bucket_files
+
+    batch_bucket_files(
+        repo,
+        add=[(str(p), f"{_buoy_prefix(campaign)}/raw/{p.name}") for p in paths],
+        token=token,
+    )
+    ui.detail(f"uploaded {', '.join(p.name for p in paths)} → buckets/{repo}")
 
 
 def upload_tides(work: Path, port_id: str, repo: str, token: str | None) -> None:
@@ -381,11 +426,20 @@ def snapshot_reel(work: Path, campaign: str, repo: str, token: str | None) -> No
     place bucket can't otherwise provide. Backups live under `<campaign>/backup/<date>/`
     and are pruned beyond REEL_BACKUP_RETENTION_DAYS (lexicographic date compare).
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import timedelta
 
     from huggingface_hub import HfFileSystem, batch_bucket_files
 
-    reels = sorted(_raw_dir(work, campaign).glob("*_reel.csv"))
+    # Only the reels a refresh can still change: this year's, plus last year's through
+    # January. The years backfilled from the API (spec 0022) are frozen, and copying five
+    # of them into a dated key every day would be pure churn.
+    now = datetime.now(timezone.utc)
+    live = {now.year, now.year - 1} if now.month == 1 else {now.year}
+    reels = sorted(
+        r
+        for r in _raw_dir(work, campaign).glob("*_reel.csv")
+        if int(r.stem.split("_")[2][:4]) in live
+    )
     if not reels:
         return
     prefix = f"{_buoy_prefix(campaign)}/backup"
@@ -433,6 +487,54 @@ def snapshot_reel(work: Path, campaign: str, repo: str, token: str | None) -> No
 
 # --------------------------------------------------------------------------- run
 
+# The cron's step (refresh-data.yml `*/15`); CANDHIS API slots are multiples of it.
+CRON_STEP_MIN = 15
+FEEDS = ("auto", "api", "html")
+
+
+def _api_due(interval_min: int, now: datetime | None = None) -> bool:
+    """Whether this run falls on a CANDHIS API slot (spec 0022 §3.2).
+
+    A slot is a minute of the UTC day, floored to the cron step, that is a multiple of
+    `interval_min`: at 60, the runs starting in :00–:14. Stateless on purpose — a cron that
+    GitHub delays past its slot only moves the next API call, and the API's gap-aware window
+    then catches up whatever the HTML table's 48 h window missed in between.
+    """
+    if interval_min <= CRON_STEP_MIN:
+        return True
+    now = now or datetime.now(timezone.utc)
+    slot = (now.hour * 60 + now.minute) // CRON_STEP_MIN * CRON_STEP_MIN
+    return slot % interval_min == 0
+
+
+def _fetch_feed(raw: Path, campaign: str, feed: str, api_interval: int) -> str:
+    """Grow the reel from the realtime feed; return which source did it (spec 0022 §3.1).
+
+    `auto`: the API on its slots when a key is set, the HTML table otherwise — and the HTML
+    table too when the API is down or out of quota, so a quota spent before the day is out
+    costs no freshness. A hard API error (a bad key, a changed payload) is ours and raises.
+    `api` / `html` force one source, with no fallback.
+    """
+    key = os.environ.get(api_mod.ENV_KEY)
+    if feed == "api" and not key:
+        raise scrape_mod.ScrapeError(f"--feed api needs {api_mod.ENV_KEY}")
+    if key and (feed == "api" or (feed == "auto" and _api_due(api_interval))):
+        try:
+            api_mod.refresh(raw, campaign, key)
+            return "api"
+        except scrape_mod.FeedUnavailable as e:
+            if feed == "api":
+                raise
+            ui.warn(f"{e} → reading the HTML table instead")
+            scrape_mod.scrape(raw, campaign)
+            return (
+                "html (quota)"
+                if isinstance(e, api_mod.QuotaExhausted)
+                else "html (api down)"
+            )
+    scrape_mod.scrape(raw, campaign)
+    return "html"
+
 
 def update(
     campaign: str = CAMPAIGN_ID,
@@ -441,6 +543,9 @@ def update(
     *,
     do_pull: bool = True,
     do_scrape: bool = True,
+    feed: str = "auto",
+    api_interval: int = CRON_STEP_MIN,
+    do_archive: bool = True,
     do_tides: bool = True,
     force_tides: bool = False,
     do_wind: bool = True,
@@ -467,9 +572,14 @@ def update(
         "rows": None,
         "through": "—",
         "uploaded": do_upload,
-        # "live" | "unavailable" (CANDHIS down — tiers rebuilt from the last-good reel)
-        # | "—" (--no-scrape). Never a silent "everything is fine".
-        "feed": "live" if do_scrape else "—",
+        # "api" | "html" | "html (quota)" | "html (api down)" | "unavailable" (CANDHIS
+        # down — tiers rebuilt from the last-good reel) | "—" (--no-scrape). Never a
+        # silent "everything is fine".
+        "feed": "—",
+        # the daily API archive refresh (spec 0022 §3.4), or "—" when it didn't run
+        "archive": "—",
+        # a failure that is OURS but didn't stop this buoy's refresh; main() fails the run
+        "error": None,
         "tide": None,
         "wind": None,
     }
@@ -492,11 +602,11 @@ def update(
             ui.step(ui.ICON_PULL, "pull")
             _net(f"pull {campaign}", pull, work, campaign, repo, token)
 
-        # --- scrape the live CANDHIS feed into the reel accumulator ---
+        # --- the live CANDHIS feed into the reel accumulator: API or HTML table (spec 0022) ---
         if do_scrape:
-            ui.step(ui.ICON_SCRAPE, "scrape")
+            ui.step(ui.ICON_SCRAPE, "feed")
             try:
-                scrape_mod.scrape(raw, campaign)
+                result["feed"] = _fetch_feed(raw, campaign, feed, api_interval)
             except scrape_mod.FeedUnavailable as e:
                 # CANDHIS is down, not broken. Keep the last-good reel and carry on with
                 # this buoy's OTHER sources: raising here used to abandon the campaign
@@ -505,6 +615,35 @@ def update(
                 # feeds. The run still reports the degradation (and exits EXIT_OUTAGE).
                 ui.warn(f"{e} → keeping the last-good reel")
                 result["feed"] = "unavailable"
+
+        # --- the QC'd archive, once a UTC day, from the API (spec 0022 §3.4) ---
+        archive_changed: list[Path] = []
+        api_key = os.environ.get(api_mod.ENV_KEY)
+        if do_archive and api_key:
+            ui.step(ui.ICON_BACKUP, "archive")
+            if not api_mod.archive_due(raw):
+                ui.detail("already checked today → skip")
+                result["archive"] = "checked today"
+            else:
+                try:
+                    archive_changed = api_mod.refresh_archive(raw, campaign, api_key)
+                    result["archive"] = (
+                        "updated "
+                        + ", ".join(p.stem.split("_")[2] for p in archive_changed)
+                        if archive_changed
+                        else "unchanged"
+                    )
+                except scrape_mod.FeedUnavailable as e:
+                    # Down or out of quota: the state stays unwritten, so the next run
+                    # retries. The archive lags weeks behind anyway; a day costs nothing.
+                    ui.warn(f"archive: {e} → retry next run")
+                    result["archive"] = "unavailable"
+                except scrape_mod.ScrapeError as e:
+                    # Ours (a changed payload), but no reason to freeze this buoy's live
+                    # data over it: say so, finish the refresh, and let main() fail the run.
+                    ui.err(f"archive: {e}")
+                    result["archive"] = "failed"
+                    result["error"] = f"archive: {e}"
 
         # --- tides (distinct blue step): refresh the buoy's nearest port ---
         if do_tides and tide_port is not None:
@@ -605,6 +744,17 @@ def update(
                 ui.detail(
                     f"seeded {_buoy_prefix(campaign)}/raw (archive + reel) → buckets/{repo}"
                 )
+            # The refreshed archive goes up BEFORE the tiers + API state: the other way round,
+            # a failed archive push behind an uploaded "checked today" would wait a whole day.
+            if archive_changed:
+                _net(
+                    f"upload archive {campaign}",
+                    upload_archive,
+                    campaign,
+                    repo,
+                    token,
+                    archive_changed,
+                )
             _net(f"upload {campaign}", upload, work, campaign, repo, token)
             if tide_port is not None:
                 _net(
@@ -641,7 +791,7 @@ def _summaries(results: list[dict]) -> None:
     """Buoy, tide and wind end-of-run tables, kept visually separate (specs 0009/0012)."""
     ui.summary_table(
         "Buoys",
-        ["campaign", "buoy", "rows", "through", "feed", "uploaded"],
+        ["campaign", "buoy", "rows", "through", "feed", "archive", "uploaded"],
         [
             [
                 r["campaign"],
@@ -650,6 +800,7 @@ def _summaries(results: list[dict]) -> None:
                 r["through"],
                 # `through` is a date, so a few hours of missing feed doesn't show there.
                 r.get("feed", "—"),
+                r.get("archive", "—"),
                 "✓" if r["uploaded"] else "—",
             ]
             for r in results
@@ -713,6 +864,28 @@ def main(
             "--no-scrape", help="Skip the live scrape (just rebuild + upload)."
         ),
     ] = False,
+    feed: Annotated[
+        str,
+        typer.Option(
+            help="Realtime CANDHIS source: auto (the API on its slots, the HTML table "
+            "otherwise and whenever the API is down or out of quota), api, or html.",
+        ),
+    ] = "auto",
+    api_interval: Annotated[
+        int,
+        typer.Option(
+            "--api-interval",
+            envvar="CANDHIS_API_INTERVAL_MIN",
+            help="Call the CANDHIS API every N minutes (a multiple of the 15-min cron); "
+            "with --feed auto the runs in between read the HTML table. 15 = every run.",
+        ),
+    ] = CRON_STEP_MIN,
+    no_archive: Annotated[
+        bool,
+        typer.Option(
+            "--no-archive", help="Skip the daily archive refresh from the CANDHIS API."
+        ),
+    ] = False,
     no_tides: Annotated[
         bool, typer.Option("--no-tides", help="Skip the tide refresh (api-maree.fr).")
     ] = False,
@@ -741,9 +914,11 @@ def main(
     """Refresh Olatu data: pull → scrape → tides → wind → build → upload to the HF bucket."""
     campaigns = campaign or [CAMPAIGN_ID]
     do_pull, do_upload = not no_pull, not no_upload
+    if feed not in FEEDS:
+        raise typer.BadParameter(f"--feed must be one of {', '.join(FEEDS)}")
 
     ui.banner(
-        f"pull → scrape → tides → wind → build → upload   ·   {', '.join(campaigns)}"
+        f"pull → feed → archive → tides → wind → build → upload   ·   {', '.join(campaigns)}"
     )
 
     # Resolve the HF token ONCE and share it across campaigns: every buoy is a path in
@@ -769,8 +944,10 @@ def main(
     )
     tide_key = "set" if os.environ.get(tides_mod.ENV_KEY) else "MISSING"
     wind_key = "set" if os.environ.get(wind_mod.ENV_KEY) else "MISSING"
+    candhis_key = "set" if os.environ.get(api_mod.ENV_KEY) else "MISSING"
     ui.detail(
         f"bucket {repo} · huggingface_hub {hf.__version__} · auth {auth} · "
+        f"{api_mod.ENV_KEY} {candhis_key} (feed {feed}, API every {api_interval} min) · "
         f"{tides_mod.ENV_KEY} {tide_key} · {wind_mod.ENV_KEY} {wind_key} · "
         f"net timeout {NET_TIMEOUT_S:.0f}s"
     )
@@ -782,28 +959,36 @@ def main(
     fatal: list[str] = []  # failures that are OURS — those always exit 1
     for c in campaigns:
         try:
-            results.append(
-                update(
-                    campaign=c,
-                    repo=repo,
-                    work=work,
-                    do_pull=do_pull,
-                    do_scrape=not no_scrape,
-                    do_tides=not no_tides,
-                    force_tides=force_tides,
-                    do_wind=not no_wind,
-                    do_upload=do_upload,
-                    seed_src=seed_src,
-                    token=token,
-                )
+            r = update(
+                campaign=c,
+                repo=repo,
+                work=work,
+                do_pull=do_pull,
+                do_scrape=not no_scrape,
+                feed=feed,
+                api_interval=api_interval,
+                do_archive=not no_archive,
+                do_tides=not no_tides,
+                force_tides=force_tides,
+                do_wind=not no_wind,
+                do_upload=do_upload,
+                seed_src=seed_src,
+                token=token,
             )
         except (scrape_mod.ScrapeError, RuntimeError) as e:
             ui.err(f"{c}: {e}")
             failed.append(c)
             if not isinstance(e, Outage):
                 fatal.append(c)
+            continue
+        results.append(r)
+        if r["error"]:  # ours, even though the buoy's refresh itself went through
+            failed.append(c)
+            fatal.append(c)
 
     _summaries(results)
+    # The quota is per key and no response reports what is left: count it in every log.
+    ui.detail(f"{api_mod.requests_made} CANDHIS API request(s) this run")
 
     # Exit code is a *classification*, not just a verdict (ingest/outage.py):
     #   0  clean
