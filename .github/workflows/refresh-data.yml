@@ -1,12 +1,22 @@
 name: Refresh data (buoys · tides · wind → HF bucket)
 
-# Every 30 min, for EACH buoy, refresh ALL three data sources and upload them back to
+# Every 15 min, for EACH buoy, refresh ALL three data sources and upload them back to
 # buckets/hadim/olatu:
-#   • buoys — pull the realtime accumulator, scrape the live CANDHIS feed, rebuild tiers
+#   • buoys — pull the realtime accumulator, fetch the live CANDHIS feed (API, HTML table as
+#             fallback), refresh the QC'd archive from the API once a day, rebuild tiers
+#             (specs 0004, 0022)
 #   • tides — refresh the nearest port's extrema from api-maree.fr        (spec 0008)
 #   • wind  — scrape the nearest station's 6-min feed from Météo-France + rebuild (specs 0012/0013)
 # The webapp reads those tiers at runtime, so this NEVER rebuilds or redeploys the site —
-# it is a tiny Python-only job. See specs/0004 §6, 0005 §4, 0008, 0012.
+# it is a tiny Python-only job. See specs/0004 §6, 0005 §4, 0008, 0012, 0022.
+#
+# CANDHIS API quota (spec 0022): the key allows a fixed number of requests a day, shared
+# with every local run, and one realtime call per buoy per run is 96 x 3 = 288/day at this
+# cadence. So the API is asked only every CANDHIS_API_INTERVAL_MIN minutes (repo variable;
+# default 60 ≈ 75/day with the daily archive call, inside the 150/day the key shipped with).
+# Runs in between read the HTML table, and so does any run where the API is down or out of
+# quota: the refresh keeps this cadence either way, and the API's gap-aware window refills
+# whatever the HTML's 48 h window missed. Set the variable to 15 once the quota allows it.
 #
 # Failure policy (spec 0020): all four sources belong to somebody else, and each of their
 # outages used to cost a red run + a notification every 30 min for hours, for something
@@ -27,7 +37,7 @@ name: Refresh data (buoys · tides · wind → HF bucket)
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       keyless:
@@ -78,9 +88,11 @@ jobs:
           cache: true
           environments: data
 
-      # Bump the key whenever a *_arch.csv is re-seeded in the bucket: pull() only fetches
-      # an archive that is missing, so a stale cache would rebuild the tiers from the old
-      # one (spec 0004 §7). v2 = the 2026 archives re-seeded through 2026-08-31.
+      # Past years' archives never change, so they're cached rather than re-downloaded each
+      # run. The CURRENT year's is different since spec 0022: the API refreshes it daily and
+      # update.pull() re-syncs it from the bucket on every run, so a stale cached copy can't
+      # regress the tiers. Bump the key only when a PAST year is re-seeded by hand.
+      # v2 = the 2026 archives re-seeded through 2026-08-31.
       - name: Cache the immutable archives (so we don't re-download them each run)
         uses: actions/cache@v6
         with:
@@ -97,14 +109,16 @@ jobs:
       # Ingest-only secrets, NEVER shipped to the webapp — only derived tiers are uploaded
       # to the bucket:
       #   HF_TOKEN             normally UNSET → OIDC (see the auth note at the top); set → wins
+      #   CANDHIS_API_KEY      CANDHIS API realtime + archive (ingest/candhis_api.py, spec 0022)
       #   API_MAREE_KEY        tide refresh (ingest/tides.py, spec 0008) -> tides/<port>/
       #   METEOFRANCE_API_KEY  6-min live wind (ingest/wind.py DPObs, spec 0012) -> wind/<station>/
-      # The last two are non-fatal if unset (the step logs + skips).
+      # All three API keys are non-fatal if unset (CANDHIS falls back to the HTML table; the
+      # tide and wind steps log + skip).
       # The hourly wind history needs no key (open Météo-France bulk files) and refreshes at
       # most ~once/day (gated in update._hourly_wind_due). Each buoy resolves to its nearest
       # port/station; the 3 buoys map to 3 distinct ones, so one run refreshes all with no
       # collision.
-      - name: Refresh every buoy (pull → scrape → tides → wind → build → upload to HF)
+      - name: Refresh every buoy (pull → feed → archive → tides → wind → build → upload to HF)
         id: refresh
         env:
           # Blank on a `keyless` dispatch so resolve_token falls through to the OIDC exchange.
@@ -112,6 +126,8 @@ jobs:
           # equivalent but is not -- '' is FALSY in a GHA expression, so the `||` branch would
           # win and hand the secret back. On `schedule`, inputs.keyless is null -> secret.
           HF_TOKEN: ${{ inputs.keyless != true && secrets.HF_TOKEN || '' }}
+          CANDHIS_API_KEY: ${{ secrets.CANDHIS_API_KEY }}
+          CANDHIS_API_INTERVAL_MIN: ${{ vars.CANDHIS_API_INTERVAL_MIN || '60' }}
           API_MAREE_KEY: ${{ secrets.API_MAREE_KEY }}
           METEOFRANCE_API_KEY: ${{ secrets.METEOFRANCE_API_KEY }}
         # Capture the exit code instead of failing here — the gate below turns it into a
