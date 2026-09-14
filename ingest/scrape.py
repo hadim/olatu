@@ -92,8 +92,9 @@ class FeedUnavailable(ScrapeError, Outage):
     ingest/outage.py.
     """
 
-    def __init__(self, message: str) -> None:
-        super().__init__(message, service="CANDHIS")
+    def __init__(self, message: str, *, service: str = "CANDHIS") -> None:
+        # `service` lets the API client (spec 0022) name itself "CANDHIS API" in the log.
+        super().__init__(message, service=service)
 
 
 # --------------------------------------------------------------------------- fetch
@@ -434,7 +435,18 @@ def scrape(src: Path, campaign_id: str = CAMPAIGN_ID) -> dict[int, int]:
     ui.detail(
         f"scraped {scraped.height} valid rows  span {scraped[DT].min()} → {scraped[DT].max()}"
     )
+    return merge_rows(src, scraped, campaign_id)
 
+
+def merge_rows(
+    src: Path, scraped: pl.DataFrame, campaign_id: str = CAMPAIGN_ID
+) -> dict[int, int]:
+    """Coalesce-merge a validated realtime frame into the per-year reel CSVs in `src`.
+
+    Shared by both realtime feeds — this module's HTML table and the CANDHIS API
+    (`ingest/candhis_api.py`, spec 0022) — so they get the same never-clobber,
+    never-shrink and atomic-write guarantees. Returns {year: row_count_written}.
+    """
     with _lock(src, campaign_id):
         # Plan every year's merge in memory first; only write once all pass validation,
         # so a failure mid-way never leaves a half-updated set on disk.
