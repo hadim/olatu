@@ -8,6 +8,28 @@ spec and link it here.
 Format per entry: **date — title** · what we found · why it matters · resolution · refs.
 
 
+**2026-09-14 — the CANDHIS API is not the HTML table with a key: it keeps the whole realtime history, and its doc gets "no data" wrong.**
+*What we found.* Probing the new API against what we already held (spec 0022): `getCampTR` rows
+are identical to the scraped reel — 0 value diffs over 10 461 rows on three buoys — but the
+endpoint takes a date window and serves realtime back to **2021-05** (06402: 2021-06), sea
+temperature included, where the HTML table only ever showed ~48 h. `getCampTD` is the archive
+export value for value, plus a `QUALITE` the CSV leaves empty, repeated as a duplicate trailing
+column. Four things the PDF gets wrong or leaves out: `dateFin` is **exclusive**; "no data" is
+HTTP 200 with `success: true` (documented as `false`); rows empty in every column, which the HTML
+table lists, are simply absent (150 on 03302 — they looked like lost data until checked); and no
+response says how much of the daily quota is left. `getCampListeTR` (every buoy in one call) looks
+like the answer to the quota and isn't: it returns only the latest *hourly* value.
+
+*Why it matters.* "Sea temperature has no history" was a limit of the scraper, not of CANDHIS —
+this project was built around it. And either doc error would have bitten: an inclusive `dateFin`
+duplicates the boundary row of every yearly chunk, and "`success: false` means no data" turns
+every silent buoy into a hard failure.
+
+*Resolution.* `ingest/candhis_api.py` resolves columns by header name, asserts every row falls in
+`[dateDeb, dateFin)`, treats `nbLig 0` + `Pas de données` as empty whatever `success` says, and
+counts its own calls (stopping after the first 429). The realtime history is backfilled once with
+`pixi run candhis --all --since 2021-01-01`. Refs: spec 0022, CANDHIS API v1 user doc (Oct 2024).
+
 **2026-09-12 — a cache keyed to ONE realm freezes the other, and `latest` is not the manifest.**
 *What we found.* Chasing the chart's right edge during the CANDHIS freeze turned up two bugs that
 had nothing to do with the anchor and everything to do with the same blind spot — *the buoy stands

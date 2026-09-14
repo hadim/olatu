@@ -42,6 +42,12 @@
 > repo is left in place as a frozen pre-migration snapshot. This supersedes §3's "Why a
 > dataset, not a bucket" and the dataset-specific details in §6.
 
+> **Revision 2026-09-14 — the CANDHIS API is the feed; this scraper is its fallback.** Cerema
+> granted an API key, and [0022](2026-09-14-0022-candhis-api.md) moves the realtime feed to
+> `getCampTR` (identical rows, the whole history since 2021, a gap-aware window) and automates
+> §7's archive refresh with `getCampTD`. §1–§2 still describe the fallback path; §4–§5 are now
+> shared by both feeds through `scrape.merge_rows`; §6's `*/30` cadence is `*/15`.
+
 ---
 
 ## 1. The discovery (so a future session need not re-derive it)
