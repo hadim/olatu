@@ -28,7 +28,8 @@ its archive matches the `*_arch.csv` export. So the API became the feed without 
   (default 60 until the quota is raised — then 15).
 - **Backfill.** Realtime 2021 → today for the three buoys, uploaded the same day: sea temperature
   now starts 2021-05-21 (06403, 03302) / 2021-07-01 (06402, whose realtime rows start 2021-06-21
-  without a temperature) instead of 2026-06-25.
+  without a temperature) instead of 2026-06-25. Those older rows write `TempMer = 0.0` for a
+  missing temperature (thousands on 03302), which `build.read_realtime` now nulls.
 
 ---
 

@@ -25,7 +25,13 @@ this project was built around it. And either doc error would have bitten: an inc
 duplicates the boundary row of every yearly chunk, and "`success: false` means no data" turns
 every silent buoy into a hard failure.
 
-*Resolution.* `ingest/candhis_api.py` resolves columns by header name, asserts every row falls in
+*And one no probe could show:* the older realtime rows use an exact `TempMer = 0.0` for "no
+temperature" (2 122 rows on 03302), which two months of scraped data had never contained. It
+surfaced only once the backfill was live, as vertical drops to 0 °C in the all-years chart. A
+diff against what you already hold only validates the period you already hold.
+
+*Resolution.* `build.read_realtime` nulls an exact 0.0 sea temperature, like the 999.999
+sentinel. `ingest/candhis_api.py` resolves columns by header name, asserts every row falls in
 `[dateDeb, dateFin)`, treats `nbLig 0` + `Pas de données` as empty whatever `success` says, and
 counts its own calls (stopping after the first 429). The realtime history is backfilled once with
 `pixi run candhis --all --since 2021-01-01`. Refs: spec 0022, CANDHIS API v1 user doc (Oct 2024).

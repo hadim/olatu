@@ -119,6 +119,16 @@ def read_realtime(src: Path, campaign: str = CAMPAIGN_ID) -> pl.DataFrame | None
             pl.col(DT).str.strptime(pl.Datetime, "%Y-%m-%d %H:%M:%S", strict=False)
         )
         df = _clean_numeric(df, [c for c in REEL_MAP.values() if c in df.columns])
+        if "sea_temperature_c" in df.columns:
+            # Realtime writes an exact 0.0 °C where the temperature is missing: a second
+            # sentinel, often beside a 999.999 wave height. Two months of scraping never showed
+            # one, but the 2021-2025 API backfill has thousands (spec 0022 §3.3), and water at
+            # 0 °C is impossible on this coast. Only the exact 0.0 — the next-lowest readings
+            # are 7-11 °C, and those stay.
+            t = pl.col("sea_temperature_c")
+            df = df.with_columns(
+                pl.when(t == 0.0).then(None).otherwise(t).alias("sea_temperature_c")
+            )
         frames.append(df)
     return pl.concat(frames, how="diagonal_relaxed")
 
