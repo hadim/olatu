@@ -9,6 +9,29 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-09-14 — CANDHIS through its API (spec 0022)
+
+Cerema granted a key to the CANDHIS API v1 (150 requests/day). Probed before switching: its
+realtime matches the scraped reel exactly (0 diffs over 10 461 rows) but reaches back to 2021, and
+its archive matches the `*_arch.csv` export. So the API became the feed without touching `build.py`:
+
+- **`ingest/candhis_api.py`.** `getCampTR` rows go through `scrape.merge_rows` — the merge pulled
+  out of `scrape()` so both feeds share its validation, coalesce, never-shrink and atomic write — in
+  a **gap-aware** window starting at the newest reading held (one request heals any outage up to a
+  year). `getCampTD` is coalesced into the current year's `*_arch.csv` once a UTC day (state in
+  `raw/candhis_api.json`), and only the files that changed are uploaded, by name.
+- **`update`.** `--feed auto|api|html`: the API on `CANDHIS_API_INTERVAL_MIN` slots, the HTML table
+  on the other runs and whenever the API is down or out of quota; no call after the first 429 in a
+  run. `pull` re-syncs the live archive years every run so CI's cache can't regress them;
+  `snapshot_reel` backs up only this year's reel.
+- **CI.** `*/15` (was `*/30`), `CANDHIS_API_KEY` secret, `CANDHIS_API_INTERVAL_MIN` repo variable
+  (default 60 until the quota is raised — then 15).
+- **Backfill.** Realtime 2021 → today for the three buoys, uploaded the same day: sea temperature
+  now starts 2021-05-21 (06403, 03302) / 2021-07-01 (06402, whose realtime rows start 2021-06-21
+  without a temperature) instead of 2026-06-25.
+
+---
+
 ## 2026-09-12 — The chart x-axis became a clock (spec 0021)
 
 Owner report, four days into the CANDHIS freeze: the charts' most recent point sat on the buoy's

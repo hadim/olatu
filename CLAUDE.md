@@ -40,18 +40,19 @@ if unsure, ask the owner. Key specs to read before implementing:
 ```
 ingest/        Python (polars). NOT an installable package. All steps take --campaign.
   schema.py    per-buoy identity (BUOYS) + column mapping/units/sentinel + TIDE_PORTS registry & resolve_tide_port (nearest port)
-  scrape.py    fetch the CANDHIS realtime HTML table -> per-year reel CSV (coalesce-merge)
+  candhis_api.py  CANDHIS API v1 (spec 0022; CANDHIS_API_KEY, shared daily quota): getCampTR -> reel via scrape.merge_rows (gap-aware window) + getCampTD -> current-year *_arch.csv once a day
+  scrape.py    fetch the CANDHIS realtime HTML table -> per-year reel CSV (coalesce-merge `merge_rows`, shared with the API); the fallback feed
   tides.py     fetch api-maree.fr water levels -> high/low extrema -> tides/<port>/data/tides.parquet (spec 0008; needs API_MAREE_KEY)
   wind.py      Météo-France wind per station -> buoy-style tiered dataset wind/<station>/ (spec 0012; one-shot hourly history keyless + forward 6-min live needs METEOFRANCE_API_KEY)
   build.py     CSV -> tiered Parquet/JSON (archive-preferred coalesce)
-  update.py    pull → scrape → tides → build → upload to the HF bucket (keyless OIDC in CI) + daily reel snapshot; Typer CLI (-c repeatable)
+  update.py    pull → feed (API on its slots, HTML otherwise/fallback) → archive (daily) → tides → wind → build → upload to the HF bucket (keyless OIDC in CI) + daily reel snapshot; Typer CLI (-c repeatable)
   outage.py    Outage + EXIT_OUTAGE=75 — the failures that are provably NOT ours (spec 0020)
   ui.py        shared Rich console + helpers (banner/section/step/detail/summary_table); buoys=cyan, tides=blue; CI-safe plain (spec 0009)
   migrate_layout.py  one-shot bucket layout migration <campaign>/ -> buoys/<campaign>/ (copy | delete --yes; spec 0009)
 pixi.toml      Python env + frontend tasks (no pyproject; no Python library)
 webapp/        the frontend (reads data tiers from the HF bucket at runtime)
 specs/         decisions        docs/  HISTORY.md + README assets (logo, screenshot)
-.github/workflows/  deploy.yml (Pages, on code changes) + refresh-data.yml (data, */30)
+.github/workflows/  deploy.yml (Pages, on code changes) + refresh-data.yml (data, */15)
 .github/scripts/    outage-gate.sh — holds a red run through a short external outage (spec 0020)
 ```
 
@@ -81,11 +82,13 @@ repo 2026-06-30 — buckets are mutable/overwrite-in-place, and a *public* bucke
 ## Commands
 
 ```bash
-pixi run update                      # pull → scrape → build → upload to HF (the usual refresh; keyless OIDC in CI)
+pixi run update                      # pull → feed → archive → tides → wind → build → upload to HF (the usual refresh; keyless OIDC in CI)
 pixi run update -c 06403 -c 06402    # refresh several buoys (repeat -c; typer, not argparse nargs)
 pixi run migrate copy                # one-shot: copy bucket <campaign>/ -> buoys/<campaign>/ (spec 0009)
 pixi run migrate delete --yes        # after the deployed site reads buoys/, drop the old root prefixes
-pixi run scrape                      # lower-level: grow the local reel from the live feed (hfdata/06403/raw)
+pixi run candhis -c 06403            # lower-level: grow the local reel from the CANDHIS API (gap-aware; prints its request count)
+pixi run candhis --all --since 2021-01-01   # realtime history backfill, 1 request/buoy/year (--archive: the TD archive)
+pixi run scrape                      # lower-level: grow the local reel from the HTML table, the fallback feed (hfdata/06403/raw)
 pixi run ingest                      # lower-level: build tiers from local raw (hfdata/06403/{raw,data})
 pixi run wind --all --seed           # one-time: seed every station's wind history (2010→) to the bucket (spec 0012; keyless)
 pixi run wind --live --all           # refresh the 6-min live wind layer (needs METEOFRANCE_API_KEY)
@@ -111,8 +114,22 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
 - **Sentinel `999.999`** (CANDHIS "no data") is nulled at ingest (threshold ≥ 999.99). Don't
   reintroduce it; don't blanket-clip directions (real 0–360°).
 - **43 archive columns are 100% empty for 06403** (QUALITE, NBSYS, S1–S4) → dropped.
-- **Sea temperature exists only in the realtime feed** → history has none; it accumulates
-  forward. Handle missing-temp as a first-class UI state, not an empty chart.
+- **Sea temperature exists only in the realtime feed** — never in the archive. The API serves
+  realtime back to **2021-05/06** (backfilled, spec 0022), so history starts there and there is
+  none before; handle missing-temp as a first-class UI state, not an empty chart.
+- **CANDHIS comes from its API first, the HTML table second (spec 0022).** `CANDHIS_API_KEY`
+  (ingest-only; GitHub secret + `.env`) has a **daily request quota shared by CI and every local
+  run** (150/day as granted) and no response says what is left. So the API is called only on
+  `CANDHIS_API_INTERVAL_MIN` slots (repo variable, CI default 60; 15 = every run, once the quota
+  allows), the HTML table fills the other runs **and** any run where the API is down or answers
+  429, and nothing calls the API again after a 429 in the same process. Both feeds write the same
+  reel through `scrape.merge_rows` — don't give the API its own merge. The live window is
+  **gap-aware** (from the newest reading held), never "the last 48 h". `dateFin` is **exclusive**
+  and "no data" is `success: true` + `nbLig 0` (the PDF says otherwise). The current year's
+  `*_arch.csv` is refreshed daily from `getCampTD` (state `raw/candhis_api.json`), so it is **no
+  longer immutable**: `pull` re-syncs it every run and `upload_archive` pushes it by name — never
+  glob-sync `raw/*_arch.csv` up, or CI's cached copies can overwrite newer ones. See the
+  2026-09-14 LEARNINGS entry.
 - **Series has real gaps** (largest 50 days) → break the line, never interpolate across.
 - **Parquet:** Snappy + `row_group_size≈1440` (multi-row-group, CI-asserted) so hyparquet range
   requests + column projection work.
@@ -353,7 +370,7 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
 Shipped and live at **olatu.io** — foundation → PWA → analytics/legal → wind ingest → wind in the
 webapp → units/settings + wind-UX polish → Current Conditions density → touch charts → mobile layout
 → rain accumulation → instant load from the local tier cache → CI outage tolerance → chart axis on the clock
-(specs 0001–0021). The full feature-by-feature history is in
+→ CANDHIS through its API, with sea-temperature history from 2021 (specs 0001–0022). The full feature-by-feature history is in
 **[docs/HISTORY.md](docs/HISTORY.md)**; the spec index + statuses are in [specs/README.md](specs/README.md).
 
 **Open owner TODO:** CI is **keyless again** since 2026-09-04 — the bucket's trusted publisher
@@ -367,6 +384,9 @@ and it needs no code change. ⚠️ **Check the publisher's claims**: it was rec
 `hadim/olatu/.github/workflows/refresh-data.yml@` couldn't be added while that endpoint was
 500ing), so until it is narrowed *any* workflow in the repo can mint a bucket-scoped token.
 Also **revoke the now-unused fine-grained token `olatu-gh-ci`** on huggingface.co/settings/tokens.
-`API_MAREE_KEY` and `METEOFRANCE_API_KEY` are set. **Next per roadmap:** a combined air+sea temperature chart panel + the
+`API_MAREE_KEY`, `METEOFRANCE_API_KEY` and `CANDHIS_API_KEY` are set. **CANDHIS quota:** the owner
+is asking Cerema to raise the key's 150 requests/day (~500 asked); once granted, set the repo
+variable `CANDHIS_API_INTERVAL_MIN=15` (API on every `*/15` run) — if refused, leave it at the
+default 60 (spec 0022 §3.2). **Next per roadmap:** a combined air+sea temperature chart panel + the
 map buoy↔station pairing **line** (station markers already shipped, spec 0013 §6), side-by-side buoy
 comparison, per-locale glossary JSON.

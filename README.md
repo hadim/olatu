@@ -18,8 +18,8 @@ with pixel-perfect canvas charts. Deployed on GitHub Pages.
 | Cap Ferret | 03302 | 44.653° N, 1.447° W | full, from 2010 |
 
 Data © **[Cerema / CANDHIS](https://candhis.cerema.fr)** (Datawell directional Waverider
-buoys, one measurement / 30 min). The cleaned tiers are re-scraped every 30 min into the
-public HF bucket **[`hadim/olatu`](https://huggingface.co/buckets/hadim/olatu)** (CORS
+buoys, one measurement / 30 min). The cleaned tiers are refreshed every 15 min from the
+CANDHIS API into the public HF bucket **[`hadim/olatu`](https://huggingface.co/buckets/hadim/olatu)** (CORS
 Parquet/JSON) and reusable by anyone.
 
 ## Features
@@ -37,7 +37,7 @@ Parquet/JSON) and reusable by anyone.
 React + Vite + TypeScript · **uPlot** canvas charts · MapLibre (lazy) · Tailwind v4 +
 shadcn/Radix · Paraglide i18n · [hyparquet](https://github.com/hyparam/hyparquet)
 (Parquet-in-browser, no WASM). Pipeline: **Python + [polars](https://pola.rs)** via
-[pixi](https://pixi.sh). The site and its data are **decoupled** — the 30-min refresh
+[pixi](https://pixi.sh). The site and its data are **decoupled** — the 15-min refresh
 re-uploads to HF without rebuilding or redeploying the webapp.
 
 ## Quickstart
@@ -49,24 +49,27 @@ pixi run webapp                      # frontend dev server (reads data live from
 pixi run webapp-build                # static build for GitHub Pages
 pixi run check                       # ruff format + lint (Python)
 
-pixi run update                      # pull → scrape → build → upload to HF (campaign 06403)
+pixi run update                      # pull → fetch → build → upload to HF (campaign 06403)
 pixi run update --campaign 06402     # …for another buoy
 ```
 
-`update` is the usual data refresh (same command locally and in CI). Lower-level
-`pixi run scrape` / `pixi run ingest` work on a local `./hfdata/<campaign>/{raw,data}`
-mirror. Override the webapp's data root with `VITE_DATA_BASE_URL` (must end in `/`).
+`update` is the usual data refresh (same command locally and in CI). It reads CANDHIS through
+its API when `CANDHIS_API_KEY` is set, and the public HTML table otherwise. Lower-level
+`pixi run candhis` / `pixi run scrape` / `pixi run ingest` work on a local
+`./hfdata/<campaign>/{raw,data}` mirror. Override the webapp's data root with
+`VITE_DATA_BASE_URL` (must end in `/`).
 
 ## Layout
 
 ```
-ingest/     Python (polars): CANDHIS CSV/HTML → tiered Parquet/JSON, per --campaign
-  schema.py   buoy registry (BUOYS) + column mapping   scrape.py  live-feed reel
-  build.py    tiers                                     update.py  pull→scrape→build→upload
+ingest/     Python (polars): CANDHIS API/HTML → tiered Parquet/JSON, per --campaign
+  schema.py   buoy registry (BUOYS) + column mapping   candhis_api.py  API feed + archive
+  scrape.py   HTML-table fallback feed                  build.py        tiers
+  update.py   pull→feed→archive→build→upload
 webapp/     frontend (reads tiers from the HF bucket at runtime)
   src/lib/buoys.ts   buoy registry powering the switcher + locator map
 specs/      design & decision records — read these first (this project is spec-driven)
-.github/workflows/   deploy.yml (Pages, on webapp change) · refresh-data.yml (data, */30)
+.github/workflows/   deploy.yml (Pages, on webapp change) · refresh-data.yml (data, */15)
 ```
 
 Data is **not** in git — it lives in the HF bucket as `buoys/<campaign>/raw/*.csv` (sources)
