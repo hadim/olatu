@@ -121,10 +121,12 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   none before; handle missing-temp as a first-class UI state, not an empty chart.
 - **CANDHIS comes from its API first, the HTML table second (spec 0022).** `CANDHIS_API_KEY`
   (ingest-only; GitHub secret + `.env`) has a **daily request quota shared by CI and every local
-  run** (150/day as granted) and no response says what is left. So the API is called only on
-  `CANDHIS_API_INTERVAL_MIN` slots (repo variable, CI default 60; 15 = every run, once the quota
-  allows), the HTML table fills the other runs **and** any run where the API is down or answers
-  429, and nothing calls the API again after a 429 in the same process. Both feeds write the same
+  run** (150/day as granted, 500–1000 asked) and no response says what is left. The API is called
+  on `CANDHIS_API_INTERVAL_MIN` slots (repo variable, default 15 = every run); the HTML table
+  fills any other run **and** any run where the API is down or answers 429, and a 429 is
+  remembered for the rest of the UTC day (`quota_spent_on` in `raw/candhis_api.json`) so later
+  runs don't knock again. The scraper is **temporary**: remove its fetch/parse once the API has
+  proven itself (keep `merge_rows`/`validate_rows`, the API path uses them). Both feeds write the same
   reel through `scrape.merge_rows` — don't give the API its own merge. The live window is
   **gap-aware** (from the newest reading held), never "the last 48 h". `dateFin` is **exclusive**
   and "no data" is `success: true` + `nbLig 0` (the PDF says otherwise). The current year's
@@ -387,8 +389,10 @@ and it needs no code change. ⚠️ **Check the publisher's claims**: it was rec
 500ing), so until it is narrowed *any* workflow in the repo can mint a bucket-scoped token.
 Also **revoke the now-unused fine-grained token `olatu-gh-ci`** on huggingface.co/settings/tokens.
 `API_MAREE_KEY`, `METEOFRANCE_API_KEY` and `CANDHIS_API_KEY` are set. **CANDHIS quota:** the owner
-is asking Cerema to raise the key's 150 requests/day (~500 asked); once granted, set the repo
-variable `CANDHIS_API_INTERVAL_MIN=15` (API on every `*/15` run) — if refused, leave it at the
-default 60 (spec 0022 §3.2). **Next per roadmap:** a combined air+sea temperature chart panel + the
+asked Cerema (2026-09-14) to raise the key's 150 requests/day to 500–1000; meanwhile the API is
+called on every `*/15` run anyway, and a spent quota sends the rest of the UTC day to the HTML
+table. If the raise is refused, set the repo variable `CANDHIS_API_INTERVAL_MIN=60`. Once the API
+has proven itself (quota raised, `feed: api` without fallbacks), **remove the HTML scraper**
+(spec 0022 §3.2). **Next per roadmap:** a combined air+sea temperature chart panel + the
 map buoy↔station pairing **line** (station markers already shipped, spec 0013 §6), side-by-side buoy
 comparison, per-locale glossary JSON.

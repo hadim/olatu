@@ -519,10 +519,16 @@ def _fetch_feed(raw: Path, campaign: str, feed: str, api_interval: int) -> str:
     if feed == "api" and not key:
         raise scrape_mod.ScrapeError(f"--feed api needs {api_mod.ENV_KEY}")
     if key and (feed == "api" or (feed == "auto" and _api_due(api_interval))):
+        if feed == "auto" and api_mod.quota_spent_today(raw):
+            ui.detail("CANDHIS API quota already spent today → HTML table")
+            scrape_mod.scrape(raw, campaign)
+            return "html (quota)"
         try:
             api_mod.refresh(raw, campaign, key)
             return "api"
         except scrape_mod.FeedUnavailable as e:
+            if isinstance(e, api_mod.QuotaExhausted):
+                api_mod.mark_quota_spent(raw)  # spare the runs left today their own 429
             if feed == "api":
                 raise
             ui.warn(f"{e} → reading the HTML table instead")
@@ -624,6 +630,9 @@ def update(
             if not api_mod.archive_due(raw):
                 ui.detail("already checked today → skip")
                 result["archive"] = "checked today"
+            elif api_mod.quota_spent_today(raw):
+                ui.detail("CANDHIS API quota already spent today → retry tomorrow")
+                result["archive"] = "quota"
             else:
                 try:
                     archive_changed = api_mod.refresh_archive(raw, campaign, api_key)
@@ -636,6 +645,8 @@ def update(
                 except scrape_mod.FeedUnavailable as e:
                     # Down or out of quota: the state stays unwritten, so the next run
                     # retries. The archive lags weeks behind anyway; a day costs nothing.
+                    if isinstance(e, api_mod.QuotaExhausted):
+                        api_mod.mark_quota_spent(raw)
                     ui.warn(f"archive: {e} → retry next run")
                     result["archive"] = "unavailable"
                 except scrape_mod.ScrapeError as e:
