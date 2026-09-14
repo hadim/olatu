@@ -24,8 +24,9 @@ its archive matches the `*_arch.csv` export. So the API became the feed without 
   on the other runs and whenever the API is down or out of quota; no call after the first 429 in a
   run. `pull` re-syncs the live archive years every run so CI's cache can't regress them;
   `snapshot_reel` backs up only this year's reel.
-- **CI.** `*/15` (was `*/30`), `CANDHIS_API_KEY` secret, `CANDHIS_API_INTERVAL_MIN` repo variable
-  (default 60 until the quota is raised — then 15).
+- **CI.** `*/15` (was `*/30`), `CANDHIS_API_KEY` secret, and the API on every run
+  (`CANDHIS_API_INTERVAL_MIN`, default 15) while a 500–1000/day quota is asked for; a 429 sends
+  the rest of the UTC day to the HTML table (`quota_spent_on` in `raw/candhis_api.json`).
 - **Backfill.** Realtime 2021 → today for the three buoys, uploaded the same day: sea temperature
   now starts 2021-05-21 (06403, 03302) / 2021-07-01 (06402, whose realtime rows start 2021-06-21
   without a temperature) instead of 2026-06-25. Those older rows write `TempMer = 0.0` for a

@@ -67,8 +67,9 @@ MAX_WINDOW_DAYS = 365  # "12 mois maxi par requête"
 LIVE_LOOKBACK = timedelta(days=2)  # the HTML table's ~48 h, kept as a floor
 
 ARCHIVE_DATE_COL = "DateHeure"
-# Per-campaign state next to the raw CSVs (pulled + uploaded with them), so the archive is
-# fetched once a UTC day however many runs there are: {"archive_checked": "YYYY-MM-DD"}.
+# Per-campaign API state next to the raw CSVs (pulled + uploaded with them), dated per UTC
+# day: `archive_checked` (the archive is fetched once a day, however many runs there are)
+# and `quota_spent_on` (a 429 said the daily quota is gone — the day's later runs don't ask).
 ARCHIVE_STATE = "candhis_api.json"
 # QC'd archive rows land weeks after the fact, so last year keeps changing into the new
 # one: refresh it too through the end of February.
@@ -321,13 +322,40 @@ def archive_years(today: date) -> list[int]:
     return [today.year]
 
 
-def archive_due(src: Path, today: date | None = None) -> bool:
-    """True unless this campaign's archive was already checked today (UTC)."""
+def _read_state(src: Path) -> dict:
     try:
         state = json.loads((src / ARCHIVE_STATE).read_text())
     except (OSError, ValueError):
-        return True
-    return state.get("archive_checked") != (today or _utc_today()).isoformat()
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _write_state(src: Path, **updates: str) -> None:
+    src.mkdir(parents=True, exist_ok=True)
+    state = _read_state(src) | updates
+    (src / ARCHIVE_STATE).write_text(json.dumps(state, sort_keys=True) + "\n")
+
+
+def archive_due(src: Path, today: date | None = None) -> bool:
+    """True unless this campaign's archive was already checked today (UTC)."""
+    checked = _read_state(src).get("archive_checked")
+    return checked != (today or _utc_today()).isoformat()
+
+
+def quota_spent_today(src: Path, today: date | None = None) -> bool:
+    """True when a run already got the daily-quota 429 today (UTC) for this campaign.
+
+    Remembered across runs because the in-process `quota_spent` flag dies with the process:
+    without it, every `*/15` run after the quota ran out would still spend a request per
+    buoy just to collect a fresh 429. The UTC day is a guess at CANDHIS's reset, which is
+    undocumented; a later reset only costs a couple of hours of HTML fallback.
+    """
+    spent = _read_state(src).get("quota_spent_on")
+    return spent == (today or _utc_today()).isoformat()
+
+
+def mark_quota_spent(src: Path, today: date | None = None) -> None:
+    _write_state(src, quota_spent_on=(today or _utc_today()).isoformat())
 
 
 # --------------------------------------------------------------------------- merge
@@ -444,10 +472,7 @@ def refresh_archive(
         )
         if path is not None:
             changed.append(path)
-    src.mkdir(parents=True, exist_ok=True)
-    (src / ARCHIVE_STATE).write_text(
-        json.dumps({"archive_checked": today.isoformat()}) + "\n"
-    )
+    _write_state(src, archive_checked=today.isoformat())
     return changed
 
 

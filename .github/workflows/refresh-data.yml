@@ -10,13 +10,14 @@ name: Refresh data (buoys · tides · wind → HF bucket)
 # The webapp reads those tiers at runtime, so this NEVER rebuilds or redeploys the site —
 # it is a tiny Python-only job. See specs/0004 §6, 0005 §4, 0008, 0012, 0022.
 #
-# CANDHIS API quota (spec 0022): the key allows a fixed number of requests a day, shared
-# with every local run, and one realtime call per buoy per run is 96 x 3 = 288/day at this
-# cadence. So the API is asked only every CANDHIS_API_INTERVAL_MIN minutes (repo variable;
-# default 60 ≈ 75/day with the daily archive call, inside the 150/day the key shipped with).
-# Runs in between read the HTML table, and so does any run where the API is down or out of
-# quota: the refresh keeps this cadence either way, and the API's gap-aware window refills
-# whatever the HTML's 48 h window missed. Set the variable to 15 once the quota allows it.
+# CANDHIS API quota (spec 0022 §3.2): the key allows a fixed number of requests a day, shared
+# with every local run. One realtime call per buoy per run is 96 x 3 = 288/day at this
+# cadence (+3 for the daily archive) — above the 150/day the key was granted with, while a
+# raise is being asked for. The API is called on every run anyway (CANDHIS_API_INTERVAL_MIN,
+# repo variable, default 15). Once the day's quota runs out, the 429 is remembered in each
+# buoy's raw/candhis_api.json and the remaining runs read the HTML table until the next UTC
+# day: freshness holds, and CANDHIS doesn't get a 429 every 15 min. To stretch the quota
+# instead, set the variable to 30 or 60 — the runs in between then read the HTML table.
 #
 # Failure policy (spec 0020): all four sources belong to somebody else, and each of their
 # outages used to cost a red run + a notification every 30 min for hours, for something
@@ -127,7 +128,7 @@ jobs:
           # win and hand the secret back. On `schedule`, inputs.keyless is null -> secret.
           HF_TOKEN: ${{ inputs.keyless != true && secrets.HF_TOKEN || '' }}
           CANDHIS_API_KEY: ${{ secrets.CANDHIS_API_KEY }}
-          CANDHIS_API_INTERVAL_MIN: ${{ vars.CANDHIS_API_INTERVAL_MIN || '60' }}
+          CANDHIS_API_INTERVAL_MIN: ${{ vars.CANDHIS_API_INTERVAL_MIN || '15' }}
           API_MAREE_KEY: ${{ secrets.API_MAREE_KEY }}
           METEOFRANCE_API_KEY: ${{ secrets.METEOFRANCE_API_KEY }}
         # Capture the exit code instead of failing here — the gate below turns it into a
