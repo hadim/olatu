@@ -52,6 +52,7 @@ import polars as pl
 
 from . import build as build_mod
 from . import ui
+from .outage import Outage
 from .schema import (
     CAMPAIGN_ID,
     WIND_ACCUM_VARS,
@@ -326,16 +327,33 @@ def _dpobs_row(
     Retries 429/5xx with backoff (honouring Retry-After) instead of swallowing them: the API caps
     at 100 req/min, so a burst trips 429, and silently treating that as "no data" would drop real
     observations. 401/403 is a bad key -> raise. A 200 with an empty body -> None.
+
+    A transport fault (reset/timeout/refused) retries on the same backoff and, once exhausted,
+    raises `Outage`: a `RuntimeError`, so update's wind step stays non-fatal and the gap-aware
+    heal refills the slots next run. A bare httpx error used to escape that step and abort the
+    whole campaign (build + upload included) as "ours" (specs/0020).
     """
     for i in range(attempts):
         _dpobs_gate()
-        r = httpx.get(
-            f"{DPOBS_BASE}/station/infrahoraire-6m",
-            params={"id_station": num_poste, "date": date_iso, "format": "csv"},
-            headers={"apikey": key},
-            timeout=30,
-            follow_redirects=True,
-        )
+        try:
+            r = httpx.get(
+                f"{DPOBS_BASE}/station/infrahoraire-6m",
+                params={"id_station": num_poste, "date": date_iso, "format": "csv"},
+                headers={"apikey": key},
+                timeout=30,
+                follow_redirects=True,
+            )
+        except httpx.TransportError as e:
+            if i == attempts - 1:
+                raise Outage(
+                    f"DPObs {num_poste} {date_iso}: {type(e).__name__} after {attempts} attempts",
+                    service="Météo-France",
+                ) from e
+            ui.warn(
+                f"DPObs {num_poste}: {type(e).__name__}: {e} — retrying in {2.0**i:.0f}s"
+            )
+            time.sleep(2.0**i)
+            continue
         if r.status_code in (401, 403):
             raise WindError(f"DPObs {r.status_code} — bad/expired {ENV_KEY}")
         if r.status_code == 200:
