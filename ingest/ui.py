@@ -53,7 +53,7 @@ ICON_BUOY = "🛟"
 ICON_TIDE = "🌙"
 ICON_WIND = "💨"
 ICON_PULL = "↓"
-ICON_SCRAPE = "⟳"
+ICON_FEED = "⟳"
 ICON_BUILD = "⚙"
 ICON_UPLOAD = "↑"
 ICON_SEED = "🌱"
@@ -84,7 +84,7 @@ def section(
 
 
 def step(icon: str, label: str, *, style: str = BUOY) -> None:
-    """A step header (pull / scrape / tide / build / upload); details follow via detail()."""
+    """A step header (pull / feed / tide / build / upload); details follow via detail()."""
     line = Text()
     line.append(f"  {icon} ", style=style)
     line.append(label, style=f"bold {style}")

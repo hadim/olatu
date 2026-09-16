@@ -2,8 +2,8 @@ name: Refresh data (buoys · tides · wind → HF bucket)
 
 # Every 15 min, for EACH buoy, refresh ALL three data sources and upload them back to
 # buckets/hadim/olatu:
-#   • buoys — pull the realtime accumulator, fetch the live CANDHIS feed (API, HTML table as
-#             fallback), refresh the QC'd archive from the API once a day, rebuild tiers
+#   • buoys — pull the realtime accumulator, fetch the live CANDHIS feed from its API,
+#             refresh the QC'd archive from the API once a day, rebuild tiers
 #             (specs 0004, 0022)
 #   • tides — refresh the nearest port's extrema from api-maree.fr        (spec 0008)
 #   • wind  — scrape the nearest station's 6-min feed from Météo-France + rebuild (specs 0012/0013)
@@ -13,11 +13,12 @@ name: Refresh data (buoys · tides · wind → HF bucket)
 # CANDHIS API quota (spec 0022 §3.2): the key allows a fixed number of requests a day, shared
 # with every local run. One realtime call per buoy per run is 96 x 3 = 288/day at this
 # cadence (+3 for the daily archive) — above the 150/day the key was granted with, while a
-# raise is being asked for. The API is called on every run anyway (CANDHIS_API_INTERVAL_MIN,
-# repo variable, default 15). Once the day's quota runs out, the 429 is remembered in each
-# buoy's raw/candhis_api.json and the remaining runs read the HTML table until the next UTC
-# day: freshness holds, and CANDHIS doesn't get a 429 every 15 min. To stretch the quota
-# instead, set the variable to 30 or 60 — the runs in between then read the HTML table.
+# raise is being asked for — and no 429 has come back so far. The API is called on every run
+# (CANDHIS_API_INTERVAL_MIN, repo variable, default 15). If the day's quota runs out, the 429
+# is remembered in each buoy's raw/candhis_api.json and the remaining runs keep the last reel
+# until the next UTC day (`feed: quota`, held like an outage), so CANDHIS doesn't get a 429
+# every 15 min; the gap-aware window then refetches what was missed. To stretch the quota,
+# set the variable to 30 or 60 — the runs in between skip the buoy feed (`feed: off-slot`).
 #
 # Failure policy (spec 0020): all four sources belong to somebody else, and each of their
 # outages used to cost a red run + a notification every 30 min for hours, for something
@@ -113,8 +114,8 @@ jobs:
       #   CANDHIS_API_KEY      CANDHIS API realtime + archive (ingest/candhis_api.py, spec 0022)
       #   API_MAREE_KEY        tide refresh (ingest/tides.py, spec 0008) -> tides/<port>/
       #   METEOFRANCE_API_KEY  6-min live wind (ingest/wind.py DPObs, spec 0012) -> wind/<station>/
-      # All three API keys are non-fatal if unset (CANDHIS falls back to the HTML table; the
-      # tide and wind steps log + skip).
+      # CANDHIS_API_KEY is required (unset: tides and wind still refresh, then the run fails);
+      # the tide and wind keys are optional (unset: those steps log + skip).
       # The hourly wind history needs no key (open Météo-France bulk files) and refreshes at
       # most ~once/day (gated in update._hourly_wind_due). Each buoy resolves to its nearest
       # port/station; the 3 buoys map to 3 distinct ones, so one run refreshes all with no

@@ -54,17 +54,17 @@ pixi run update --campaign 06402     # …for another buoy
 ```
 
 `update` is the usual data refresh (same command locally and in CI). It reads CANDHIS through
-its API when `CANDHIS_API_KEY` is set, and the public HTML table otherwise. Lower-level
-`pixi run candhis` / `pixi run scrape` / `pixi run ingest` work on a local
+its API, which needs a `CANDHIS_API_KEY` (see `.env.template`). Lower-level
+`pixi run candhis` / `pixi run ingest` work on a local
 `./hfdata/<campaign>/{raw,data}` mirror. Override the webapp's data root with
 `VITE_DATA_BASE_URL` (must end in `/`).
 
 ## Layout
 
 ```
-ingest/     Python (polars): CANDHIS API/HTML → tiered Parquet/JSON, per --campaign
+ingest/     Python (polars): CANDHIS API → tiered Parquet/JSON, per --campaign
   schema.py   buoy registry (BUOYS) + column mapping   candhis_api.py  API feed + archive
-  scrape.py   HTML-table fallback feed                  build.py        tiers
+  reel.py     realtime accumulator (validate + merge)   build.py        tiers
   update.py   pull→feed→archive→build→upload
 webapp/     frontend (reads tiers from the HF bucket at runtime)
   src/lib/buoys.ts   buoy registry powering the switcher + locator map

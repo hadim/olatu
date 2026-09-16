@@ -31,8 +31,8 @@ var, if set, wins over it — see resolve_token). Each run:
   1. pull the realtime accumulator + the current year's archive (always) and the past
      archive (only if missing) from the bucket into a local working mirror
      (`./hfdata/<campaign>/raw`),
-  2. fetch the live CANDHIS feed — the API on its slots, the HTML table otherwise or when
-     the API fails (spec 0022) — and coalesce-merge it into the accumulator,
+  2. fetch the live CANDHIS feed from its API (spec 0022) and coalesce-merge it into the
+     accumulator,
   3. once a UTC day, refresh the current year's QC'd archive from the API,
   4. build the tiers into `./hfdata/<campaign>/data`,
   5. upload the tiers + the updated accumulator (+ any refreshed archive) back to the
@@ -56,9 +56,8 @@ import typer
 
 from . import build as build_mod
 from . import candhis_api as api_mod
-from . import scrape as scrape_mod
+from . import reel, ui
 from . import tides as tides_mod
-from . import ui
 from . import wind as wind_mod
 from .outage import EXIT_OUTAGE, Outage
 from .schema import CAMPAIGN_ID, buoy, resolve_tide_port, resolve_wind_station
@@ -489,7 +488,6 @@ def snapshot_reel(work: Path, campaign: str, repo: str, token: str | None) -> No
 
 # The cron's step (refresh-data.yml `*/15`); CANDHIS API slots are multiples of it.
 CRON_STEP_MIN = 15
-FEEDS = ("auto", "api", "html")
 
 
 def _api_due(interval_min: int, now: datetime | None = None) -> bool:
@@ -498,7 +496,7 @@ def _api_due(interval_min: int, now: datetime | None = None) -> bool:
     A slot is a minute of the UTC day, floored to the cron step, that is a multiple of
     `interval_min`: at 60, the runs starting in :00–:14. Stateless on purpose — a cron that
     GitHub delays past its slot only moves the next API call, and the API's gap-aware window
-    then catches up whatever the HTML table's 48 h window missed in between.
+    then catches up everything since the last reading held.
     """
     if interval_min <= CRON_STEP_MIN:
         return True
@@ -507,39 +505,27 @@ def _api_due(interval_min: int, now: datetime | None = None) -> bool:
     return slot % interval_min == 0
 
 
-def _fetch_feed(raw: Path, campaign: str, feed: str, api_interval: int) -> str:
-    """Grow the reel from the realtime feed; return which source did it (spec 0022 §3.1).
+def _fetch_feed(raw: Path, campaign: str, key: str, api_interval: int) -> str:
+    """Grow the reel from the CANDHIS API; return what the feed did (spec 0022 §3.1, §6).
 
-    `auto`: the API on its slots when a key is set, the HTML table otherwise — and the HTML
-    table too when the API is down or out of quota, so a quota spent before the day is out
-    costs no freshness. A hard API error (a bad key, a changed payload) is ours and raises.
-    `api` / `html` force one source, with no fallback.
+    `off-slot`: not an API slot, so no call — the next slot's gap-aware window fetches
+    everything in between. `quota`: a run already got the daily-quota 429 today, so no call
+    either; a partner we asked for more quota should not see us keep knocking. Raises
+    FeedUnavailable when CANDHIS is down or answers 429 (remembered for the rest of the UTC
+    day), and FeedError when the failure is ours (a bad key, a changed payload).
     """
-    key = os.environ.get(api_mod.ENV_KEY)
-    if feed == "api" and not key:
-        raise scrape_mod.ScrapeError(f"--feed api needs {api_mod.ENV_KEY}")
-    if key and (feed == "api" or (feed == "auto" and _api_due(api_interval))):
-        if feed == "auto" and api_mod.quota_spent_today(raw):
-            ui.detail("CANDHIS API quota already spent today → HTML table")
-            scrape_mod.scrape(raw, campaign)
-            return "html (quota)"
-        try:
-            api_mod.refresh(raw, campaign, key)
-            return "api"
-        except scrape_mod.FeedUnavailable as e:
-            if isinstance(e, api_mod.QuotaExhausted):
-                api_mod.mark_quota_spent(raw)  # spare the runs left today their own 429
-            if feed == "api":
-                raise
-            ui.warn(f"{e} → reading the HTML table instead")
-            scrape_mod.scrape(raw, campaign)
-            return (
-                "html (quota)"
-                if isinstance(e, api_mod.QuotaExhausted)
-                else "html (api down)"
-            )
-    scrape_mod.scrape(raw, campaign)
-    return "html"
+    if not _api_due(api_interval):
+        ui.detail(f"not a CANDHIS API slot (every {api_interval} min) → keep the reel")
+        return "off-slot"
+    if api_mod.quota_spent_today(raw):
+        ui.detail("CANDHIS API quota already spent today → keep the reel")
+        return "quota"
+    try:
+        api_mod.refresh(raw, campaign, key)
+    except api_mod.QuotaExhausted:
+        api_mod.mark_quota_spent(raw)  # spare the runs left today their own 429
+        raise
+    return "api"
 
 
 def update(
@@ -548,8 +534,7 @@ def update(
     work: Path = Path("hfdata"),
     *,
     do_pull: bool = True,
-    do_scrape: bool = True,
-    feed: str = "auto",
+    do_feed: bool = True,
     api_interval: int = CRON_STEP_MIN,
     do_archive: bool = True,
     do_tides: bool = True,
@@ -578,9 +563,9 @@ def update(
         "rows": None,
         "through": "—",
         "uploaded": do_upload,
-        # "api" | "html" | "html (quota)" | "html (api down)" | "unavailable" (CANDHIS
-        # down — tiers rebuilt from the last-good reel) | "—" (--no-scrape). Never a
-        # silent "everything is fine".
+        # "api" | "off-slot" (not an API slot, reel kept) | "quota" (daily quota spent, reel
+        # kept) | "unavailable" (CANDHIS down, tiers rebuilt from the last-good reel) |
+        # "no key" | "—" (--no-feed). Never a silent "everything is fine".
         "feed": "—",
         # the daily API archive refresh (spec 0022 §3.4), or "—" when it didn't run
         "archive": "—",
@@ -608,23 +593,36 @@ def update(
             ui.step(ui.ICON_PULL, "pull")
             _net(f"pull {campaign}", pull, work, campaign, repo, token)
 
-        # --- the live CANDHIS feed into the reel accumulator: API or HTML table (spec 0022) ---
-        if do_scrape:
-            ui.step(ui.ICON_SCRAPE, "feed")
-            try:
-                result["feed"] = _fetch_feed(raw, campaign, feed, api_interval)
-            except scrape_mod.FeedUnavailable as e:
-                # CANDHIS is down, not broken. Keep the last-good reel and carry on with
-                # this buoy's OTHER sources: raising here used to abandon the campaign
-                # before tides, wind, build and upload, so every cerema.fr outage froze
-                # the Air realm and the marée too — for no reason, they have their own
-                # feeds. The run still reports the degradation (and exits EXIT_OUTAGE).
-                ui.warn(f"{e} → keeping the last-good reel")
-                result["feed"] = "unavailable"
+        # --- the live CANDHIS feed from its API into the reel accumulator (spec 0022) ---
+        api_key = os.environ.get(api_mod.ENV_KEY)
+        if do_feed:
+            ui.step(ui.ICON_FEED, "feed")
+            if not api_key:
+                # There is no keyless feed (spec 0022 §6): fail the run at the end, but
+                # still refresh this buoy's tides and wind first.
+                ui.err(
+                    f"no {api_mod.ENV_KEY} → no buoy feed (pixi run does not read .env)"
+                )
+                result["feed"] = "no key"
+                result["error"] = f"feed: {api_mod.ENV_KEY} is not set"
+            else:
+                try:
+                    result["feed"] = _fetch_feed(raw, campaign, api_key, api_interval)
+                except reel.FeedUnavailable as e:
+                    # CANDHIS is down or out of quota, not broken. Keep the last-good reel and
+                    # carry on with this buoy's OTHER sources: raising here used to abandon
+                    # the campaign before tides, wind, build and upload, so every cerema.fr
+                    # outage froze the Air realm and the marée too — for no reason, they have
+                    # their own feeds. The run still reports the degradation (EXIT_OUTAGE).
+                    ui.warn(f"{e} → keeping the last-good reel")
+                    result["feed"] = (
+                        "quota"
+                        if isinstance(e, api_mod.QuotaExhausted)
+                        else "unavailable"
+                    )
 
         # --- the QC'd archive, once a UTC day, from the API (spec 0022 §3.4) ---
         archive_changed: list[Path] = []
-        api_key = os.environ.get(api_mod.ENV_KEY)
         if do_archive and api_key:
             ui.step(ui.ICON_BACKUP, "archive")
             if not api_mod.archive_due(raw):
@@ -642,14 +640,14 @@ def update(
                         if archive_changed
                         else "unchanged"
                     )
-                except scrape_mod.FeedUnavailable as e:
+                except reel.FeedUnavailable as e:
                     # Down or out of quota: the state stays unwritten, so the next run
                     # retries. The archive lags weeks behind anyway; a day costs nothing.
                     if isinstance(e, api_mod.QuotaExhausted):
                         api_mod.mark_quota_spent(raw)
                     ui.warn(f"archive: {e} → retry next run")
                     result["archive"] = "unavailable"
-                except scrape_mod.ScrapeError as e:
+                except reel.FeedError as e:
                     # Ours (a changed payload), but no reason to freeze this buoy's live
                     # data over it: say so, finish the refresh, and let main() fail the run.
                     ui.err(f"archive: {e}")
@@ -869,26 +867,19 @@ def main(
     no_pull: Annotated[
         bool, typer.Option("--no-pull", help="Skip pulling raw inputs from the bucket.")
     ] = False,
-    no_scrape: Annotated[
+    no_feed: Annotated[
         bool,
         typer.Option(
-            "--no-scrape", help="Skip the live scrape (just rebuild + upload)."
+            "--no-feed", help="Skip the live CANDHIS feed (just rebuild + upload)."
         ),
     ] = False,
-    feed: Annotated[
-        str,
-        typer.Option(
-            help="Realtime CANDHIS source: auto (the API on its slots, the HTML table "
-            "otherwise and whenever the API is down or out of quota), api, or html.",
-        ),
-    ] = "auto",
     api_interval: Annotated[
         int,
         typer.Option(
             "--api-interval",
             envvar="CANDHIS_API_INTERVAL_MIN",
             help="Call the CANDHIS API every N minutes (a multiple of the 15-min cron); "
-            "with --feed auto the runs in between read the HTML table. 15 = every run.",
+            "the runs in between keep the last reel. 15 = every run.",
         ),
     ] = CRON_STEP_MIN,
     no_archive: Annotated[
@@ -922,11 +913,9 @@ def main(
         ),
     ] = None,
 ) -> None:
-    """Refresh Olatu data: pull → scrape → tides → wind → build → upload to the HF bucket."""
+    """Refresh Olatu data: pull → feed → archive → tides → wind → build → upload to the HF bucket."""
     campaigns = campaign or [CAMPAIGN_ID]
     do_pull, do_upload = not no_pull, not no_upload
-    if feed not in FEEDS:
-        raise typer.BadParameter(f"--feed must be one of {', '.join(FEEDS)}")
 
     ui.banner(
         f"pull → feed → archive → tides → wind → build → upload   ·   {', '.join(campaigns)}"
@@ -958,7 +947,7 @@ def main(
     candhis_key = "set" if os.environ.get(api_mod.ENV_KEY) else "MISSING"
     ui.detail(
         f"bucket {repo} · huggingface_hub {hf.__version__} · auth {auth} · "
-        f"{api_mod.ENV_KEY} {candhis_key} (feed {feed}, API every {api_interval} min) · "
+        f"{api_mod.ENV_KEY} {candhis_key} (API every {api_interval} min) · "
         f"{tides_mod.ENV_KEY} {tide_key} · {wind_mod.ENV_KEY} {wind_key} · "
         f"net timeout {NET_TIMEOUT_S:.0f}s"
     )
@@ -975,8 +964,7 @@ def main(
                 repo=repo,
                 work=work,
                 do_pull=do_pull,
-                do_scrape=not no_scrape,
-                feed=feed,
+                do_feed=not no_feed,
                 api_interval=api_interval,
                 do_archive=not no_archive,
                 do_tides=not no_tides,
@@ -986,7 +974,7 @@ def main(
                 seed_src=seed_src,
                 token=token,
             )
-        except (scrape_mod.ScrapeError, RuntimeError) as e:
+        except (reel.FeedError, RuntimeError) as e:
             ui.err(f"{c}: {e}")
             failed.append(c)
             if not isinstance(e, Outage):
@@ -1008,7 +996,9 @@ def main(
     #      themselves within an hour or two and a red run every 30 min through them is
     #      noise nobody can act on.
     #   1  at least one failure pointed at this repo → red now.
-    degraded = [r["campaign"] for r in results if r.get("feed") == "unavailable"]
+    degraded = [
+        r["campaign"] for r in results if r.get("feed") in ("unavailable", "quota")
+    ]
     if fatal:
         ui.err(f"done with failures: {', '.join(failed)}")
         raise typer.Exit(1)

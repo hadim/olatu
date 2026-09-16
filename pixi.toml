@@ -10,7 +10,7 @@ platforms = ["osx-arm64", "linux-64"]
 
 [tasks]
 # --- Data pipeline (data lives in the HF dataset hadim/olatu, not in git) ---
-# The usual refresh — pull from HF, scrape the live CANDHIS feed, rebuild the tiers,
+# The usual refresh — pull from HF, fetch the live CANDHIS feed (API), rebuild the tiers,
 # upload back to the dataset. Same command locally and in CI:
 #   pixi run update                 # campaign 06403 by default
 #   pixi run update --campaign 06402
@@ -20,8 +20,6 @@ update = "python -m ingest.update"
 #   pixi run migrate delete --yes    # after the deployed site reads buoys/, drop the old ones
 migrate = "python -m ingest.migrate_layout"
 # Lower-level steps (the working mirror is ./hfdata/<campaign>/{raw,data}):
-#   scrape the live feed into the local reel accumulator
-scrape = "python -m ingest.scrape --src hfdata/06403/raw"
 #   read CANDHIS from its API (spec 0022; needs CANDHIS_API_KEY, shared daily quota):
 #   pixi run candhis -c 06403                    # realtime, gap-aware live window
 #   pixi run candhis --all --since 2021-01-01    # realtime history backfill (1 req/buoy/year)
@@ -54,9 +52,8 @@ check = { depends-on = ["format", "lint"] }
 python = ">=3.13,<4"
 polars = ">=1.42.0"
 pyarrow = ">=24.0.0"
-# For the realtime scraper that pulls the CANDHIS web table:
+# HTTP client for the CANDHIS, api-maree.fr and Météo-France APIs:
 httpx = ">=0.28"
-lxml = ">=6.1.1"
 # Publishes the built tiers + raw CSVs to the HF dataset (hadim/olatu) and provides
 # the `hf` CLI (OIDC trusted-publisher uploads in CI). See specs/0004 §6.
 huggingface_hub = ">=1.21.0"

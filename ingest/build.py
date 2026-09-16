@@ -89,7 +89,7 @@ def _clean_numeric(df: pl.DataFrame, cols: list[str]) -> pl.DataFrame:
 
 def read_archive(src: Path, campaign: str = CAMPAIGN_ID) -> pl.DataFrame | None:
     # A realtime-only buoy (no downloaded archive, e.g. a newly-added campaign whose
-    # history accumulates forward from the scraper) simply has no *_arch.csv yet.
+    # history accumulates forward from the realtime feed) simply has no *_arch.csv yet.
     files = sorted(glob.glob(str(src / f"Candhis_{campaign}_*_arch.csv")))
     if not files:
         return None
@@ -152,7 +152,7 @@ def assemble(
     archive record -- see specs/2026-06-27-0004-realtime-scraper.md.)
 
     Either feed may be absent: a realtime-only buoy (no archive yet) builds purely from
-    the scraped tail, and forward-grows like sea temperature does (spec 0005).
+    the realtime tail, and forward-grows like sea temperature does (spec 0005).
     """
     parts = []
     if archive is not None:

@@ -9,7 +9,7 @@ lasted long enough to actually need a human (see `.github/scripts/outage-gate.sh
 
 ⚠️ Raise `Outage` **only where the other side is provably at fault**: a transport fault,
 a timeout, a 5xx/429, an upstream error page. Never for "the payload wasn't what we
-expect" — a changed HTML table, a renamed column, a schema drift is *our* bug and must
+expect" — a changed payload, a renamed column, a schema drift is *our* bug and must
 go red on the spot, because a silent six-hour grace period is exactly the wrong answer
 to it. When in doubt, don't: a hard failure costs a notification, a wrong grace costs
 six hours of unnoticed breakage.
