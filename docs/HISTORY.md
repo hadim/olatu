@@ -9,6 +9,25 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-09-16 — The CANDHIS HTML scraper is gone (spec 0022 §6)
+
+Two days after the switch, the API had carried every run: 156 runs, 481 requests, `feed: api`
+throughout, no fallback and no 429, even at 271 requests on one day against the 150 granted. So
+the HTML table went:
+
+- **`ingest/scrape.py` → `ingest/reel.py`.** The HTML fetch/parse, `pixi run scrape`,
+  `update --feed` and `lxml` are removed. What stays is the reel accumulator both feeds used:
+  `validate_rows` + `merge_rows` (the unused legacy dated-snapshot migration dropped), with
+  `ScrapeError` renamed `FeedError`. `--no-scrape` is `--no-feed`.
+- **`update` without a fallback.** `feed` is `api` · `off-slot` (not a
+  `CANDHIS_API_INTERVAL_MIN` slot, no call) · `quota` (429 now or earlier today, degraded, exit 75)
+  · `unavailable` · `no key` (fails the run, after tides/wind/build/upload).
+- **The 2026-09-08 → 09-16 CANDHIS silence.** Checked for a backfill: the API republished ~2–3
+  days at recovery and holds nothing older (TR), and TD stops at 2026-08-31. The realtime hole is
+  permanent. September's archive may still bring the waves back through the daily archive refresh.
+
+---
+
 ## 2026-09-14 — CANDHIS through its API (spec 0022)
 
 Cerema granted a key to the CANDHIS API v1 (150 requests/day). Probed before switching: its

@@ -8,6 +8,23 @@ spec and link it here.
 Format per entry: **date — title** · what we found · why it matters · resolution · refs.
 
 
+**2026-09-16 — after an outage CANDHIS republishes a couple of days, once; everything older is a permanent realtime hole.**
+*What we found.* All three buoys were silent upstream from 2026-09-08 12:00 UTC. The feed came back
+between the 06:00 and 06:38 UTC runs on 2026-09-16, and the first `getCampTR` returned the recovery
+in one block: 06403 and 06402 from 2026-09-14 06:30 (97 rows, exactly 48 h), 03302 from 2026-09-13
+08:30. The same morning a direct probe over 2026-09-01 → 09-17 returned exactly what the reel held.
+Nothing had arrived inside the hole, and `getCampTD` still ended on 2026-08-31.
+
+*Why it matters.* "The API keeps the whole realtime history" (2026-09-14) is true of what CANDHIS
+*received*. It does not bring back what never reached it. A gap-aware window can't refill a hole
+that is upstream, and re-probing it later is wasted quota. Only the QC'd archive, published about
+a month late, might still carry the waves for that week. The sea temperature (TR only) is gone.
+
+*Resolution.* No code: the gap-aware window took the whole republished block on the first run, and
+the daily archive refresh will coalesce September's TD, if it has those rows, without anyone acting.
+Before assuming a CANDHIS hole is ours, probe TR over the hole (a few requests) and compare with the
+reel. Refs: spec 0022 §6.4.
+
 **2026-09-14 — the CANDHIS API is not the HTML table with a key: it keeps the whole realtime history, and its doc gets "no data" wrong.**
 *What we found.* Probing the new API against what we already held (spec 0022): `getCampTR` rows
 are identical to the scraped reel — 0 value diffs over 10 461 rows on three buoys — but the

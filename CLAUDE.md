@@ -40,12 +40,12 @@ if unsure, ask the owner. Key specs to read before implementing:
 ```
 ingest/        Python (polars). NOT an installable package. All steps take --campaign.
   schema.py    per-buoy identity (BUOYS) + column mapping/units/sentinel + TIDE_PORTS registry & resolve_tide_port (nearest port)
-  candhis_api.py  CANDHIS API v1 (spec 0022; CANDHIS_API_KEY, shared daily quota): getCampTR -> reel via scrape.merge_rows (gap-aware window) + getCampTD -> current-year *_arch.csv once a day
-  scrape.py    fetch the CANDHIS realtime HTML table -> per-year reel CSV (coalesce-merge `merge_rows`, shared with the API); the fallback feed
+  candhis_api.py  CANDHIS API v1, the only buoy feed (spec 0022; CANDHIS_API_KEY, shared daily quota): getCampTR -> reel via reel.merge_rows (gap-aware window) + getCampTD -> current-year *_arch.csv once a day
+  reel.py      the realtime reel accumulator: validate + coalesce-merge (`merge_rows`) -> per-year reel CSV; FeedError / FeedUnavailable
   tides.py     fetch api-maree.fr water levels -> high/low extrema -> tides/<port>/data/tides.parquet (spec 0008; needs API_MAREE_KEY)
   wind.py      Météo-France wind per station -> buoy-style tiered dataset wind/<station>/ (spec 0012; one-shot hourly history keyless + forward 6-min live needs METEOFRANCE_API_KEY)
   build.py     CSV -> tiered Parquet/JSON (archive-preferred coalesce)
-  update.py    pull → feed (API on its slots, HTML otherwise/fallback) → archive (daily) → tides → wind → build → upload to the HF bucket (keyless OIDC in CI) + daily reel snapshot; Typer CLI (-c repeatable)
+  update.py    pull → feed (CANDHIS API on its slots) → archive (daily) → tides → wind → build → upload to the HF bucket (keyless OIDC in CI) + daily reel snapshot; Typer CLI (-c repeatable)
   outage.py    Outage + EXIT_OUTAGE=75 — the failures that are provably NOT ours (spec 0020)
   ui.py        shared Rich console + helpers (banner/section/step/detail/summary_table); buoys=cyan, tides=blue; CI-safe plain (spec 0009)
   migrate_layout.py  one-shot bucket layout migration <campaign>/ -> buoys/<campaign>/ (copy | delete --yes; spec 0009)
@@ -88,7 +88,6 @@ pixi run migrate copy                # one-shot: copy bucket <campaign>/ -> buoy
 pixi run migrate delete --yes        # after the deployed site reads buoys/, drop the old root prefixes
 pixi run candhis -c 06403            # lower-level: grow the local reel from the CANDHIS API (gap-aware; prints its request count)
 pixi run candhis --all --since 2021-01-01   # realtime history backfill, 1 request/buoy/year (--archive: the TD archive)
-pixi run scrape                      # lower-level: grow the local reel from the HTML table, the fallback feed (hfdata/06403/raw)
 pixi run ingest                      # lower-level: build tiers from local raw (hfdata/06403/{raw,data})
 pixi run wind --all --seed           # one-time: seed every station's wind history (2010→) to the bucket (spec 0012; keyless)
 pixi run wind --live --all           # refresh the 6-min live wind layer (needs METEOFRANCE_API_KEY)
@@ -98,8 +97,8 @@ pixi run webapp-build                # static build for GitHub Pages
 ```
 
 ⚠️ **`pixi run` does NOT read `.env`.** The tide/wind steps then skip on a missing key and the
-run still reports success (the buoy data refreshes fine), so a whole feature can silently stop
-updating. Export first — `set -a && source .env && set +a && pixi run update …` — and check the
+run still reports success, so a whole feature can silently stop updating (a missing
+`CANDHIS_API_KEY` at least fails the run). Export first — `set -a && source .env && set +a && pixi run update …` — and check the
 run's Tides/Wind tables say `refreshed`, not `no key`.
 
 One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users/hadim/Data/olatu/06403`.
@@ -119,16 +118,19 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
 - **Sea temperature exists only in the realtime feed** — never in the archive. The API serves
   realtime back to **2021-05/06** (backfilled, spec 0022), so history starts there and there is
   none before; handle missing-temp as a first-class UI state, not an empty chart.
-- **CANDHIS comes from its API first, the HTML table second (spec 0022).** `CANDHIS_API_KEY`
-  (ingest-only; GitHub secret + `.env`) has a **daily request quota shared by CI and every local
-  run** (150/day as granted, 500–1000 asked) and no response says what is left. The API is called
-  on `CANDHIS_API_INTERVAL_MIN` slots (repo variable, default 15 = every run); the HTML table
-  fills any other run **and** any run where the API is down or answers 429, and a 429 is
-  remembered for the rest of the UTC day (`quota_spent_on` in `raw/candhis_api.json`) so later
-  runs don't knock again. The scraper is **temporary**: remove its fetch/parse once the API has
-  proven itself (keep `merge_rows`/`validate_rows`, the API path uses them). Both feeds write the same
-  reel through `scrape.merge_rows` — don't give the API its own merge. The live window is
-  **gap-aware** (from the newest reading held), never "the last 48 h". `dateFin` is **exclusive**
+- **CANDHIS comes from its API only (spec 0022; the HTML scraper was removed, §6).**
+  `CANDHIS_API_KEY` (ingest-only; GitHub secret + `.env`) is **required**: there is no keyless
+  feed, and a run without it fails after refreshing tides/wind (`--no-feed` builds without one).
+  The key has a **daily request quota shared by CI and every local run** (150/day as granted,
+  500–1000 asked; ~270/day at `*/15` has never drawn a 429) and no response says what is left.
+  The API is called on `CANDHIS_API_INTERVAL_MIN` slots (repo variable, default 15 = every run;
+  other runs are `feed: off-slot` and keep the reel); a 429 is remembered for the rest of the UTC
+  day (`quota_spent_on` in `raw/candhis_api.json`) so later runs don't knock again, and reads as
+  `feed: quota`, degraded like an outage. Every realtime row goes through `reel.merge_rows`, never
+  a merge of its own. The live window is **gap-aware** (from the newest reading held, never less
+  than 2 days), never "the last 48 h". An upstream silence is still a permanent realtime hole:
+  CANDHIS republishes only ~2–3 days when it recovers (0022 §6.4); TD may bring the waves back
+  later, never the sea temperature. `dateFin` is **exclusive**
   and "no data" is `success: true` + `nbLig 0` (the PDF says otherwise). The current year's
   `*_arch.csv` is refreshed daily from `getCampTD` (state `raw/candhis_api.json`), so it is **no
   longer immutable**: `pull` re-syncs it every run and `upload_archive` pushes it by name — never
@@ -146,7 +148,7 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   (`olatu.campaign`) **and** deep-linked (`?buoy=<id>`, **persisted choice wins on load**; see
   spec 0005). Loaded tiers are tagged with their campaign so a switch never pairs the new buoy
   with the old manifest.
-- **Realtime-only buoys:** a campaign with no `*_arch.csv` builds from the scraped reel alone
+- **Realtime-only buoys:** a campaign with no `*_arch.csv` builds from the realtime reel alone
   (`build.read_archive` returns None, history accumulates forward). Drop archive CSVs into the
   campaign's `raw/` later to backfill (they coalesce) — this is how Cap Ferret went from
   realtime-only to full history from 2010.
@@ -352,13 +354,11 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   **re-alarm interval**, so a day-long outage goes red once per window, not every 30 min.
   ⚠️ **Raise `Outage` only
   where the other side is provably at fault** — a transport fault, a timeout, a 5xx/408/429, an
-  upstream error page. A 4xx, a changed table, a renamed column is OURS and must stay red now:
-  a wrong grace costs six hours of unnoticed breakage. The one borderline call is CANDHIS's
-  **'choose a campaign' page**, which is *theirs* (spec 0020 §5): our half of that request is a
-  constant, so the same URL serving the table at 13:37 and the picker at 14:17 changed on their
-  side. Test a borderline symptom by what the benign reading costs when wrong — here, red six
-  hours later and every six hours after, because the grace delays an alarm and never cancels it.
-  ⚠️ Misclassifying **costs data, not just noise**: a hard `ScrapeError` abandons the campaign
+  upstream error page. A 4xx, a changed payload, a renamed column is OURS and must stay red now:
+  a wrong grace costs six hours of unnoticed breakage. Test a borderline symptom by what the
+  benign reading costs when wrong (spec 0020 §5 walks through one): the grace delays an alarm and
+  never cancels it.
+  ⚠️ Misclassifying **costs data, not just noise**: a hard `reel.FeedError` abandons the campaign
   before tides/wind/build/upload, so it freezes every *other* source too. The gate's clock is the **marker step**
   `Data refreshed`, never the run conclusion — a held run is green by design, so that clock
   would reset itself every 30 min and never fire (keep the step name and `REFRESH_MARKER` in
@@ -374,7 +374,7 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
 Shipped and live at **olatu.io** — foundation → PWA → analytics/legal → wind ingest → wind in the
 webapp → units/settings + wind-UX polish → Current Conditions density → touch charts → mobile layout
 → rain accumulation → instant load from the local tier cache → CI outage tolerance → chart axis on the clock
-→ CANDHIS through its API, with sea-temperature history from 2021 (specs 0001–0022). The full feature-by-feature history is in
+→ CANDHIS through its API only, with sea-temperature history from 2021 (specs 0001–0022). The full feature-by-feature history is in
 **[docs/HISTORY.md](docs/HISTORY.md)**; the spec index + statuses are in [specs/README.md](specs/README.md).
 
 **Open owner TODO:** CI is **keyless again** since 2026-09-04 — the bucket's trusted publisher
@@ -390,9 +390,8 @@ and it needs no code change. ⚠️ **Check the publisher's claims**: it was rec
 Also **revoke the now-unused fine-grained token `olatu-gh-ci`** on huggingface.co/settings/tokens.
 `API_MAREE_KEY`, `METEOFRANCE_API_KEY` and `CANDHIS_API_KEY` are set. **CANDHIS quota:** the owner
 asked Cerema (2026-09-14) to raise the key's 150 requests/day to 500–1000; meanwhile the API is
-called on every `*/15` run anyway, and a spent quota sends the rest of the UTC day to the HTML
-table. If the raise is refused, set the repo variable `CANDHIS_API_INTERVAL_MIN=60`. Once the API
-has proven itself (quota raised, `feed: api` without fallbacks), **remove the HTML scraper**
-(spec 0022 §3.2). **Next per roadmap:** a combined air+sea temperature chart panel + the
+called on every `*/15` run (~270/day, no 429 so far). There is no fallback feed any more: if the
+quota starts to bind (`feed: quota`, a red run six hours into it), set the repo variable
+`CANDHIS_API_INTERVAL_MIN=60`. **Next per roadmap:** a combined air+sea temperature chart panel + the
 map buoy↔station pairing **line** (station markers already shipped, spec 0013 §6), side-by-side buoy
 comparison, per-locale glossary JSON.

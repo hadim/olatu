@@ -1,6 +1,8 @@
 # 0004 — Realtime scraper (the live-growing tail)
 
-- **Status:** Accepted (implemented)
+- **Status:** Accepted (implemented) — **feed superseded (2026-09-16):** CANDHIS is read
+  through its API only and the HTML scraper is removed ([0022 §6](2026-09-14-0022-candhis-api.md));
+  this spec's merge (§4) and validation (§5) live on in `ingest/reel.py`.
 - **Date:** 2026-06-27
 - **Authors:** Hadrien Mary (owner) + implementation
 - **Relates to:** [0001 — Foundation](2026-06-27-0001-foundation.md) (§2.4 append-only
