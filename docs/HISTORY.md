@@ -9,6 +9,27 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-11-08 — The refresh cron, kept alive and off GitHub's release CDN (spec 0020 §6)
+
+Two ways the cron could stop without anything in this repo being wrong:
+
+- **The 60-day rule.** GitHub disables a public repo's scheduled workflows after 60 days with
+  no repository activity, and the refresh never commits: its output goes to the HF bucket. The
+  warning email came 53 days after the last commit (2026-09-16), so it would have stopped around
+  2026-11-15. The new `.github/workflows/keepalive.yml` calls `PUT …/workflows/<wf>/enable` every
+  Monday for `refresh-data.yml` and for itself, with no dummy commits. GitHub doesn't document
+  that this resets the clock, but it is the widely used approach. **If the email comes back about
+  53 days after the last commit, it doesn't**, and the fallback is a dated empty commit from that
+  workflow.
+- **The pixi download.** Five of eight runs went red from 08:45 to 10:30 UTC on a 504 while
+  `setup-pixi` fetched the pixi binary from GitHub's releases. That happens before the refresh,
+  where the outage gate can't see it. The binary is now cached (`actions/cache`, keyed on
+  `pixi.lock`). `setup-pixi` skips its download when `pixi` is already on `PATH`, so only a
+  lockfile change downloads again. `post-cleanup: false` keeps the binary on disk until the cache
+  saves it.
+
+---
+
 ## 2026-09-16 — The CANDHIS HTML scraper is gone (spec 0022 §6)
 
 Two days after the switch, the API had carried every run: 156 runs, 481 requests, `feed: api`

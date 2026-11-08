@@ -137,3 +137,23 @@ the general test for a borderline symptom: ask what it costs when the benign rea
 **Scope.** Only this signature moves. Everything below it in `parse_realtime_table` — the table
 count, the 8 headers, the `TU` check, the date/plausibility guards — is still the format, and
 still fails on the spot.
+
+## 6. Revision 2026-11-08 — the pixi download, cached away rather than graced
+
+**What happened.** From 08:45 to 10:30 UTC, five of eight runs went red on
+`prefix-dev/setup-pixi`'s `Unexpected HTTP response: 504` while it downloaded the pixi binary
+from GitHub's release CDN (its two built-in retries over ~35 s didn't ride it out). That step
+runs before the refresh, so the gate never saw it: §4 counts the toolchain as ours, and red on
+the first occurrence is what §4 promises for it.
+
+**Why it is not reclassified.** The pixi *install* (the solve against `pixi.lock`) still runs in
+that same step, and a lockfile mismatch there is ours. Holding the step under a grace that is
+48 h on this repo would hide that for two days. So the step stays red when it fails, and the
+fix takes the network out of it instead.
+
+**The fix.** `setup-pixi` skips its download when a `pixi` is already on `PATH` and none of
+`pixi-version`/`pixi-url`/`pixi-bin-path` is set. `refresh-data.yml` now caches
+`~/.pixi/bin/pixi` (`actions/cache`, keyed on `pixi.lock`'s hash) and puts it on `PATH` on a hit,
+and sets `post-cleanup: false` so the binary survives until the cache saves it. A run downloads
+pixi only when the lockfile changes, so the binary is whatever pixi was latest at that point,
+and a lock written by a newer pixi brings a newer pixi with it. §4 is unchanged.

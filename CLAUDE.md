@@ -364,6 +364,13 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   would reset itself every 30 min and never fire (keep the step name and `REFRESH_MARKER` in
   sync). A CANDHIS outage now **degrades** a buoy (`feed: unavailable`, last-good reel kept)
   instead of aborting it before tides/wind/build/upload.
+- **Two things keep the refresh cron running that look removable (spec 0020 §6).**
+  `keepalive.yml` re-enables it weekly: the refresh never commits, so GitHub's 60-day
+  no-activity rule would otherwise disable it, and a "will be disabled soon" email means the
+  keepalive is not working. The cached pixi binary in `refresh-data.yml` keeps the run off
+  GitHub's release CDN, whose 504s fail the run before the outage gate can hold it. Setting
+  `pixi-version`/`pixi-url`/`pixi-bin-path` on `setup-pixi`, or dropping `post-cleanup: false`,
+  silently brings that download back.
 - **Chart gap-breaks:** `TimeSeries.gapAware` must estimate the sampling cadence **causally (an EWMA of
   the normal deltas)**, never the global-minimum delta — a **mixed-cadence** source (the current-year
   wind file = a 6-min live tail on an hourly history) otherwise flags every hourly step as a gap and
