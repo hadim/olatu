@@ -83,12 +83,34 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The pixi BINARY, cached so a run doesn't fetch it from GitHub's release CDN every
+      # 15 min: on 2026-11-08 that download answered 504 on and off for ~2 h and turned five
+      # runs red before the refresh even started — a failure the outage gate below never
+      # sees, since it only reads the refresh step's exit code (spec 0020 §6). setup-pixi
+      # skips its download when a `pixi` is already on PATH, so a restored binary means no
+      # network at all; only a cache miss (a new pixi.lock) still downloads. Two ways to
+      # silently undo this: setting `pixi-version`, `pixi-url` or `pixi-bin-path` below
+      # (each forces the download), or dropping `post-cleanup: false` (setup-pixi's post
+      # step would delete the binary before this cache gets to save it).
+      # Keyed on the lockfile: a lock written by a newer pixi gets a newer pixi with it.
+      - name: Cache the pixi binary (no GitHub release download on a hit)
+        id: pixi-bin
+        uses: actions/cache@v6
+        with:
+          path: ~/.pixi/bin/pixi
+          key: pixi-bin-${{ runner.os }}-${{ hashFiles('pixi.lock') }}
+
+      - name: Put the cached pixi on PATH
+        if: steps.pixi-bin.outputs.cache-hit == 'true'
+        run: echo "$HOME/.pixi/bin" >>"$GITHUB_PATH"
+
       # Reproduces the local env exactly from pixi.lock (cached between runs). Install
       # only the lean `data` environment (no Node/ruff) — that's all the refresh needs.
       - uses: prefix-dev/setup-pixi@v0.9.6
         with:
           cache: true
           environments: data
+          post-cleanup: false # keep ~/.pixi/bin/pixi for the cache above; the runner is discarded anyway
 
       # Past years' archives never change, so they're cached rather than re-downloaded each
       # run. The CURRENT year's is different since spec 0022: the API refreshes it daily and

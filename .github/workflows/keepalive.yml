@@ -1,0 +1,41 @@
+name: Keep the refresh cron alive
+
+# GitHub disables a public repository's scheduled workflows after 60 days without repository
+# activity — and the data refresh never commits anything (its output goes to the HF bucket,
+# not to git), so a quiet stretch on the code silently stops olatu.io's data. The first
+# warning came on 2026-11-08, 53 days after the last commit.
+#
+# Re-enabling a workflow through the API preempts that, with no dummy commits (the approach
+# of liskin/gh-workflow-keepalive, inlined here: it is one API call). This does it weekly for
+# the refresh AND for this workflow, which is scheduled too and would otherwise be disabled
+# alongside it.
+#
+# GitHub doesn't document that an enable call on an already-enabled workflow resets the
+# clock. If a "will be disabled soon" email still arrives ~53 days after the last commit,
+# it doesn't, and the fallback is a dated empty commit from here (needs `contents: write`).
+#
+# Kept out of refresh-data.yml on purpose: the refresh job runs third-party packages every
+# 15 min and needs no `actions: write`, and a failure here must never count as a red refresh
+# run (.github/scripts/outage-gate.sh reads that workflow's run history to time outages).
+
+on:
+  schedule:
+    - cron: '23 5 * * 1' # Mondays 05:23 UTC
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Re-enable the scheduled workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for wf in refresh-data.yml keepalive.yml; do
+            gh api --method PUT "repos/$GITHUB_REPOSITORY/actions/workflows/$wf/enable"
+            echo "re-enabled $wf"
+          done
