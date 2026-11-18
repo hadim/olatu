@@ -366,13 +366,23 @@ async function parseTides(meta: TideMeta, file: ArrayBuffer): Promise<Tides | nu
   }
 }
 
-/** Latest non-null value of a variable in a columnar series, with its timestamp (ms). */
-export function lastValue(series: Series, key: string): { value: number; at: number } | null {
+/** Latest non-null value of a variable in a columnar series, with its timestamp (ms).
+ *
+ *  `maxLagMs` bounds how far BEHIND THE SERIES' NEWEST READING that value may be. A source can
+ *  lose one sensor and keep the others: the newest row then carries a wave height and no
+ *  direction, and an unbounded walk-back pairs a fresh height with a direction up to 48 h old
+ *  under one stamp (06402, 2026-11-18: 35 h apart). Past the bound the variable reads as
+ *  missing. The lag is measured from the newest reading, not from the clock, so a source that
+ *  went silent as a whole still shows the last thing it reported. */
+export function lastValue(series: Series, key: string, maxLagMs = Infinity): { value: number; at: number } | null {
   const col = series[key];
-  if (!col) return null;
+  if (!col || !series.t.length) return null;
+  const oldest = series.t[series.t.length - 1] * 1000 - maxLagMs;
   for (let i = col.length - 1; i >= 0; i--) {
+    const at = series.t[i] * 1000;
+    if (at < oldest) return null;
     const v = col[i];
-    if (v != null) return { value: v, at: series.t[i] * 1000 };
+    if (v != null) return { value: v, at };
   }
   return null;
 }

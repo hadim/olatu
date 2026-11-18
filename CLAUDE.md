@@ -281,7 +281,12 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   rides on the zone **body**, never the zone, or the alarm is greyed along with what it warns about;
   and it is `grayscale` **without opacity** — the values are the last thing the buoy reported and
   must stay readable (a `.65` dim put the hero values at ~2.2:1 on the light theme). Staleness is
-  derived from the DATA's timestamp, never from a pipeline flag. **Tile type is sized in `cqw`, never `vw`** — each tile is a `@container`, and the page is capped
+  derived from the DATA's timestamp, never from a pipeline flag. **One hour per zone, the hour of
+  the measurement (spec 0015 §9)**: the badge says "Measured at 08:42", and every value is read
+  through `lastValue(…, FRESH_MAX_MS)` — at most 2 h behind its zone's newest reading, else "—".
+  Never read a card value with an unbounded `lastValue` (a buoy that loses one sensor then shows
+  a 35 h-old direction under a fresh stamp); a value older than its zone's stamp prints its own
+  hour (`LagStamp`), and Olatu's refresh time stays in the popover. **Tile type is sized in `cqw`, never `vw`** — each tile is a `@container`, and the page is capped
   at `max-w-[1100px]` so viewport units stop tracking the box past ~1140px; the `clamp` bounds come
   from the widest string a tile must hold without wrapping (Air's "1 020 hPa"), so re-tune them if
   you change the column count. Values align by **`subgrid`** (tile spans two rows, label

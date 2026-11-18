@@ -19,6 +19,14 @@ forward on a buoy that measured nothing. `build.drop_empty_readings` now drops t
 any tier is written. The raw reel keeps them. The webapp is unchanged: with truthful tiers the
 Mer zone goes dormant and the hatched band starts at the last real point.
 
+**Current Conditions, same day (spec 0015 §9).** A row with a wave height and no direction used
+to pair a fresh height with a direction up to 48 h old. Every value on the card is now read with
+a 2 h bound behind its zone's newest reading (`lastValue(…, FRESH_MAX_MS)`); past it the tile
+reads "—". The zone badge names its hour: "Measured at 08:42 · 19 min ago" (date only when it is
+not today; "No recent reading · last at 00:30 · 9 h ago" when dormant). A value older than its
+zone's stamp prints its own hour under its label, which a healthy source never triggers. Olatu's
+refresh time moved into the badge popover.
+
 ---
 
 ## 2026-11-08 — The refresh cron, kept alive and off GitHub's release CDN (spec 0020 §6)

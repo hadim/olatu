@@ -27,9 +27,13 @@ fine, the buoy was not.
 *Resolution.* `build.drop_empty_readings` drops the rows with no measured value before any tier
 is written (484 rows over 06402's 2009–2026 history, 0 on the other two buoys' latest tier;
 the kept rows are unchanged, value for value). The webapp needed no change: the realm goes
-dormant and the hatched band starts at the last real point. Still open: a row with a wave
-height and no direction makes Current Conditions pair a fresh height with a direction walked
-back up to 48 h (`lastValue` has no age bound). Refs: spec 0002 §7 rule 5.
+dormant and the hatched band starts at the last real point. The second half is a row with a
+wave height and no direction: Current Conditions paired a fresh height with a direction walked
+back up to 48 h. `lastValue` now takes an age bound, measured from the zone's newest reading
+(2 h), and the badge names its hour as the hour of the measurement (spec 0015 §9). Before
+bounding a walk-back, measure how often a healthy source lags at all: here it was ≤ 0.2 % of
+rows, which is what made "one hour per zone, the exception marked" affordable.
+Refs: spec 0002 §7 rule 5, spec 0015 §9.
 
 
 **2026-09-16 — after an outage CANDHIS republishes a couple of days, once; everything older is a permanent realtime hole.**

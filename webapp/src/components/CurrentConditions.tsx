@@ -10,7 +10,7 @@ import type { ReactNode } from 'react';
 import { useLocale, type Locale, type MessageKey } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
 import { lastValue, latestTimestamp, type Manifest, type Series, type WindData } from '../lib/data';
-import { compass, dirColor, fmtNumber, fmtClock, freshness, relativeAgo, type Freshness } from '../lib/format';
+import { compass, dirColor, fmtNumber, fmtStamp, fmtTimeOfDay, freshness, relativeAgo, FRESH_MAX_MS, type Freshness } from '../lib/format';
 import { shoreRelation, shoreColorVar } from '../lib/wind';
 import { stationInfo } from '../lib/stations';
 import { useUnits, formatKeyValue, keySuffix } from '../lib/units';
@@ -108,9 +108,20 @@ const VALUE_SIZE_HERO = 'text-[clamp(2.4rem,30cqw,3.6rem)]';
 const UNIT_SIZE = 'text-[clamp(0.85rem,9cqw,1.15rem)]';
 const UNIT_SIZE_HERO = 'text-[clamp(1rem,11cqw,1.5rem)]';
 
+/** The hour of ONE value, printed under its label only when it is older than its zone's stamp.
+ *  The zone badge is the hour of every figure in the zone (it is, on a healthy source: every
+ *  variable rides the newest row), so a tile carries its own hour as the exception, never the
+ *  rule — a buoy that sent a wave height at 08:00 and its last direction at 07:30.
+ *  A line of its own, in words: inline ("· 07:30") it squeezed the dial caption onto three lines
+ *  and, on a phone, wrapped to a line that began with the separator. */
+function LagStamp({ at, className = '' }: { at?: string; className?: string }) {
+  if (!at) return null;
+  return <span className={`block font-mono normal-case tracking-normal text-muted ${className}`}>{`${m.cc_measured_at()} ${at}`.toLowerCase()}</span>;
+}
+
 function Metric({
-  label, value, unit, defKey, accent, icon, hero = false, title,
-}: { label: string; value: string; unit?: string; defKey: MessageKey; accent?: string; icon?: ReactNode; hero?: boolean; title?: string }) {
+  label, value, unit, defKey, accent, icon, hero = false, title, at,
+}: { label: string; value: string; unit?: string; defKey: MessageKey; accent?: string; icon?: ReactNode; hero?: boolean; title?: string; at?: string }) {
   // Alignment is inherited from the grid (TILE_COL): left-aligned from 720px up, centred below —
   // where the zone stacks under a centred dial and a left column would read as mis-set (0017 §3).
   return (
@@ -122,13 +133,15 @@ function Metric({
         <span className="mr-1.5 inline-block align-[-0.2em]">{icon}</span>
         {label}
         <InfoPopover title={title ?? label} body={m[defKey]()} />
+        <LagStamp at={at} className="mt-[0.15rem] text-[0.68rem]" />
       </span>
       <span
         className={`self-end font-display leading-none [font-feature-settings:'tnum'] ${hero ? `${VALUE_SIZE_HERO} font-bold tracking-[-0.02em]` : `${VALUE_SIZE} font-medium`}`}
         style={accent ? { color: accent } : undefined}
       >
         {value}
-        {unit && <span className={`text-muted ${hero ? `ml-[0.15rem] ${UNIT_SIZE_HERO}` : UNIT_SIZE}`}> {unit}</span>}
+        {/* No unit beside a missing value: "— °C" reads as a measurement of nothing. */}
+        {unit && value !== '—' && <span className={`text-muted ${hero ? `ml-[0.15rem] ${UNIT_SIZE_HERO}` : UNIT_SIZE}`}> {unit}</span>}
       </span>
     </div>
   );
@@ -197,7 +210,7 @@ function ZoneHeader({ realm, tag, badge, off = false, children }: { realm: Realm
 /** The single caption under a dial: the direction label + its definition, then the realm's
  *  secondary direction fact (swell spread / gust direction). It no longer repeats the cardinal
  *  and degrees the dial already prints — that redundancy was a whole extra line (spec 0015). */
-function DialCaption({ label, defKey, icon, children }: { label: string; defKey: MessageKey; icon: ReactNode; children?: ReactNode }) {
+function DialCaption({ label, defKey, icon, at, children }: { label: string; defKey: MessageKey; icon: ReactNode; at?: string; children?: ReactNode }) {
   return (
     <div className="flex flex-col items-center gap-[0.1rem] text-center leading-tight">
       <span className="inline-flex items-baseline text-[0.78rem] text-muted">
@@ -205,6 +218,7 @@ function DialCaption({ label, defKey, icon, children }: { label: string; defKey:
         {label}
         <InfoPopover title={label} body={m[defKey]()} />
       </span>
+      <LagStamp at={at} className="text-[0.76rem]" />
       {children}
     </div>
   );
@@ -229,17 +243,27 @@ const STATUS_DOT: Record<Freshness, string> = {
   stale: 'bg-faint',
 };
 
-function StalenessBadge({ realm, fresh, stampMs, tz, now }: { realm: Realm; fresh: Freshness; stampMs: number | null; tz: string; now: number }) {
+/** One stamp per zone, and it is the hour of the MEASUREMENT — named as such, because "8 minutes
+ *  ago · 08:42" did not say of what, and its popover called it "updated". Three clocks exist and
+ *  only this one belongs on the card: when the instrument measured. When a single value is older
+ *  than that, its tile says so (`LagStamp`); when Olatu last rebuilt its data is a diagnostic
+ *  ("is the buoy silent, or is the site?") and lives in the popover. The hour leads and the age
+ *  follows: the hour is the fact, the age is what the dot already says. */
+function StalenessBadge({ realm, fresh, stampMs, refreshedMs, tz, now }: { realm: Realm; fresh: Freshness; stampMs: number | null; refreshedMs: number | null; tz: string; now: number }) {
   const { locale } = useLocale();
   const { units } = useUnits();
-  const ago = stampMs != null ? relativeAgo(stampMs, locale, now) : null;
-  const clock = stampMs != null ? fmtClock(stampMs, locale, tz, units.clock) : null;
+  // Short form ("il y a 11 min"): with the hour now named, the long one no longer fits a phone on one line.
+  const ago = stampMs != null ? relativeAgo(stampMs, locale, now, 'short') : null;
+  const stamp = stampMs != null ? fmtStamp(stampMs, now, locale, tz, units.clock) : null;
+  const refreshed = refreshedMs != null ? fmtStamp(refreshedMs, now, locale, tz, units.clock) : null;
   // The help text is source-agnostic; the reporting cadence that explains the age is what
   // differs between the realms (buoy every 30 min vs station every 6 min behind our refresh).
   const help = `${m[`cc_${fresh}_help` as MessageKey]()} ${m[`cc_cadence_${realm}` as MessageKey]()}`;
-  const body = stampMs != null ? `${help} · ${m.cc_updated()} ${clock}` : help;
+  const body = refreshed ? `${help} ${m.cc_refreshed_at()} ${refreshed.text}.` : help;
   const realmLabel = realm === 'sea' ? m.cc_realm_sea() : m.cc_realm_air();
   const off = fresh === 'stale';
+  // "Measured at 08:42" while it reports; "last at 00:30" behind the words that say it stopped.
+  const lead = stamp && (off ? (stamp.today ? m.cc_last_at() : m.cc_last_on()) : stamp.today ? m.cc_measured_at() : m.cc_measured_on());
   return (
     <InfoPopover title={`${realmLabel} · ${m[`cc_${fresh}` as MessageKey]()}`} body={body} align="end" triggerClassName={`${STATUS_BADGE} ${STATUS_TONE[fresh]}`} triggerLabel={`${m.cc_freshness()} · ${realmLabel} · ${m[`cc_${fresh}` as MessageKey]()}`}>
       {/* A dormant zone spells the state out in words: a timestamp alone is something you have to
@@ -248,8 +272,13 @@ function StalenessBadge({ realm, fresh, stampMs, tz, now }: { realm: Realm; fres
           is the point. */}
       {off ? <AlertIcon size={13} className="shrink-0" /> : <span className={`h-[9px] w-[9px] rounded-full ${STATUS_DOT[fresh]}`} aria-hidden="true" />}
       {off && <span className="font-semibold">{m.cc_stale()}</span>}
-      {ago && <span className="whitespace-nowrap">{ago}</span>}
-      {clock && <span className={`whitespace-nowrap ${off ? 'opacity-75' : 'text-faint'}`}>· {clock}</span>}
+      {stamp && (
+        <span className="whitespace-nowrap">
+          {off && '· '}
+          {lead} <span className={off ? '' : 'text-fg'}>{stamp.text}</span>
+        </span>
+      )}
+      {ago && <span className={`whitespace-nowrap ${off ? 'opacity-75' : 'text-faint'}`}>· {ago}</span>}
     </InfoPopover>
   );
 }
@@ -322,23 +351,30 @@ export default function CurrentConditions({
   const now = useNow(30_000);
 
   // Sea (buoy) realm
-  const hs = lastValue(latest, 'significant_wave_height_m');
-  const hmax = lastValue(latest, 'max_wave_height_m');
-  const period = lastValue(latest, 'significant_period_s');
-  const dir = lastValue(latest, 'peak_direction_deg');
-  const spread = lastValue(latest, 'peak_directional_spread_deg');
-  const seaTemp = lastValue(latest, 'sea_temperature_c');
+  // Every value on the card is read through `sea` / `air`, never a bare `lastValue`: a value is
+  // shown only while it belongs to its realm's current reading, i.e. measured at most
+  // FRESH_MAX_MS before the realm's stamp. A buoy that keeps its wave height and loses its
+  // direction otherwise shows a 35 h-old direction (and a shore verdict built on it) under a
+  // fresh stamp. Healthy sources never get near the bound: every variable rides the newest row.
+  const sea = (key: string) => lastValue(latest, key, FRESH_MAX_MS);
+  const hs = sea('significant_wave_height_m');
+  const hmax = sea('max_wave_height_m');
+  const period = sea('significant_period_s');
+  const dir = sea('peak_direction_deg');
+  const spread = sea('peak_directional_spread_deg');
+  const seaTemp = sea('sea_temperature_c');
 
   // Air (station) realm
   const wl = wind?.latest;
-  const windSpeed = wl ? lastValue(wl, 'wind_speed_ms') : null;
-  const windDir = wl ? lastValue(wl, 'wind_direction_deg') : null;
-  const gust = wl ? lastValue(wl, 'wind_gust_ms') : null;
-  const gustDir = wl ? lastValue(wl, 'wind_gust_direction_deg') : null;
-  const airTemp = wl ? lastValue(wl, 'air_temperature_c') : null;
-  const rain = wl ? lastValue(wl, 'precipitation_mm') : null;
-  const humidity = wl ? lastValue(wl, 'humidity_pct') : null;
-  const pressure = wl ? lastValue(wl, 'pressure_msl_hpa') : null;
+  const air = (key: string) => (wl ? lastValue(wl, key, FRESH_MAX_MS) : null);
+  const windSpeed = air('wind_speed_ms');
+  const windDir = air('wind_direction_deg');
+  const gust = air('wind_gust_ms');
+  const gustDir = air('wind_gust_direction_deg');
+  const airTemp = air('air_temperature_c');
+  const rain = air('precipitation_mm');
+  const humidity = air('humidity_pct');
+  const pressure = air('pressure_msl_hpa');
 
   const num = (v: { value: number } | null, digits = 1) => (v ? fmtNumber(v.value, locale, digits) : '—');
   // Units-aware value for the convertible measures (speed · temperature · pressure) — spec 0014.
@@ -351,6 +387,14 @@ export default function CurrentConditions({
   const seaFresh = seaStampMs != null ? freshness(now - seaStampMs) : 'stale';
   const airStampMs = wl ? latestTimestamp(wl) : null;
   const airFresh = airStampMs != null ? freshness(now - airStampMs) : 'stale';
+  // A value older than its zone's stamp names its own hour on its tile (see `LagStamp`).
+  const lagOf = (v: { at: number } | null, stampMs: number | null) =>
+    v && stampMs != null && v.at < stampMs ? fmtTimeOfDay(v.at, locale, tz, units.clock) : undefined;
+  const seaLag = (v: { at: number } | null) => lagOf(v, seaStampMs);
+  const airLag = (v: { at: number } | null) => lagOf(v, airStampMs);
+  // When Olatu last rebuilt each source's tiers — the popover's diagnostic, never the stamp.
+  const seaRefreshedMs = Date.parse(manifest.generated_at) || null;
+  const airRefreshedMs = wind ? Date.parse(wind.manifest.generated_at) || null : null;
   // "This source has stopped reporting" — the state the whole zone dresses for (spec 0015 §8).
   const seaOff = seaFresh === 'stale';
   const airOff = airFresh === 'stale';
@@ -383,14 +427,14 @@ export default function CurrentConditions({
 
       {/* ---- MER (buoy) zone ---- */}
       <div className={`rounded-xl border p-2.5 sm:p-3.5 ${seaOff ? ZONE_OFF : ZONE.sea}`}>
-        <ZoneHeader realm="sea" tag={m.cc_realm_sea()} off={seaOff} badge={<StalenessBadge realm="sea" fresh={seaFresh} stampMs={seaStampMs} tz={tz} now={now} />}>
+        <ZoneHeader realm="sea" tag={m.cc_realm_sea()} off={seaOff} badge={<StalenessBadge realm="sea" fresh={seaFresh} stampMs={seaStampMs} refreshedMs={seaRefreshedMs} tz={tz} now={now} />}>
           <BuoyMark size={15} className={seaOff ? 'text-faint' : 'text-accent'} />
           {m.cc_buoy()} {manifest.buoy.campaign_id} · {manifest.buoy.network}
         </ZoneHeader>
         <div className={`${ZONE_GRID} ${seaOff ? ZONE_OFF_BODY : ''}`}>
           <div className="flex flex-col items-center gap-1.5">
             <CompassDial deg={dir?.value ?? null} spread={spread?.value ?? null} locale={locale} />
-            <DialCaption label={m.cc_direction()} defKey="def_direction" icon={<DirectionIcon className={LABEL_ICON} style={{ color: 'var(--c-dir)' }} />}>
+            <DialCaption label={m.cc_direction()} defKey="def_direction" at={seaLag(dir)} icon={<DirectionIcon className={LABEL_ICON} style={{ color: 'var(--c-dir)' }} />}>
               {spread && (
                 <span className="inline-flex items-center whitespace-nowrap font-mono text-[0.76rem] text-faint">
                   {m.cc_spread()} ±{Math.round(spread.value)}°
@@ -400,10 +444,10 @@ export default function CurrentConditions({
             </DialCaption>
           </div>
           <div className={SEA_TILES}>
-            <Metric label={m.cc_wave_height()} value={num(hs)} unit="m" defKey="def_wave_height" accent="var(--accent)" hero icon={<WaveHeightIcon className={TILE_ICON} style={{ color: 'var(--c-height)' }} />} />
-            <Metric label={m.cc_max_wave()} value={num(hmax)} unit="m" defKey="def_max_wave" icon={<MaxWaveIcon className={TILE_ICON} style={{ color: 'var(--c-max)' }} />} />
-            <Metric label={m.cc_period()} value={num(period)} unit="s" defKey="def_period" icon={<PeriodIcon className={TILE_ICON} style={{ color: 'var(--c-period)' }} />} />
-            <Metric label={m.cc_sea_temp_short()} title={m.cc_sea_temp()} value={fmtU(seaTemp, 'sea_temperature_c')} unit={keySuffix('sea_temperature_c', units) ?? undefined} defKey="def_sea_temp" accent="var(--accent)" icon={<TempIcon className={TILE_ICON} style={{ color: 'var(--accent)' }} />} />
+            <Metric label={m.cc_wave_height()} value={num(hs)} at={seaLag(hs)} unit="m" defKey="def_wave_height" accent="var(--accent)" hero icon={<WaveHeightIcon className={TILE_ICON} style={{ color: 'var(--c-height)' }} />} />
+            <Metric label={m.cc_max_wave()} value={num(hmax)} at={seaLag(hmax)} unit="m" defKey="def_max_wave" icon={<MaxWaveIcon className={TILE_ICON} style={{ color: 'var(--c-max)' }} />} />
+            <Metric label={m.cc_period()} value={num(period)} at={seaLag(period)} unit="s" defKey="def_period" icon={<PeriodIcon className={TILE_ICON} style={{ color: 'var(--c-period)' }} />} />
+            <Metric label={m.cc_sea_temp_short()} title={m.cc_sea_temp()} value={fmtU(seaTemp, 'sea_temperature_c')} at={seaLag(seaTemp)} unit={keySuffix('sea_temperature_c', units) ?? undefined} defKey="def_sea_temp" accent="var(--accent)" icon={<TempIcon className={TILE_ICON} style={{ color: 'var(--accent)' }} />} />
           </div>
         </div>
       </div>
@@ -411,14 +455,14 @@ export default function CurrentConditions({
       {/* ---- AIR (station) zone ---- */}
       {wind ? (
         <div className={`rounded-xl border p-2.5 sm:p-3.5 ${airOff ? ZONE_OFF : ZONE.air}`}>
-          <ZoneHeader realm="air" tag={m.cc_realm_air()} off={airOff} badge={<StalenessBadge realm="air" fresh={airFresh} stampMs={airStampMs} tz={tz} now={now} />}>
+          <ZoneHeader realm="air" tag={m.cc_realm_air()} off={airOff} badge={<StalenessBadge realm="air" fresh={airFresh} stampMs={airStampMs} refreshedMs={airRefreshedMs} tz={tz} now={now} />}>
             <StationIcon size={15} style={{ color: airOff ? 'var(--text-3)' : 'var(--c-wind)' }} />
             {m.cc_station()} {wind.manifest.station.label} <span className="text-faint">· {fmtNumber(wind.distanceKm, locale, 1)} km{kindLabel ? ` · ${kindLabel}` : ''} · {wind.manifest.source.provider}</span>
           </ZoneHeader>
           <div className={`${ZONE_GRID} ${airOff ? ZONE_OFF_BODY : ''}`}>
             <div className="flex flex-col items-center gap-1.5">
               <CompassDial deg={windDir?.value ?? null} spread={null} second={gustDir?.value ?? null} locale={locale} />
-              <DialCaption label={m.cc_wind_dir()} defKey="def_wind" icon={<WindIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)' }} />}>
+              <DialCaption label={m.cc_wind_dir()} defKey="def_wind" at={airLag(windDir)} icon={<WindIcon className={LABEL_ICON} style={{ color: 'var(--c-wind)' }} />}>
                 {gustDir && (
                   <span className="whitespace-nowrap font-mono text-[0.76rem] text-faint">
                     {m.cc_gust().toLowerCase()} {compass(gustDir.value, locale)} · {Math.round(gustDir.value)}°
@@ -427,12 +471,12 @@ export default function CurrentConditions({
               </DialCaption>
             </div>
             <div className={AIR_TILES}>
-              <Metric label={m.cc_wind()} value={fmtU(windSpeed, 'wind_speed_ms')} unit={keySuffix('wind_speed_ms', units) ?? undefined} defKey="def_wind" accent="var(--c-wind)" icon={<WindIcon className={TILE_ICON} style={{ color: 'var(--c-wind)' }} />} />
-              <Metric label={m.cc_gust()} value={fmtU(gust, 'wind_gust_ms')} unit={keySuffix('wind_gust_ms', units) ?? undefined} defKey="def_gust" icon={<WindIcon className={TILE_ICON} style={{ color: 'var(--c-wind)', opacity: 0.7 }} />} />
-              <Metric label={m.cc_air_temp_short()} title={m.cc_air_temp()} value={fmtU(airTemp, 'air_temperature_c')} unit={keySuffix('air_temperature_c', units) ?? undefined} defKey="def_air_temp" accent="var(--c-airtemp)" icon={<TempIcon className={TILE_ICON} style={{ color: 'var(--c-airtemp)' }} />} />
-              <Metric label={m.cc_rain()} value={num(rain)} unit="mm/h" defKey="def_rain" icon={<RainIcon className={TILE_ICON} style={{ color: 'var(--c-period)' }} />} />
-              <Metric label={m.cc_humidity()} value={humidity ? fmtNumber(humidity.value, locale, 0) : '—'} unit={humidity ? '%' : undefined} defKey="def_humidity" icon={<HumidityIcon className={TILE_ICON} style={{ color: 'var(--c-tide)' }} />} />
-              <Metric label={m.cc_pressure()} value={fmtU(pressure, 'pressure_msl_hpa')} unit={pressure ? keySuffix('pressure_msl_hpa', units) ?? undefined : undefined} defKey="def_pressure" icon={<PressureIcon className={TILE_ICON} style={{ color: 'var(--c-dir)' }} />} />
+              <Metric label={m.cc_wind()} value={fmtU(windSpeed, 'wind_speed_ms')} at={airLag(windSpeed)} unit={keySuffix('wind_speed_ms', units) ?? undefined} defKey="def_wind" accent="var(--c-wind)" icon={<WindIcon className={TILE_ICON} style={{ color: 'var(--c-wind)' }} />} />
+              <Metric label={m.cc_gust()} value={fmtU(gust, 'wind_gust_ms')} at={airLag(gust)} unit={keySuffix('wind_gust_ms', units) ?? undefined} defKey="def_gust" icon={<WindIcon className={TILE_ICON} style={{ color: 'var(--c-wind)', opacity: 0.7 }} />} />
+              <Metric label={m.cc_air_temp_short()} title={m.cc_air_temp()} value={fmtU(airTemp, 'air_temperature_c')} at={airLag(airTemp)} unit={keySuffix('air_temperature_c', units) ?? undefined} defKey="def_air_temp" accent="var(--c-airtemp)" icon={<TempIcon className={TILE_ICON} style={{ color: 'var(--c-airtemp)' }} />} />
+              <Metric label={m.cc_rain()} value={num(rain)} at={airLag(rain)} unit="mm/h" defKey="def_rain" icon={<RainIcon className={TILE_ICON} style={{ color: 'var(--c-period)' }} />} />
+              <Metric label={m.cc_humidity()} value={humidity ? fmtNumber(humidity.value, locale, 0) : '—'} at={airLag(humidity)} unit={humidity ? '%' : undefined} defKey="def_humidity" icon={<HumidityIcon className={TILE_ICON} style={{ color: 'var(--c-tide)' }} />} />
+              <Metric label={m.cc_pressure()} value={fmtU(pressure, 'pressure_msl_hpa')} at={airLag(pressure)} unit={pressure ? keySuffix('pressure_msl_hpa', units) ?? undefined : undefined} defKey="def_pressure" icon={<PressureIcon className={TILE_ICON} style={{ color: 'var(--c-dir)' }} />} />
             </div>
           </div>
         </div>

@@ -40,6 +40,15 @@ export function fmtClock(ms: number, locale: Locale, timeZone: string, clock: Cl
   }).format(new Date(ms));
 }
 
+/** "When was this measured", as short as it can honestly be: the time of day alone while that
+ *  instant is TODAY in `timeZone`, day + month + time once it is not. `today` lets the caller
+ *  pick the matching phrase ("measured at 08:00" vs "measured on 16 Nov, 13:30"). */
+export function fmtStamp(ms: number, now: number, locale: Locale, timeZone: string, clock: ClockPref = 'auto'): { text: string; today: boolean } {
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
+  const today = day.format(new Date(ms)) === day.format(new Date(now));
+  return { text: today ? fmtTimeOfDay(ms, locale, timeZone, clock) : fmtClock(ms, locale, timeZone, clock), today };
+}
+
 /** Time-of-day only (HH:MM) in the buoy's zone — for tide extrema labels. */
 export function fmtTimeOfDay(ms: number, locale: Locale, timeZone: string, clock: ClockPref = 'auto'): string {
   return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', timeZone, ...hourOpts(clock) }).format(new Date(ms));
@@ -181,17 +190,21 @@ export function dirColor(deg: number): string {
 
 export type Freshness = 'fresh' | 'aging' | 'stale';
 
+/** The fresh→aging step. Also how far behind its realm's newest reading a Current-Conditions
+ *  value may be before it reads as missing (`lastValue`), and the charts' `SILENT_AFTER`. */
+export const FRESH_MAX_MS = 2 * 3_600_000;
+
 export function freshness(ageMs: number): Freshness {
   const hours = ageMs / 3_600_000;
-  if (hours <= 2) return 'fresh';
+  if (ageMs <= FRESH_MAX_MS) return 'fresh';
   if (hours <= 6) return 'aging';
   return 'stale';
 }
 
 /** Human "N hours ago" / "N days ago" using Intl.RelativeTimeFormat. */
-export function relativeAgo(ms: number, locale: Locale, now: number): string {
+export function relativeAgo(ms: number, locale: Locale, now: number, style: 'long' | 'short' = 'long'): string {
   const diffSec = Math.round((ms - now) / 1000);
-  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style });
   const abs = Math.abs(diffSec);
   if (abs < 3600) return rtf.format(Math.round(diffSec / 60), 'minute');
   if (abs < 86400) return rtf.format(Math.round(diffSec / 3600), 'hour');

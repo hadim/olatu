@@ -230,3 +230,53 @@ so the visual and the words explain each other.
   screen reader, so the newly-added word would otherwise have been visible only to sighted readers.
 - Nothing about this is CANDHIS-specific. The Air zone gets the identical treatment when
   Météo-France is the one that goes quiet.
+
+---
+
+## 9. Revision (2026-11-18) — one hour per zone, and it is the hour of the measurement
+
+### 9.1 Why
+
+Anglet (06402) lost its sensor and kept its transmitter. Two things went wrong on the card, and
+only the first was an ingest bug (rows with no value at all — spec 0002 §7 rule 5):
+
+- **The values under one stamp were not from one instant.** `lastValue` walked back through the
+  whole 48 h tier, so a row with a wave height and no direction showed a fresh height beside a
+  direction and a sea temperature 35 h older, and built the offshore/onshore verdict on that
+  direction.
+- **The stamp did not say what it was the hour of.** The badge read "8 minutes ago · 18 Nov,
+  08:42" and its popover "Updated 08:42". Three clocks exist — when the instrument measured, when
+  one particular value was measured, when Olatu last rebuilt its data — and the card named none.
+
+Measured before deciding (30 days of buoys, 48 h of stations): on a healthy source every variable
+rides the newest row — ≥ 99.8 % of rows on 06403 and 03302 (worst lag 30 min), 100 % on the three
+stations. Only the faulty buoy lags (5 % of rows, with a tail of 35 h). So "one zone = one
+instant" is true in practice, and the design can state it and mark the exception.
+
+### 9.2 Decision
+
+- **A value belongs to its zone's reading or it is missing.** `lastValue(series, key, maxLagMs)`
+  takes a bound, and every read on the card passes `FRESH_MAX_MS` (2 h, `freshness()`'s own
+  fresh→aging step). Past it the tile shows "—" (no unit beside it), the dial is empty and the
+  verdict has no swell to speak for. The lag is measured from the **zone's newest reading, not
+  from the clock**, so a dormant realm still shows the last thing it reported (§8).
+- **The badge is the hour of the measurement, and says so**: "Measured at 08:42 · 19 min ago".
+  The hour leads (it is the fact), the age follows. The date appears only when the reading is not
+  from today in the buoy's zone. Dormant: "No recent reading · last at 00:30 · 9 h ago".
+- **A tile carries its own hour only when it differs from the zone's** (`LagStamp`): a line under
+  its label, in words ("measured at 07:30"). On a healthy source it never shows, so the normal
+  card gained nothing to read.
+- **Olatu's own refresh time is a diagnostic** ("is the buoy silent, or the site?") and lives in
+  the badge popover (`manifest.generated_at`), never on the card.
+
+Identical on Mer and Air.
+
+### 9.3 Rejected
+
+- **Strict** (only the newest row; anything absent from it is "—"): no ambiguity at all, but a
+  direction 30 min old would blink out 5 % of the time on the buoy that needs the most reading.
+- **Two hours in the badge** (measured · refreshed): the badge already fills a phone's width, and
+  the second hour serves only a diagnosis.
+- **The lag hour inline beside the label** ("· 07:30"): it squeezed the dial caption onto three
+  lines and, on a phone, wrapped to a line that began with the separator.
+
