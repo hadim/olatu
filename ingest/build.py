@@ -177,7 +177,28 @@ def assemble(
         .agg([pl.col(c).drop_nulls().first().alias(c) for c in value_cols])
         .sort(DT)
     )
+    merged = drop_empty_readings(merged)
     return merged.select([c for c in CANONICAL_ORDER if c in merged.columns])
+
+
+def drop_empty_readings(df: pl.DataFrame) -> pl.DataFrame:
+    """Drop the timestamps that carry no measured value at all.
+
+    A buoy whose sensor is down keeps transmitting: CANDHIS then serves a row whose every
+    value is the 999.999 sentinel, and once that is nulled the row is a timestamp and
+    nothing else. Left in, it passes for the newest *reading* -- `span.end` (the licence's
+    "last updated" date), the Current Conditions stamp and the charts' silence band all
+    read the last row -- so a buoy that measured nothing for hours looked live (06402,
+    2026-11-18: 52 of the 69 rows in latest.json). A reading is a timestamp WITH a value;
+    the raw reel keeps the sentinel rows, like it keeps 999.999 itself.
+    """
+    measured = [c for c in df.columns if c not in (DT, "campaign_id")]
+    if not measured:
+        return df
+    kept = df.filter(pl.any_horizontal(pl.col(measured).is_not_null()))
+    if kept.height < df.height:
+        ui.detail(f"dropped {df.height - kept.height} rows with no measured value")
+    return kept
 
 
 # --------------------------------------------------------------------- downsample
@@ -258,6 +279,11 @@ def build(src: Path, out: Path, campaign: str = CAMPAIGN_ID) -> None:
     )
 
     merged = assemble(archive, realtime, campaign)
+    if merged.is_empty():
+        raise RuntimeError(
+            f"{campaign}: no row carries a measured value (every reading is the "
+            "999.999 sentinel) — nothing to build"
+        )
     ui.detail(
         f"merged rows={merged.height}  span={merged[DT].min()} → {merged[DT].max()}"
     )

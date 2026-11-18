@@ -272,6 +272,14 @@ Doubles as the wave-height color legend (see [0001 §7.1](2026-06-27-0001-founda
    landing on empty stretches show a "no data for this period" state.
 4. **Temperature coverage** is published per-variable in `manifest.json` so the
    frontend decides panel visibility from metadata, not by probing nulls.
+5. **A reading is a timestamp with at least one measured value** (added 2026-11-18).
+   A buoy whose sensor is down keeps transmitting, and CANDHIS serves the row with
+   `999.999` in every column. After rule 1 that row is a bare timestamp, so the build
+   drops it (`build.drop_empty_readings`) before any tier is written. Everything that
+   means "the newest reading" reads the last row — `manifest.span.end` (the licence's
+   "last updated" date), the Current Conditions stamp and freshness, the charts'
+   silence band — and none of them may count a timestamp that measured nothing. The
+   raw reel keeps those rows, as it keeps the sentinel itself.
 
 ---
 

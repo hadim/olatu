@@ -8,6 +8,30 @@ spec and link it here.
 Format per entry: **date — title** · what we found · why it matters · resolution · refs.
 
 
+**2026-11-18 — a buoy with a dead sensor keeps sending rows: "the last row" was not "the last reading".**
+*What we found.* Anglet (06402) showed Current Conditions stamped "18 Nov, 08:00" with a live
+badge, and no point anywhere near that hour on the charts. The realtime feed was arriving on
+time, but 52 of the 69 rows in `latest.json` had `999.9999` in **every** column: the buoy
+transmits, its sensor measures nothing. The sentinel was nulled as it should be, and the row
+stayed, as a timestamp with no value. The newest real wave height was 8.5 h old, the newest
+direction and sea temperature 43 h old. (The 2026-09-14 entry says the API leaves out rows empty
+in every column. That holds for *absent* values, not for sentinel-filled ones.)
+
+*Why it matters.* Three things read "the last row" and all three were wrong at once:
+`manifest.span.end` (the licence's "last updated" date, CLAUDE.md attribution rule), the Current
+Conditions stamp and its freshness (`latestTimestamp`), and the charts' silence band (`seaTN`).
+A buoy that had measured nothing for hours was drawn exactly like a live one, which is the
+failure spec 0021 was written to end. `feed: ok` in the run summary was also true: the feed was
+fine, the buoy was not.
+
+*Resolution.* `build.drop_empty_readings` drops the rows with no measured value before any tier
+is written (484 rows over 06402's 2009–2026 history, 0 on the other two buoys' latest tier;
+the kept rows are unchanged, value for value). The webapp needed no change: the realm goes
+dormant and the hatched band starts at the last real point. Still open: a row with a wave
+height and no direction makes Current Conditions pair a fresh height with a direction walked
+back up to 48 h (`lastValue` has no age bound). Refs: spec 0002 §7 rule 5.
+
+
 **2026-09-16 — after an outage CANDHIS republishes a couple of days, once; everything older is a permanent realtime hole.**
 *What we found.* All three buoys were silent upstream from 2026-09-08 12:00 UTC. The feed came back
 between the 06:00 and 06:38 UTC runs on 2026-09-16, and the first `getCampTR` returned the recovery

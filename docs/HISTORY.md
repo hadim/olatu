@@ -9,6 +9,18 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-11-18 — A row with no measured value is not a reading (spec 0002 §7)
+
+Anglet (06402) had a dead sensor and a live transmitter: CANDHIS served its rows on time with
+`999.9999` in every column. Nulled, they stayed in the tiers as bare timestamps, so the newest
+*row* (08:00) passed for the newest *reading* (00:30): Current Conditions wore a live badge and
+that stamp over values 8 to 43 hours old, the charts drew no silence band, and `span.end` moved
+forward on a buoy that measured nothing. `build.drop_empty_readings` now drops those rows before
+any tier is written. The raw reel keeps them. The webapp is unchanged: with truthful tiers the
+Mer zone goes dormant and the hatched band starts at the last real point.
+
+---
+
 ## 2026-11-08 — The refresh cron, kept alive and off GitHub's release CDN (spec 0020 §6)
 
 Two ways the cron could stop without anything in this repo being wrong:
