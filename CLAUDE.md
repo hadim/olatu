@@ -52,7 +52,7 @@ ingest/        Python (polars). NOT an installable package. All steps take --cam
 pixi.toml      Python env + frontend tasks (no pyproject; no Python library)
 webapp/        the frontend (reads data tiers from the HF bucket at runtime)
 specs/         decisions        docs/  HISTORY.md + README assets (logo, screenshot)
-.github/workflows/  deploy.yml (Pages, on code changes) + refresh-data.yml (data, */15)
+.github/workflows/  ci.yml (PR checks) + deploy.yml (Pages, on merge) + refresh-data.yml (data, */15)
 .github/scripts/    outage-gate.sh — holds a red run through a short external outage (spec 0020)
 ```
 
@@ -105,8 +105,18 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
 
 ## Conventions & gotchas
 
-- **Conventional Commits, always**: `type(scope): description` (feat/fix/docs/refactor/chore/ci/
-  build/perf/test; scope e.g. `webapp`, `ingest`, `ci`).
+- **Every change lands through a pull request, squash-merged** (since 2026-11-20). Never commit
+  or push to `main`: a ruleset refuses it, for everyone — the owner lifts it in the repository
+  settings in an emergency. Branch (`feat/…`, `fix/…`, `docs/…`, `ci/…`), then open a PR whose
+  **title is the Conventional Commit**: `type(scope): description` (feat/fix/docs/refactor/chore/
+  ci/build/perf/test; scope e.g. `webapp`, `ingest`, `ci`). The squash makes that title the one
+  commit `main` gets and the PR body its message, so write both for the history, not for the
+  review. `ci.yml` checks the title, typechecks + builds the webapp and runs ruff; all three are
+  **required** — never path-filter them or rename a job without updating the ruleset, a required
+  check that does not report blocks the PR forever. Merging a PR that touches `webapp/**` deploys
+  to olatu.io on the spot; the data refresh is untouched (it never commits). **The owner decides
+  each merge.** One thing the ruleset closes: `keepalive.yml`'s documented fallback (a dated empty
+  commit to `main`) would now be refused — if it is ever needed, it has to go through a PR too.
 - **English everywhere** (code, comments, specs, UI source strings); UI translated EN/FR/ES.
 - **polars, not pandas.** TypeScript for the webapp. Pixel-perfect data-viz is the bar.
 - **Timestamps are UTC**, rendered Europe/Paris. Don't use bare `new Date(value)`.
