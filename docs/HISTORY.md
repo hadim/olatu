@@ -9,6 +9,25 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-11-20 — Changes land through pull requests
+
+Until now every change was committed straight to `main`. The owner asked for pull requests with
+Conventional Commits, for a cleaner history:
+
+- **Squash merge only.** One PR is one commit on `main`: its title (a Conventional Commit) is
+  the commit title, its body the commit message. Merge commits and rebase merges are switched
+  off, and the branch is deleted on merge.
+- **`main` is protected by a ruleset**: a pull request is required, force pushes and deletion
+  are blocked, and nobody bypasses it — the owner disables the rule in the settings in an
+  emergency. Nothing automated is affected: the data refresh and the keepalive never commit.
+- **`.github/workflows/ci.yml`** runs on every PR and its three jobs are required: `PR title`
+  (the Conventional Commit format, since the title is what `main` keeps), `Webapp` (typecheck +
+  the same build the deploy runs) and `Ingest` (ruff format + lint, from the pixi env so the
+  ruff version is the pinned one). No path filter: a required check that does not report would
+  block the PR forever.
+
+---
+
 ## 2026-11-18 — A row with no measured value is not a reading (spec 0002 §7)
 
 Anglet (06402) had a dead sensor and a live transmitter: CANDHIS served its rows on time with

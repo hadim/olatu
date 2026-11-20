@@ -1,0 +1,90 @@
+name: CI
+
+# Every change reaches `main` through a pull request, squash-merged (CLAUDE.md, "Conventions").
+# These are the checks a PR must pass first. All three jobs are REQUIRED by the `main` ruleset,
+# which has two consequences worth knowing before editing this file:
+#
+#   - Never path-filter the workflow or a job. A required check that does not report keeps the
+#     PR blocked forever, so a docs-only PR must still run (and pass) all three.
+#   - The job `name:` values are the check names the ruleset matches. Renaming one here without
+#     updating the ruleset (Settings → Rules) blocks every PR the same way.
+on:
+  pull_request:
+    branches: [main]
+    # `edited` re-runs the title check when the title is fixed without a new push.
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+# A new push (or a title edit) supersedes the run in flight for that PR.
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  title:
+    name: PR title
+    runs-on: ubuntu-latest
+    steps:
+      # The squash merge makes the PR title the ONE commit `main` gets, so the title is where
+      # Conventional Commits is enforced. The title goes through the environment, never
+      # interpolated into the script: it is attacker-controlled text on a public repository.
+      - name: The title is a Conventional Commit
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(feat|fix|docs|refactor|chore|ci|build|perf|test)(\([a-z0-9-]+\))?!?: [^ ].*$'
+          if printf '%s' "$TITLE" | grep -Eq "$pattern"; then
+            echo "ok: $TITLE"
+          else
+            echo "::error::Not a Conventional Commit: $TITLE"
+            echo "Expected 'type(scope): description' — the scope is optional."
+            echo "Types: feat fix docs refactor chore ci build perf test"
+            exit 1
+          fi
+
+  webapp:
+    name: Webapp
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+
+      - name: Install dependencies
+        working-directory: webapp
+        run: npm ci
+
+      # `typecheck` compiles the i18n messages first, so a missing translation key fails here.
+      - name: Typecheck
+        working-directory: webapp
+        run: npm run typecheck
+
+      # The same build the deploy runs after the merge — a PR that cannot build cannot ship.
+      - name: Build
+        working-directory: webapp
+        run: npm run build
+
+  ingest:
+    name: Ingest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The pixi env rather than a standalone ruff: pixi.lock pins the exact ruff the
+      # contributors format with, and two ruff versions do not always agree on a format.
+      - uses: prefix-dev/setup-pixi@v0.9.6
+        with:
+          cache: true
+
+      # Check only — `pixi run check` rewrites files, which is right locally and wrong here.
+      - name: Format
+        run: pixi run ruff format --check .
+
+      - name: Lint
+        run: pixi run ruff check .
