@@ -158,6 +158,9 @@ flags whether the column carries real data for *this* buoy.
   (height vs length). *Full:* mean steepness H/L of the highest third; L derived
   from period and depth via the linear dispersion relation. High → breaking/
   uncomfortable seas.
+  *Not the steepness the webapp charts:* that one is derived in the browser from H1/3 and
+  Th1/3 with the deep-water wavelength, reads ~2.5× lower, and is defined in
+  [0023](2026-11-20-0023-wave-steepness.md) — this archive-only field is not displayed.
 - **`max_steepness` / `period_of_max_steepness_s`** — steepest single wave, and its
   period.
 - **`n_waves`** (NBRE_VAG) — *Simple:* how many waves were counted. *Full:* number
@@ -250,13 +253,20 @@ Doubles as the wave-height color legend (see [0001 §7.1](2026-06-27-0001-founda
 
 | H1/3 | Label | Color |
 |------|-------|-------|
-| 0.0–0.5 m | glassy | `#BFE9E0` |
-| 0.5–1.0 m | smooth | `#6FD3C4` |
+| 0.0–0.5 m | flat | `#BFE9E0` |
+| 0.5–1.0 m | small | `#6FD3C4` |
 | 1.0–1.5 m | moderate | `#38B8C9` |
-| 1.5–2.5 m | clean/lively | `#2E8FC4` |
+| 1.5–2.5 m | solid | `#2E8FC4` |
 | 2.5–4.0 m | building | `#3D5FBE` |
 | 4.0–6.0 m | big | `#7A4FC0` |
 | 6.0 m+ | heavy / storm | `#B83D8E` |
+
+> **Revision 2026-11-20 ([0023 §7](2026-11-20-0023-wave-steepness.md)):** the first, second and
+> fourth labels were `glassy`, `smooth` and `clean/lively` — surface-quality words attached to a
+> height alone. A 2 m sea is not clean for being 2 m; how organised the sea is belongs to the
+> steepness scale. The labels now name a size. Bounds and colours are unchanged, and still colour
+> the history ribbon (`hsColor`) — but the **legend is no longer shown** in the Definitions
+> sheet: the ribbon's one-pixel bars blend into a tint the eye cannot match to a swatch.
 
 ---
 

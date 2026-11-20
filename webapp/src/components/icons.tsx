@@ -12,6 +12,8 @@ export const ICON_PATHS = {
   /** Significant wave height — two stacked swell crests. */
   waveHeight:
     '<path d="M2 8c2 0 2.2-3 4-3s2 3 4 3 2-3 4-3 2 3 4 3"/><path d="M2 15c2 0 2.2-3 4-3s2 3 4 3 2-3 4-3 2 3 4 3"/>',
+  /** Steepness (cambrure, spec 0023) — ONE crest standing on its baseline: height over length. */
+  steepness: '<path d="M2.5 18.5h19"/><path d="M4.5 18.5c4 0 4.5-12.5 7.5-12.5s3.5 12.5 7.5 12.5"/>',
   /** Max wave — a single crest with an upward peak marker. */
   maxWave: '<path d="M2 16c2.5 0 2.5-3 5-3s2.5 3 5 3"/><path d="M19 16V6"/><path d="M16 9l3-3 3 3"/>',
   /** Swell period — a stopwatch (time between waves). */
@@ -41,6 +43,8 @@ export const ICON_PATHS = {
   calendar: '<rect x="3" y="4.5" width="18" height="16.5" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/>',
   /** Alert — a warning triangle. Flags a realm zone whose source has stopped reporting (spec 0015 §8). */
   alert: '<path d="M12 4.3 2.7 20.2h18.6L12 4.3z"/><path d="M12 10.1v4.1"/><path d="M12 17.3h.01"/>',
+  /** "What is this?" — opens a definition (the chart headings' link into the glossary). */
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><path d="M12 7.6h.01"/>',
   /** Drag handle — six dots (rendered as round line-caps). */
 } as const;
 
@@ -70,6 +74,7 @@ function Icon({ name, size = 14, ...props }: IconProps & { name: IconName }) {
 export const WaveHeightIcon = (p: IconProps) => <Icon {...p} name="waveHeight" />;
 export const MaxWaveIcon = (p: IconProps) => <Icon {...p} name="maxWave" />;
 export const PeriodIcon = (p: IconProps) => <Icon {...p} name="period" />;
+export const SteepnessIcon = (p: IconProps) => <Icon {...p} name="steepness" />;
 export const DirectionIcon = (p: IconProps) => <Icon {...p} name="direction" />;
 export const TempIcon = (p: IconProps) => <Icon {...p} name="temp" />;
 export const TideIcon = (p: IconProps) => <Icon {...p} name="tide" />;

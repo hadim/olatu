@@ -9,6 +9,46 @@ entry here — keep CLAUDE.md a stable operating manual. Intent & decisions live
 
 ---
 
+## 2026-11-20 — Wave steepness: how organised the swell is (spec 0023)
+
+The buoy read 3.5–3.9 m at 12 s under a chaotic sea, and the same two numbers could describe a
+groomed one. Height and period say how much energy there is; **steepness** — H1/3 over the
+deep-water wavelength, `1.56 × Th1/3²` — says how far the swell is from the wind that raised it.
+Thirteen years of 06403 showed it is the one usable real-time proxy: directional spread sits in
+20–35° whatever the wind, and the spectral widths are archive-only, weeks late.
+
+- **Derived in the browser** (`lib/steepness.ts` `withSteepness`), from two columns every tier
+  already carries: no ingest change, no new tier column, history from 2013. Exact to 0.01 point
+  on the hourly tier; up to ~0.15 point low on a daily mean of a day that changed a lot.
+- **A Sea chart panel** under height and period: fixed 0–3 % scale so the five class bands
+  (very long swell → wind sea) never move, ticks on the class boundaries, bands named in place
+  (full names on a desktop, the two end bands on a phone), neutral ink instead of a ninth hue.
+  The readout card gets a numeric row; the on-plot bubble adds the class word.
+- **Its note is one tap away**: an ⓘ in the panel heading opens the Definitions sheet on a new
+  "Steepness (computed by Olatu)" section (`lib/glossary.ts`, a window event — the chart
+  headings are imperative DOM and cannot hold a React popover). The note is made to be scanned:
+  one sentence, the five-row scale, two short lists, the formula.
+- **Copy corrected**: the spread definition no longer promises "small = clean swell". The
+  glossary's wave-height scale (`glassy`, `smooth`, `clean`… — surface words on a height) is
+  **removed**: it was the legend of the history ribbon, whose one-pixel bars blend into a tint
+  the eye cannot match to a swatch. The ribbon keeps its colours.
+- **Panel order**: a panel the stored order has never seen is inserted after its default
+  predecessor of the same realm, and the order is reconciled against every panel of both realms
+  — which also fixes a custom Air order being lost on each reload (the station had not resolved
+  at mount, so the Air ids were dropped from the store).
+
+- **Current Conditions** carries the same reading in its header row, beside the offshore/onshore
+  verdict and built like it: `Steepness 1.6 %` then a neutral pill (`Mixed sea`, a five-step
+  position gauge). The whole pill is a button that opens the scale with the current class marked
+  (`SteepnessScale`, shared with the sheet); the shore pill is now a whole-pill button too. Computed from the values the tiles print, only when
+  height and period come from the same reading, and never smoothed — the card must agree with its
+  own tiles and with the chart's last point. Mer only; hollow and dashed when the buoy is dormant.
+
+The thresholds are provisional and the names describe the swell, never the surface: steepness is
+blind to local chop on a long swell.
+
+---
+
 ## 2026-11-20 — Changes land through pull requests
 
 Until now every change was committed straight to `main`. The owner asked for pull requests with

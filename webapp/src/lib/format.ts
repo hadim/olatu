@@ -107,7 +107,7 @@ export function fmtAxisTick(ms: number, locale: Locale, timeZone: string, incrSe
   return new Intl.DateTimeFormat(locale, opts).format(new Date(ms));
 }
 
-/** Wave-height → sea-state colour (mirrors specs/0002 §6 and the chart legend). */
+/** Wave-height → colour band of the history ribbon (specs/0002 §6). No on-screen legend. */
 export function hsColor(v: number): string {
   if (v < 0.5) return '#BFE9E0';
   if (v < 1) return '#6FD3C4';
