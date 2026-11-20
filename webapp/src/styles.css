@@ -35,6 +35,9 @@
   --c-height: #38e1c6;
   --c-max: #8fe9dc;
   --c-period: #7cc4ff;
+  /* Steepness (spec 0023): NEUTRAL ink, deliberately not a ninth hue — it is derived from the two
+     series above it, and no free hue stays apart from both its neighbours and the Air amber. */
+  --c-steep: #c3d3dc;
   --c-dir: #b59cf0;
   --c-temp: #ff8a5b;
   --c-tide: #5b8ff5; /* tide/marée — a deeper indigo-blue, distinct from the sky-blue period */
@@ -62,6 +65,7 @@
   --c-height: #0e8c7a;
   --c-max: #4fb3a4;
   --c-period: #2e7fc4;
+  --c-steep: #3c5a6b; /* steepness — neutral ink, see the dark theme */
   --c-dir: #7a4fc0;
   --c-temp: #e85c2b;
   --c-tide: #2f6fd0; /* tide/marée */

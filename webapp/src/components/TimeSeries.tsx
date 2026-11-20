@@ -26,6 +26,8 @@ import { compass, dirColor, fmtNumber, fmtDateTime, fmtAxisTick, relativeAgo } f
 import { useUnits, measureKind, measureSuffix, keySuffix, formatKeyValue, convertMeasure } from '../lib/units';
 import { loadParquetTier, loadWindParquetTier, type Columnar } from '../lib/parquet';
 import { reconstructCurve, extremaSeries, tideHeightAt, type TideEvent, type Tides } from '../lib/tides';
+import { STEEPNESS_KEY, STEEPNESS_BOUNDS, STEEPNESS_CLASSES, steepnessClassIndex, withSteepness } from '../lib/steepness';
+import { openGlossary } from '../lib/glossary';
 import { iconSvg, type IconName } from './icons';
 import { touchZoomPlugin } from '../lib/uplotTouch';
 import { useNow } from '../lib/useNow';
@@ -206,6 +208,99 @@ function drawSilenceBand(u: uPlot, from: number, labels: string[], dpr: number, 
   ctx.restore();
 }
 
+// Steepness reading scale (spec 0023 §5). The panel's y-domain is FIXED at 0–3 % (it only grows
+// for the <1 % of sea states beyond it), so each class band sits at the same height in every
+// window: you learn to read the panel by position — low is a long swell, high is a wind sea.
+const STEEPNESS_AXIS_TOP = 3;
+// ONE neutral ink, more of it per class — sequential, never a traffic light: a steep sea is not
+// "bad" (nor a long swell "good": that also takes a quiet local wind, which this cannot see).
+const STEEPNESS_BAND_ALPHA = [0, 0.035, 0.07, 0.115, 0.17];
+
+/** Each class as [index, top px, bottom px] on the current y-scale (device px), skipping a class
+ *  that starts above the visible scale. Shared by the band fill and the band labels. */
+function steepnessBandSpans(u: uPlot): [number, number, number][] {
+  const yMax = u.scales.y.max;
+  if (yMax == null) return [];
+  const out: [number, number, number][] = [];
+  let lower = 0;
+  STEEPNESS_CLASSES.forEach((c, i) => {
+    const from = lower;
+    const to = Math.min(c.upTo, yMax);
+    lower = c.upTo;
+    if (to > from) out.push([i, u.valToPos(to, 'y', true), u.valToPos(from, 'y', true)]);
+  });
+  return out;
+}
+
+/** The class bands, painted in `drawClear` like the silence band: ground, under the grid and the
+ *  line. */
+function drawSteepnessBands(u: uPlot, ink: string) {
+  const { left, top, width, height } = u.bbox;
+  const ctx = u.ctx;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(left, top, width, height);
+  ctx.clip();
+  ctx.fillStyle = ink;
+  for (const [i, y0, y1] of steepnessBandSpans(u)) {
+    if (STEEPNESS_BAND_ALPHA[i] <= 0) continue;
+    ctx.globalAlpha = STEEPNESS_BAND_ALPHA[i];
+    ctx.fillRect(left, y0, width, y1 - y0);
+  }
+  ctx.restore();
+}
+
+/** Each band named in place, at the LEFT — the newest readings, the ones that matter, are at the
+ *  right. Painted in `draw`, i.e. OVER the line, on a translucent plate: as ground the names were
+ *  struck through wherever the curve crossed them, and a struck-through label is worse than a
+ *  dimmed stretch of the oldest data in the window. The plates may not eat the plot, so
+ *  `labelSets` runs from the most to the least generous and the FIRST set that fits is used
+ *  whole (never a mix): the full names on a desktop, the short ones on a tablet, and only the two
+ *  END bands on a phone — or on any plot whose bands are thinner than a line of type (a short
+ *  panel, or a window with a peak that stretched the scale). The two ends are enough to say which
+ *  way the scale runs, which is the one thing the panel must not leave to the glossary. */
+interface SteepnessLabelSet {
+  labels: string[]; // one per class; '' leaves that band unnamed
+  max: number; // largest share of the plot width a plate may take
+  every: boolean; // names every band (needs room for a line of type in each) vs the two ends only
+}
+function drawSteepnessLabels(u: uPlot, labelSets: SteepnessLabelSet[], dpr: number, text: string, plate: string) {
+  const { left, top, width, height } = u.bbox;
+  const ctx = u.ctx;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(left, top, width, height);
+  ctx.clip();
+  ctx.font = `${10 * dpr}px IBM Plex Mono, monospace`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  const padX = 4 * dpr;
+  const inset = 6 * dpr;
+  const spans = steepnessBandSpans(u);
+  // The bounded classes are the thin ones (0.5 point each, bar the fourth); the top one is open.
+  // 15px, not the 13px a plate needs: at 13 the plates of neighbouring bands touch and the left
+  // edge reads as one grey slab.
+  const roomy = spans.filter(([i]) => Number.isFinite(STEEPNESS_CLASSES[i].upTo)).every(([, y0, y1]) => y1 - y0 >= 15 * dpr);
+  const set = labelSets.find((ls) => (roomy || !ls.every) && Math.max(...ls.labels.map((t) => ctx.measureText(t).width)) + 2 * padX + inset <= width * ls.max);
+  if (set) {
+    for (const [i, y0, y1] of spans) {
+      const label = set.labels[i];
+      // A band thinner than a line of type stays unnamed rather than spilling onto its neighbour.
+      if (!label || y1 - y0 < 11 * dpr) continue;
+      const w = ctx.measureText(label).width;
+      const plateH = Math.min(13 * dpr, y1 - y0);
+      const yc = (y0 + y1) / 2;
+      ctx.globalAlpha = 0.78;
+      ctx.fillStyle = plate;
+      ctx.fillRect(left + inset, yc - plateH / 2, w + 2 * padX, plateH);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = text;
+      ctx.fillText(label, left + inset + padX, yc + 0.5 * dpr);
+    }
+  }
+  ctx.restore();
+}
+
 // Tide extrema markers: ▲ above each high, ▼ below each low, riding the reconstructed
 // water-level curve (spec 0008 §8.3). Density-thinned to a minimum pixel spacing like the
 // direction glyphs; drawn only on narrow windows (the wide-window zig-zag already vertices
@@ -296,6 +391,9 @@ interface PanelDef {
   glyph?: boolean; // direction: single centred arrow row, no linear y-axis
   tide?: boolean; // marée: an external reconstructed curve + PM/BM markers (spec 0008)
   zeroBased?: boolean; // y-axis anchored at 0 (spread magnitude)
+  steepness?: boolean; // cambrure: fixed 0–3 % scale + the reading-scale bands (spec 0023)
+  /** Glossary entry this panel's "i" opens — for a reading that needs its note one tap away. */
+  infoAnchor?: string;
   glued?: boolean; // no top gap — sits flush under the panel above (a child of the panel above)
   emptyKey?: MessageKey;
 }
@@ -313,6 +411,18 @@ const SEA_PANELS: PanelDef[] = [
     ],
   },
   { id: 'period', realm: 'sea', titleKey: 'cc_period', series: [{ key: 'significant_period_s', colorVar: '--c-period', width: 2 }] },
+  {
+    // Steepness (cambrure, spec 0023): height ÷ deep-water wavelength, DERIVED in the browser from
+    // the two panels above it (`withSteepness`) — so it sits right under them. Drawn in neutral
+    // ink, not a ninth hue: it is a reading OF the measurements, not another measurement, and the
+    // palette has no hue left that stays apart from both its neighbours and the Air amber.
+    id: 'steepness',
+    realm: 'sea',
+    titleKey: 'cc_steepness',
+    series: [{ key: STEEPNESS_KEY, colorVar: '--c-steep', width: 2 }],
+    steepness: true,
+    infoAnchor: 'steepness',
+  },
   {
     // Direction: a single row of colour+rotation arrows (see drawArrowGlyphs) — no y-axis.
     id: 'swelldir',
@@ -383,6 +493,7 @@ function panelHeight(panel: PanelDef, hostWidth: number): number {
   return narrow ? 100 : 124;
 }
 
+const ALL_PANELS: PanelDef[] = [...SEA_PANELS, ...AIR_PANELS];
 const WIND_DETAIL_COLUMNS = ['wind_speed_ms', 'wind_gust_ms', 'wind_direction_deg', 'air_temperature_c', 'precipitation_mm', 'humidity_pct', 'pressure_msl_hpa'];
 const REALM_COLOR: Record<'sea' | 'air', string> = { sea: 'var(--accent)', air: 'var(--c-wind)' };
 
@@ -405,6 +516,36 @@ function persistIds(key: string, ids: string[]): void {
   } catch {
     /* storage unavailable — the change still applies for this session */
   }
+}
+
+/** Reconcile a stored unit order with the units the app defines. Stored ids keep their place. A
+ *  unit the store has never seen goes where it was DESIGNED to sit — right after its nearest
+ *  default predecessor of the same realm (else right before its nearest successor) — so a new Sea
+ *  panel lands among the Sea panels a returning reader already ordered, not under the whole Air
+ *  realm. Only a unit whose realm has nothing placed yet is appended.
+ *
+ *  Always called with EVERY panel of both realms, whether or not a station is paired right now:
+ *  the order is a preference over the whole set, and what is drawable is decided at render time
+ *  (`visibleFlat` skips an id with no panel). Reconciling against the panels available at mount
+ *  — when the station has not resolved yet — dropped the Air ids from the store on every load,
+ *  so a custom Air order never survived a reload. */
+function reconcileOrder(stored: string[], panels: PanelDef[]): string[] {
+  const units = panels.filter((p) => !p.glued);
+  const known = new Set(units.map((p) => p.id));
+  const out = stored.filter((id) => known.has(id));
+  units.forEach((p, i) => {
+    if (out.includes(p.id)) return;
+    let at = -1;
+    for (let j = i - 1; j >= 0 && at < 0; j--) {
+      if (units[j].realm === p.realm && out.includes(units[j].id)) at = out.indexOf(units[j].id) + 1;
+    }
+    for (let j = i + 1; j < units.length && at < 0; j++) {
+      if (units[j].realm === p.realm && out.includes(units[j].id)) at = out.indexOf(units[j].id);
+    }
+    if (at < 0) out.push(p.id);
+    else out.splice(at, 0, p.id);
+  });
+  return out;
 }
 
 // Imperative per-panel header controls (drag handle + hide eye), styled as a literal class string
@@ -495,6 +636,8 @@ const CARD_METRICS: { key: string; labelKey: MessageKey; cardKey?: MessageKey; u
   { key: 'significant_wave_height_m', labelKey: 'cc_wave_height', unit: 'm', digits: 1, icon: 'waveHeight', colorVar: '--c-height' },
   { key: 'max_wave_height_m', labelKey: 'cc_max_wave', unit: 'm', digits: 1, icon: 'maxWave', colorVar: '--c-max' },
   { key: 'significant_period_s', labelKey: 'cc_period', unit: 's', digits: 1, icon: 'period', colorVar: '--c-period' },
+  // Numbers only here, like every other row: the class word rides the on-plot bubble + the bands.
+  { key: STEEPNESS_KEY, labelKey: 'cc_steepness', unit: '%', digits: 1, icon: 'steepness', colorVar: '--c-steep' },
   { key: 'peak_direction_deg', labelKey: 'cc_direction', dir: true, icon: 'direction', colorVar: '--c-dir' },
   { key: 'peak_directional_spread_deg', labelKey: 'cc_spread', unit: '°', digits: 0, pm: true, icon: 'spread', colorVar: '--c-dir' },
   { key: 'sea_temperature_c', labelKey: 'cc_sea_temp', cardKey: 'cc_sea_temp_short', unit: '°C', digits: 1, icon: 'temp', colorVar: '--c-temp' },
@@ -521,6 +664,7 @@ const FIXED_UNIT: Record<string, string> = {
   significant_wave_height_m: 'm',
   max_wave_height_m: 'm',
   significant_period_s: 's',
+  [STEEPNESS_KEY]: '%',
   peak_directional_spread_deg: '°',
   precipitation_mm: 'mm/h',
   humidity_pct: '%',
@@ -542,6 +686,7 @@ function fixedUnit(key: string, dailyTier: boolean): string {
 const PANEL_ICON: Partial<Record<MessageKey, IconName>> = {
   cc_wave_height: 'waveHeight',
   cc_period: 'period',
+  cc_steepness: 'steepness',
   cc_direction: 'direction',
   cc_spread: 'spread',
   cc_sea_temp: 'temp',
@@ -694,27 +839,14 @@ export default function TimeSeries({
   const allPanels = useMemo(() => (windStation ? [...SEA_PANELS, ...AIR_PANELS] : SEA_PANELS), [windStation]);
   const panelById = useMemo(() => new Map(allPanels.map((p) => [p.id, p])), [allPanels]);
 
-  // Panel order + hidden set (persisted). `order` is kept as the FULL reconciled unit list, so the
-  // drag/hide handlers can splice it directly. Seed it reconciled to avoid an empty first paint.
-  const [order, setOrder] = useState<string[]>(() => {
-    const stored = storedIds(CHARTS_ORDER_STORE);
-    const unitIds = (windStation ? [...SEA_PANELS, ...AIR_PANELS] : SEA_PANELS).filter((p) => !p.glued).map((p) => p.id);
-    return [...stored.filter((id) => unitIds.includes(id)), ...unitIds.filter((id) => !stored.includes(id))];
-  });
+  // Panel order + hidden set (persisted). `order` is the FULL reconciled unit list of BOTH realms
+  // (see reconcileOrder), so the drag/hide handlers can splice it directly and it never has to be
+  // re-derived when the station resolves.
+  const [order, setOrder] = useState<string[]>(() => reconcileOrder(storedIds(CHARTS_ORDER_STORE), ALL_PANELS));
   const [hidden, setHidden] = useState<string[]>(() => storedIds(CHARTS_HIDDEN_STORE));
   // A reorder rebuilds the whole stack, so the focused drag band is destroyed: remember which unit
   // to re-focus afterwards, else keyboard reordering loses focus after a single arrow press.
   const focusBandRef = useRef<string | null>(null);
-
-  // Keep `order` complete when the available panels change (e.g. the wind station resolves): append
-  // any missing unit id, preserving the stored order for the rest.
-  useEffect(() => {
-    const unitIds = allPanels.filter((p) => !p.glued).map((p) => p.id);
-    setOrder((prev) => {
-      const next = [...prev.filter((id) => unitIds.includes(id)), ...unitIds.filter((id) => !prev.includes(id))];
-      return next.length === prev.length && next.every((v, i) => v === prev[i]) ? prev : next;
-    });
-  }, [allPanels]);
 
   useEffect(() => persistIds(CHARTS_ORDER_STORE, order), [order]);
   useEffect(() => persistIds(CHARTS_HIDDEN_STORE, hidden), [hidden]);
@@ -1047,7 +1179,9 @@ export default function TimeSeries({
 
   useEffect(() => {
     const host = hostRef.current;
-    const src = detail ?? data;
+    // Steepness is derived here, from whichever tier is plotted (spec 0023 §4) — after this line
+    // it is one more buoy column: gap-aware, smoothed, hovered and summarised like the others.
+    const src = withSteepness(detail ?? data);
     const sxs = src.t;
     if (!host || sxs.length === 0) return;
     // The stack collapses to nothing while it is rebuilt, the document shrinks, and the browser
@@ -1161,6 +1295,17 @@ export default function TimeSeries({
     const labelled: Record<'sea' | 'air', boolean> = { sea: false, air: false };
     const bandColor = cssVar('--warning');
     const bandInk = cssVar('--warning-ink');
+    const steepInk = cssVar('--c-steep');
+    const steepPlate = cssVar('--surface-2'); // the chart host's own ground
+    const steepShort = STEEPNESS_CLASSES.map((c) => m[c.shortKey]());
+    const steepFull = STEEPNESS_CLASSES.map((c) => m[c.labelKey]());
+    const endsOnly = (names: string[]) => names.map((t, i) => (i === 0 || i === names.length - 1 ? t : ''));
+    const steepLabels: SteepnessLabelSet[] = [
+      { labels: steepFull, max: 0.3, every: true },
+      { labels: steepShort, max: 0.3, every: true },
+      { labels: endsOnly(steepFull), max: 0.3, every: false },
+      { labels: endsOnly(steepShort), max: 0.4, every: false },
+    ];
 
     // Insert null break-points across real outages so the line never bridges a gap
     // (daily.parquet omits empty days). gxs/gcols are the gap-aware arrays the charts AND the
@@ -1575,6 +1720,19 @@ export default function TimeSeries({
       // none — they follow their parent. Wired imperatively since the panels live in this uPlot host.
       if (!panel.glued) {
         const right = heading.querySelector('.ts-right');
+        // A reading that needs its note one tap away (steepness) opens the glossary at its entry:
+        // the heading is imperative DOM, so it cannot hold the React popover the tiles use.
+        if (panel.infoAnchor) {
+          const anchor = panel.infoAnchor;
+          const info = document.createElement('button');
+          info.type = 'button';
+          info.className = TS_CTL;
+          info.setAttribute('aria-label', `${m.a11y_what_is_this()} · ${m[panel.titleKey]()}`);
+          info.title = m.a11y_what_is_this();
+          info.innerHTML = iconSvg('info', { size: 15, color: 'currentColor' });
+          info.addEventListener('click', () => openGlossary(anchor));
+          right?.appendChild(info);
+        }
         const eye = document.createElement('button');
         eye.type = 'button';
         eye.className = TS_CTL;
@@ -1702,6 +1860,16 @@ export default function TimeSeries({
       } else if (panel.zeroBased) {
         // Hide the sub-zero splits the range's bottom sliver introduces (see the scale below).
         yAxis.filter = (_u, splits) => splits.map((v) => (v < 0 ? null : v));
+      } else if (panel.steepness) {
+        // Ticks ARE the class boundaries, so the only horizontal rules in the panel are the edges
+        // of the bands — a second, round-number grid would cut across them and mean nothing.
+        yAxis.splits = (_u, _ai, sMin, sMax) => [0, ...STEEPNESS_BOUNDS].filter((v) => v >= sMin && v <= sMax);
+        yAxis.values = (u, splits) => {
+          // On a short (phone) panel the 0.5-point steps are closer than a line of type: keep the
+          // rules, print every other boundary.
+          const tight = Math.abs(u.valToPos(0.5, 'y') - u.valToPos(1, 'y')) < 15;
+          return splits.map((v) => (tight && !Number.isInteger(v) && v < 2 ? '' : fmtNumber(v, locale, Number.isInteger(v) ? 0 : 1)));
+        };
       }
 
       const xAxis: uPlot.Axis = {
@@ -1728,6 +1896,9 @@ export default function TimeSeries({
         const v = pgcols[k]?.[idx];
         if (v == null) return '';
         if (panel.glyph) return `${compass(v, locale)} · ${Math.round(v)}°`;
+        // The one place the class WORD is printed beside the number: under the cursor, where the
+        // band it falls in may be hidden by the bubble itself.
+        if (panel.steepness) return `${fmtNumber(v, locale, 1)} % · ${m[STEEPNESS_CLASSES[steepnessClassIndex(v)].labelKey]()}`;
         const kind = measureKind(k);
         if (kind) return `${formatKeyValue(k, v, units, locale)} ${measureSuffix(kind, units)}`;
         const suf = fixedUnit(k, panel.realm === 'air' && !windDetail);
@@ -1778,6 +1949,13 @@ export default function TimeSeries({
       if (panel.tide && tideNarrow && tideEvents.length) {
         hooks.draw = [(u) => drawTideMarkers(u, tideEvents, tideColor, DPR)];
       }
+      // Everything painted as GROUND shares the one `drawClear` slot, in order: the steepness
+      // scale first, the silence band over it (a dead feed outranks a reading scale).
+      const ground: ((u: uPlot) => void)[] = [];
+      if (panel.steepness) {
+        ground.push((u) => drawSteepnessBands(u, steepInk));
+        hooks.draw = [(u) => drawSteepnessLabels(u, steepLabels, DPR, axisColor, steepPlate)];
+      }
       // The tide panel is never banded — it is a prediction, complete by construction.
       const silentAt = panel.tide ? null : silentAtOf(panel.realm);
       if (silentAt != null) {
@@ -1791,8 +1969,9 @@ export default function TimeSeries({
           captions = [`${realm} · ${m.ts_last_reading()} ${age}`, `${realm} · ${age}`, age];
         }
         // `drawClear`, not `draw`: the band is GROUND. Grid, series and glyphs land on top of it.
-        hooks.drawClear = [(u) => drawSilenceBand(u, silentAt, captions, DPR, bandColor, bandInk)];
+        ground.push((u) => drawSilenceBand(u, silentAt, captions, DPR, bandColor, bandInk));
       }
+      if (ground.length) hooks.drawClear = ground;
 
       const opts: uPlot.Options = {
         width: plotWidth(),
@@ -1818,7 +1997,16 @@ export default function TimeSeries({
                     return [-top * 0.08, top];
                   },
                 }
-              : { range: (_u, dMin, dMax) => padY(dMin, dMax, 0.12) },
+              : panel.steepness
+                ? {
+                    // Fixed 0–3 % so the bands never move between windows; it only stretches for
+                    // the rare sea beyond it. Same sliver under 0 as the zero-based panels.
+                    range: (_u: uPlot, _dMin: number, dMax: number): [number, number] => {
+                      const top = Math.max(STEEPNESS_AXIS_TOP, (dMax || 0) * 1.08);
+                      return [-top * 0.08, top];
+                    },
+                  }
+                : { range: (_u, dMin, dMax) => padY(dMin, dMax, 0.12) },
         },
         // Place ticks on the buoy's timezone boundaries for every visitor (not the
         // browser's), so axis labels stay round regardless of where you open the app.

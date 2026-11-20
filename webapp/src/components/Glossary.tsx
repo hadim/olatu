@@ -1,11 +1,21 @@
 // "Definitions" slide-over (spec 0001 §6.5 tier 3 / 0003 C2) on the Radix Sheet
 // primitive (spec 0006 §4): plain-language meaning of every value on screen, the
-// wave-vs-swell distinction, the direction-colour legend and the sea-state colour scale
-// that doubles as the chart legend. Focus trap / Esc / scroll-lock come from the primitive.
+// wave-vs-swell distinction, the steepness reading scale (spec 0023) and the direction-colour
+// legend. Focus trap / Esc / scroll-lock come from the primitive.
+//
+// The wave-height colour scale is deliberately NOT listed here any more (spec 0023 §7): it was
+// the legend of the history ribbon, whose ~4 900 one-pixel bars blend into a tint nobody can
+// match to a swatch — seven rows explaining a code the eye cannot read.
+//
+// It can also be opened from elsewhere, scrolled to one entry (`openGlossary(anchor)` in
+// lib/glossary) — how the steepness chart panel puts its note one tap away.
 
+import { useEffect, useRef, useState } from 'react';
 import { useLocale, type MessageKey } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
-import { compass, dirColor } from '../lib/format';
+import { compass, dirColor, fmtNumber } from '../lib/format';
+import { glossaryAnchorId, onGlossaryOpen } from '../lib/glossary';
+import SteepnessScale from './SteepnessScale';
 import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 
@@ -24,16 +34,12 @@ const TERMS: { labelKey: MessageKey; defKey: MessageKey; src: string; rangeKey: 
 // Cardinal anchors of the cyclical direction hue (mirrors format.ts DIR_ANCHORS).
 const DIR_LEGEND = [0, 90, 180, 270];
 
-// Sea-state reference scale — mirrors specs/0002 §6 and the chart wave-height colours.
-const SEA_STATE: { key: MessageKey; range: string; color: string }[] = [
-  { key: 'sea_glassy', range: '0–0.5 m', color: '#BFE9E0' },
-  { key: 'sea_smooth', range: '0.5–1 m', color: '#6FD3C4' },
-  { key: 'sea_moderate', range: '1–1.5 m', color: '#38B8C9' },
-  { key: 'sea_clean', range: '1.5–2.5 m', color: '#2E8FC4' },
-  { key: 'sea_building', range: '2.5–4 m', color: '#3D5FBE' },
-  { key: 'sea_big', range: '4–6 m', color: '#7A4FC0' },
-  { key: 'sea_storm', range: '6 m+', color: '#B83D8E' },
-];
+// The steepness note as two short lists (spec 0023 §6) — it was three paragraphs, and nobody
+// reads three paragraphs in a side sheet to learn what one number means.
+const STEEPNESS_READ: MessageKey[] = ['steep_read_low', 'steep_read_high', 'steep_read_period'];
+const STEEPNESS_BLIND: MessageKey[] = ['steep_blind_chop', 'steep_blind_cross', 'steep_blind_beach'];
+const NOTE_HEAD = 'm-0 mb-[0.3rem] mt-[0.9rem] text-[0.78rem] font-semibold text-fg';
+const NOTE_LIST = 'm-0 flex list-disc flex-col gap-[0.25rem] pl-[1.1rem] text-[0.84rem] leading-snug text-muted marker:text-faint';
 
 function BookIcon() {
   return (
@@ -45,9 +51,20 @@ function BookIcon() {
 
 export default function Glossary() {
   const { locale } = useLocale();
+  const [open, setOpen] = useState(false);
+  // The entry an outside caller asked for; consumed when the sheet's content mounts.
+  const pendingAnchor = useRef<string | null>(null);
+  useEffect(
+    () =>
+      onGlossaryOpen((anchor) => {
+        pendingAnchor.current = anchor;
+        setOpen(true);
+      }),
+    [],
+  );
 
   return (
-    <Sheet>
+    <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
         <Button variant="outline">
           <BookIcon />
@@ -55,7 +72,20 @@ export default function Glossary() {
         </Button>
       </SheetTrigger>
 
-      <SheetContent aria-describedby={undefined}>
+      <SheetContent
+        aria-describedby={undefined}
+        onOpenAutoFocus={(e) => {
+          // Opened AT an entry: land on it instead of the close button. The entry takes the focus
+          // (it must still move inside the dialog), then scrolls to the top of the sheet.
+          const anchor = pendingAnchor.current;
+          pendingAnchor.current = null;
+          const el = anchor ? document.getElementById(glossaryAnchorId(anchor)) : null;
+          if (!el) return;
+          e.preventDefault();
+          el.focus({ preventScroll: true });
+          el.scrollIntoView({ block: 'start' });
+        }}
+      >
         <div className="mb-2 flex items-center justify-between">
           <SheetTitle className="m-0 font-display text-[1.45rem] font-semibold text-fg">{m.glossary_title()}</SheetTitle>
           <SheetClose asChild>
@@ -90,6 +120,33 @@ export default function Glossary() {
           </dl>
         </section>
 
+        {/* Steepness (spec 0023 §6): the one reading Olatu COMPUTES rather than relays, so it gets
+            its whole note in one place — and a note made to be scanned: one sentence, the scale,
+            two short lists, the formula. */}
+        <section id={glossaryAnchorId('steepness')} tabIndex={-1} className="mb-[1.6rem] scroll-mt-4 outline-none">
+          <h3 className="m-0 mb-[0.65rem] font-mono text-[0.72rem] uppercase tracking-[0.08em] text-faint">{m.glossary_steepness()}</h3>
+          <p className="m-0 mb-[0.7rem] text-[0.88rem] leading-[1.55] text-muted">{m.def_steepness()}</p>
+          <SteepnessScale examples />
+          <h4 className={NOTE_HEAD}>{m.steep_read_title()}</h4>
+          <ul className={NOTE_LIST}>
+            {STEEPNESS_READ.map((k) => (
+              <li key={k}>{m[k]()}</li>
+            ))}
+          </ul>
+          <h4 className={NOTE_HEAD}>{m.steep_blind_title()}</h4>
+          <ul className={NOTE_LIST}>
+            {STEEPNESS_BLIND.map((k) => (
+              <li key={k}>{m[k]()}</li>
+            ))}
+          </ul>
+          <div className="mt-[0.8rem] flex flex-wrap gap-x-[0.8rem] gap-y-[0.2rem]">
+            <span className="font-mono text-[0.72rem] text-faint">H1/3 ÷ ({fmtNumber(1.56, locale, 2)} × Th1/3²)</span>
+            <span className="text-[0.74rem] text-faint">
+              {m.glossary_typical()}: {m.gloss_range_steepness()} · {m.steep_provisional()}
+            </span>
+          </div>
+        </section>
+
         <section className="mb-[1.6rem]">
           <h3 className="m-0 mb-[0.65rem] font-mono text-[0.72rem] uppercase tracking-[0.08em] text-faint">{m.glossary_direction_scale()}</h3>
           <p className="m-0 mb-[0.7rem] text-[0.82rem] text-faint">{m.glossary_direction_scale_note()}</p>
@@ -99,20 +156,6 @@ export default function Glossary() {
                 <span className="h-[1.1rem] w-[1.1rem] shrink-0 rounded-full" style={{ background: dirColor(deg) }} aria-hidden="true" />
                 <span className="flex-1 text-[0.88rem] text-fg">{compass(deg, locale)}</span>
                 <span className="font-mono text-[0.8rem] text-faint">{deg}°</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="mb-[1.6rem]">
-          <h3 className="m-0 mb-[0.65rem] font-mono text-[0.72rem] uppercase tracking-[0.08em] text-faint">{m.glossary_sea_state()}</h3>
-          <p className="m-0 mb-[0.7rem] text-[0.82rem] text-faint">{m.glossary_sea_state_note()}</p>
-          <ul className="m-0 flex list-none flex-col gap-[0.45rem] p-0">
-            {SEA_STATE.map((s) => (
-              <li key={s.key} className="flex items-center gap-[0.7rem]">
-                <span className="h-[1.1rem] w-[1.6rem] shrink-0 rounded-[0.3rem]" style={{ background: s.color }} aria-hidden="true" />
-                <span className="flex-1 text-[0.88rem] text-fg">{m[s.key]()}</span>
-                <span className="font-mono text-[0.8rem] text-faint">{s.range}</span>
               </li>
             ))}
           </ul>

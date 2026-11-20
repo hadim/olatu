@@ -5,7 +5,7 @@
 // Pass `children` for a custom trigger (e.g. the staleness badge) + `triggerClassName`
 // for its styling; omit them to get the default quiet "i" button next to a label.
 
-import { type ReactNode } from 'react';
+import { type CSSProperties, type ReactNode } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { m } from '@/paraglide/messages';
 
@@ -15,17 +15,19 @@ interface InfoPopoverProps {
   children?: ReactNode;
   align?: 'start' | 'end';
   triggerClassName?: string;
+  /** Inline style for a custom trigger whose colours are computed (the shore verdict pill). */
+  triggerStyle?: CSSProperties;
   triggerLabel?: string;
 }
 
 const DEFAULT_TRIGGER =
   'inline-flex items-center justify-center w-[1.1rem] h-[1.1rem] ml-1.5 rounded-full border border-line bg-transparent text-faint font-display text-[0.72rem] italic leading-none cursor-pointer transition-colors hover:border-accent hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
 
-export default function InfoPopover({ title, body, children, align = 'start', triggerClassName, triggerLabel }: InfoPopoverProps) {
+export default function InfoPopover({ title, body, children, align = 'start', triggerClassName, triggerStyle, triggerLabel }: InfoPopoverProps) {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button type="button" aria-label={triggerLabel ?? m.a11y_what_is_this()} className={triggerClassName ?? DEFAULT_TRIGGER}>
+        <button type="button" aria-label={triggerLabel ?? m.a11y_what_is_this()} className={triggerClassName ?? DEFAULT_TRIGGER} style={triggerStyle}>
           {children ?? <span aria-hidden="true">i</span>}
         </button>
       </PopoverTrigger>

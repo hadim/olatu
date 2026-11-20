@@ -5,23 +5,28 @@
 // repeating the numbers it already prints, every measure became the same `Metric` tile in one
 // full grid (no capped half-row), and the verdict moved into the header row. It stays a pure
 // REAL-TIME snapshot — no trends, no history; that is what the chart stack below is for.
+// **Spec 0023** added the steepness reading beside the verdict: how organised the swell is, now.
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useLocale, type Locale, type MessageKey } from '@/lib/i18n';
 import { m } from '@/paraglide/messages';
 import { lastValue, latestTimestamp, type Manifest, type Series, type WindData } from '../lib/data';
 import { compass, dirColor, fmtNumber, fmtStamp, fmtTimeOfDay, freshness, relativeAgo, FRESH_MAX_MS, type Freshness } from '../lib/format';
 import { shoreRelation, shoreColorVar } from '../lib/wind';
+import { STEEPNESS_CLASSES, steepnessClassIndex, steepnessPct } from '../lib/steepness';
 import { stationInfo } from '../lib/stations';
 import { useUnits, formatKeyValue, keySuffix } from '../lib/units';
 import { useNow } from '../lib/useNow';
 import {
-  WaveHeightIcon, MaxWaveIcon, PeriodIcon, DirectionIcon, TempIcon,
+  WaveHeightIcon, MaxWaveIcon, PeriodIcon, SteepnessIcon, DirectionIcon, TempIcon,
   WindIcon, StationIcon, RainIcon, HumidityIcon, PressureIcon, AlertIcon,
 } from './icons';
 import { BuoyMark } from './brands';
 import InfoPopover from './InfoPopover';
+import SteepnessScale from './SteepnessScale';
 import TideStrip from './TideStrip';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { openGlossary } from '../lib/glossary';
 import type { Tides } from '../lib/tides';
 
 const LABEL_ICON = 'mr-1.5 shrink-0';
@@ -283,6 +288,18 @@ function StalenessBadge({ realm, fresh, stampMs, refreshedMs, tz, now }: { realm
   );
 }
 
+// The two readings in the header row are PILLS that open their own explanation: one shape, one
+// behaviour. The whole pill is the button; the trailing "i" is only the hint that it is one.
+const PILL =
+  'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-[0.22rem] font-display text-[0.84rem] font-bold cursor-pointer transition-[filter,border-color] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
+function PillInfoGlyph() {
+  return (
+    <span className="font-display text-[0.72rem] font-normal italic opacity-60" aria-hidden="true">
+      i
+    </span>
+  );
+}
+
 /** The offshore/onshore verdict — the only cross-realm synthesis (station wind × buoy swell).
  *  Spec 0015 folded it into the card's header row: as its own full-width band it was three
  *  tokens and a pill on an otherwise empty line. */
@@ -303,20 +320,98 @@ function ShoreBridge({ swellDeg, windDeg, locale }: { swellDeg: number | null; w
       {shore ? (
         // Softened verdict: a tinted pill with the shore colour as text + border, not a loud
         // solid fill — onshore's red in particular read as an alarm at full strength (spec 0013 rev).
-        <span
-          className="inline-flex items-center gap-1 rounded-full border px-2.5 py-[0.22rem] font-display text-[0.84rem] font-bold"
-          style={{
+        // The WHOLE pill opens its definition (spec 0023 §9): the "i" alone was a 10px target
+        // inside something that already looked like a button.
+        <InfoPopover
+          title={m.cc_shore()}
+          body={m.def_offshore()}
+          align="end"
+          triggerLabel={`${m.cc_shore()} · ${label} · ${m.a11y_what_is_this()}`}
+          triggerClassName={PILL}
+          triggerStyle={{
             color: `var(${shoreColorVar(shore)})`,
             background: `color-mix(in oklab, var(${shoreColorVar(shore)}) 14%, var(--surface))`,
             borderColor: `color-mix(in oklab, var(${shoreColorVar(shore)}) 42%, var(--hairline))`,
           }}
         >
           {label}
-          <InfoPopover title={m.cc_shore()} body={m.def_offshore()} triggerClassName="opacity-60 hover:opacity-100" />
-        </span>
+          <PillInfoGlyph />
+        </InfoPopover>
       ) : (
         <span className="font-mono text-[0.74rem] text-faint">{m.cc_shore()} —</span>
       )}
+    </div>
+  );
+}
+
+/** How organised the swell is, right now (spec 0023 §9): the steepness of the newest reading and
+ *  the class it falls in. Built like the shore verdict it sits beside — the fact in mono, the
+ *  reading in a pill — because the two answer one question together: the swell's own order here,
+ *  what the local wind does to its surface there. Deliberately NOT a fifth tile: a bare "1.6 %"
+ *  means nothing without its word, and the Mer grid is four-up (0015).
+ *
+ *  Neutral, where the shore pill is coloured: a steep sea is not an alarm and a long swell is not
+ *  a promise (this number cannot see local chop). The five-step gauge only says where on the
+ *  scale the reading sits; equal steps, not rising bars — "five bars" reads as "full signal".
+ *
+ *  The pill opens the SCALE, with the current class marked: for this reading the explanation is
+ *  "where am I among the five", which a paragraph cannot show. One sentence, the table, one hint,
+ *  and a way on to the full note in the Definitions sheet.
+ *
+ *  `off` = the buoy has stopped reporting: the pill goes hollow and dashed like its zone, a
+ *  record of the last reading rather than a reading. */
+function SteepnessReadout({ pct, off, locale }: { pct: number; off: boolean; locale: Locale }) {
+  const [open, setOpen] = useState(false);
+  const idx = steepnessClassIndex(pct);
+  const word = m[STEEPNESS_CLASSES[idx].labelKey]();
+  const value = `${fmtNumber(pct, locale, 1)}\u00a0%`;
+  return (
+    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+      <span className="inline-flex items-center gap-1 whitespace-nowrap font-mono text-[0.74rem] text-muted">
+        <SteepnessIcon size={15} style={{ color: 'var(--c-steep)' }} />
+        {m.cc_steepness()} {value}
+      </span>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            aria-label={`${m.cc_steepness()} · ${word} · ${m.a11y_what_is_this()}`}
+            className={`${PILL} ${off ? 'border-dashed border-[color-mix(in_oklab,var(--text-3)_40%,var(--hairline))] text-faint' : 'border-line bg-surface-2 text-fg hover:border-accent'}`}
+          >
+            <span className="inline-flex items-center gap-[2px]" aria-hidden="true">
+              {STEEPNESS_CLASSES.map((c, i) => (
+                // The active step is taller as well as darker: at 4px wide, ink alone is too quiet.
+                <span
+                  key={c.labelKey}
+                  className={`w-[4px] rounded-[1px] ${i === idx ? 'h-[11px]' : 'h-[7px]'}`}
+                  style={{ background: i === idx ? 'var(--c-steep)' : 'color-mix(in oklab, var(--c-steep) 26%, transparent)' }}
+                />
+              ))}
+            </span>
+            {word.charAt(0).toLocaleUpperCase(locale) + word.slice(1)}
+            <PillInfoGlyph />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="end" role="dialog" aria-label={m.cc_steepness()} className="flex w-[19rem] flex-col gap-2 normal-case tracking-normal">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="font-display text-[0.92rem] font-semibold text-fg">{m.cc_steepness()}</span>
+            <span className="font-mono text-[0.82rem] text-muted">{value}</span>
+          </div>
+          <span className="text-[0.82rem] leading-snug text-muted">{m.def_steepness()}</span>
+          <SteepnessScale active={idx} />
+          <span className="text-[0.78rem] leading-snug text-faint">{m.steep_hint()}</span>
+          <button
+            type="button"
+            className="self-start rounded-md font-mono text-[0.74rem] text-accent underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            onClick={() => {
+              setOpen(false);
+              openGlossary('steepness');
+            }}
+          >
+            {m.steep_more()} →
+          </button>
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
@@ -363,6 +458,13 @@ export default function CurrentConditions({
   const dir = sea('peak_direction_deg');
   const spread = sea('peak_directional_spread_deg');
   const seaTemp = sea('sea_temperature_c');
+  // Steepness (spec 0023) is made of the two tiles beside it, so it is computed from exactly the
+  // values they print — and only when both come from the SAME reading: a height from 09:00 over a
+  // period from 08:30 is a ratio of nothing. No smoothing either: a median over the last readings
+  // would be steadier at a class boundary, but the card would then disagree with its own tiles and
+  // with the last point of the chart below. The number rides beside the word so that a borderline
+  // reading reads as borderline.
+  const steepness = hs && period && hs.at === period.at ? steepnessPct(hs.value, period.value) : null;
 
   // Air (station) realm
   const wl = wind?.latest;
@@ -407,20 +509,28 @@ export default function CurrentConditions({
       aria-label={m.cc_title()}
       className="relative flex flex-col gap-2 rounded-2xl border border-line bg-surface px-3 pb-4 pt-3.5 shadow-[0_0_40px_-28px_var(--accent)] sm:px-5 sm:pb-5 sm:pt-4"
     >
-      {/* Header row: identity · the cross-realm verdict. The verdict rides here rather than in its
-          own band (spec 0015); below 860px it drops to its own full-width line. Freshness used to
+      {/* Header row: identity · the two readings (steepness, spec 0023; the cross-realm verdict).
+          They ride here rather than in their own band (spec 0015); below 860px they drop to their
+          own full-width line. Freshness used to
           sit here too, as ONE badge fed by the buoy alone — it now lives per zone (spec 0015 §7). */}
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <span className="font-mono text-[0.74rem] uppercase tracking-[0.08em] text-faint">
           {m.cc_title()}
           <span className="text-muted"> · {manifest.buoy.name}</span>
         </span>
-        {wind && (
-          // The verdict is the card's one CROSS-realm claim, so a single dormant realm makes it
-          // stale whole: on 2026-09-09 it read "cross-shore" from a live wind and a swell
-          // direction a day old. It wears the same grey as the zone it can no longer speak for.
-          <div className={`max-[860px]:order-3 max-[860px]:basis-full ${seaOff || airOff ? ZONE_OFF_BODY : ''}`}>
-            <ShoreBridge swellDeg={dir?.value ?? null} windDeg={windDir?.value ?? null} locale={locale} />
+        {(steepness != null || wind) && (
+          // The card's two READINGS, side by side: the swell's own order (Mer only — it stands
+          // without a station) and the wind against it. They wrap as a pair under the title.
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 max-[860px]:order-3 max-[860px]:basis-full min-[861px]:justify-end">
+            {steepness != null && <SteepnessReadout pct={steepness} off={seaOff} locale={locale} />}
+            {wind && (
+              // The verdict is the card's one CROSS-realm claim, so a single dormant realm makes it
+              // stale whole: on 2026-09-09 it read "cross-shore" from a live wind and a swell
+              // direction a day old. It wears the same grey as the zone it can no longer speak for.
+              <div className={seaOff || airOff ? ZONE_OFF_BODY : ''}>
+                <ShoreBridge swellDeg={dir?.value ?? null} windDeg={windDir?.value ?? null} locale={locale} />
+              </div>
+            )}
           </div>
         )}
       </div>
