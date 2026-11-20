@@ -390,6 +390,24 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
   GitHub's release CDN, whose 504s fail the run before the outage gate can hold it. Setting
   `pixi-version`/`pixi-url`/`pixi-bin-path` on `setup-pixi`, or dropping `post-cleanup: false`,
   silently brings that download back.
+- **Steepness (cambrure, spec 0023) is derived in the browser, never stored.** `lib/steepness.ts`
+  `withSteepness` adds `wave_steepness_pct` = H1/3 ÷ (1.56 × Th1/3²) to whichever tier is plotted;
+  don't add it to the ingest or to `DETAIL_COLUMNS`. Deep-water wavelength **on purpose** (a
+  property of the swell, comparable between buoys), and it is **not** CANDHIS's
+  `significant_steepness` (archive-only, per-wave, ~2.5× larger). The class names
+  (`STEEPNESS_CLASSES`: very long swell → wind sea) describe the **swell, never the surface** — the
+  number is blind to local chop on a long swell, so no "clean"/"propre" there. Thresholds are
+  provisional; it is not a surf score and must not be fused with the wind into one. The panel's
+  y-domain is **fixed 0–3 %** (bands are read by position — don't autoscale it) and its ink is
+  **neutral** (`--c-steep`): the palette has no ninth hue that stays apart from its neighbours. On
+  **Current Conditions** it is a reading in the header row beside the shore verdict, never a fifth
+  tile; the whole pill opens the scale (`SteepnessScale`, the one component the glossary uses too —
+  keep the note a table and short lists, not paragraphs): computed from the values the tiles print,
+  only when height and period come from the **same** reading, and **never smoothed** (a median
+  would disagree with the tiles and with the chart's last point — the number sits beside the word
+  so a borderline reading reads as borderline). Panel order is reconciled against **all** panels of
+  both realms (`reconcileOrder`), never the ones available at mount — that dropped the Air ids from
+  the store on every load.
 - **Chart gap-breaks:** `TimeSeries.gapAware` must estimate the sampling cadence **causally (an EWMA of
   the normal deltas)**, never the global-minimum delta — a **mixed-cadence** source (the current-year
   wind file = a 6-min live tail on an hourly history) otherwise flags every hourly step as a gap and
@@ -400,7 +418,8 @@ One-time seed of the bucket: `pixi run update --campaign 06403 --seed-src /Users
 Shipped and live at **olatu.io** — foundation → PWA → analytics/legal → wind ingest → wind in the
 webapp → units/settings + wind-UX polish → Current Conditions density → touch charts → mobile layout
 → rain accumulation → instant load from the local tier cache → CI outage tolerance → chart axis on the clock
-→ CANDHIS through its API only, with sea-temperature history from 2021 (specs 0001–0022). The full feature-by-feature history is in
+→ CANDHIS through its API only, with sea-temperature history from 2021 → wave steepness, on the
+charts and in Current Conditions (specs 0001–0023). The full feature-by-feature history is in
 **[docs/HISTORY.md](docs/HISTORY.md)**; the spec index + statuses are in [specs/README.md](specs/README.md).
 
 **Open owner TODO:** CI is **keyless again** since 2026-09-04 — the bucket's trusted publisher
@@ -418,6 +437,7 @@ Also **revoke the now-unused fine-grained token `olatu-gh-ci`** on huggingface.c
 asked Cerema (2026-09-14) to raise the key's 150 requests/day to 500–1000; meanwhile the API is
 called on every `*/15` run (~270/day, no 429 so far). There is no fallback feed any more: if the
 quota starts to bind (`feed: quota`, a red run six hours into it), set the repo variable
-`CANDHIS_API_INTERVAL_MIN=60`. **Next per roadmap:** a combined air+sea temperature chart panel + the
+`CANDHIS_API_INTERVAL_MIN=60`. **Next per roadmap:** settle the steepness thresholds and words against the
+webcams (provisional, spec 0023 §3); a combined air+sea temperature chart panel + the
 map buoy↔station pairing **line** (station markers already shipped, spec 0013 §6), side-by-side buoy
 comparison, per-locale glossary JSON.
